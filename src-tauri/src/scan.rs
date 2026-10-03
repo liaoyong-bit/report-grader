@@ -104,11 +104,11 @@ pub fn sync_folder(conn: &Connection, folder: &str, batch_id: i64) -> Result<Syn
             let st = no.as_ref().and_then(|n| db::find_student_by_no(conn, batch_id, n).ok().flatten());
             match st {
                 Some(s) => {
-                    db::insert_report(conn, batch_id, Some(s.id), rel.clone(), rel.clone(), fname, "matched")?;
+                    db::insert_report(conn, batch_id, Some(s.id), &rel, &rel, &fname, "matched")?;
                     result.added += 1;
                 }
                 None => {
-                    db::insert_report(conn, batch_id, None, rel.clone(), rel.clone(), fname, "unmatched")?;
+                    db::insert_report(conn, batch_id, None, &rel, &rel, &fname, "unmatched")?;
                     result.unmatched.push(UnmatchedItem { path: rel.clone(), name: fname });
                 }
             }
@@ -127,11 +127,11 @@ pub fn sync_folder(conn: &Connection, folder: &str, batch_id: i64) -> Result<Syn
                     let rel_rename = format!("{}/{}", db::SOURCE_DIR, rename);
                     fs::copy(&p, source_dir.join(&rename))
                         .map_err(|e| format!("生成改名版失败: {e}"))?;
-                    db::insert_report(conn, batch_id, Some(s.id), rel.clone(), rel_rename, fname, "matched")?;
+                    db::insert_report(conn, batch_id, Some(s.id), &rel, &rel_rename, &fname, "matched")?;
                     result.added += 1;
                 }
                 None => {
-                    db::insert_report(conn, batch_id, None, rel.clone(), "", fname, "unmatched")?;
+                    db::insert_report(conn, batch_id, None, &rel, "", &fname, "unmatched")?;
                     result.unmatched.push(UnmatchedItem { path: rel.clone(), name: fname });
                 }
             }

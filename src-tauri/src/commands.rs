@@ -21,7 +21,7 @@ pub struct Picked {
 /// 选择报告文件夹：返回是否已有数据库及批次信息
 #[tauri::command]
 pub async fn pick_pdf_folder(app: tauri::AppHandle) -> Result<Picked, String> {
-    let picked = app.dialog().file().pick_folder().await;
+    let picked = app.dialog().file().blocking_pick_folder();
     let Some(path) = picked else {
         return Err("已取消选择".into());
     };
