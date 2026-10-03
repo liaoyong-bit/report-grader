@@ -1,0 +1,105 @@
+// Tauri 命令层：前端经 tauri-bridge 调用的全部后端能力
+use crate::{db, scan};
+use serde::Serialize;
+use std::fs;
+use std::path::Path;
+use tauri_plugin_dialog::DialogExt;
+
+#[derive(Serialize)]
+pub struct BatchInfo {
+    pub id: i64,
+    pub name: String,
+}
+
+#[derive(Serialize)]
+pub struct Picked {
+    pub folder: String,
+    pub has_db: bool,
+    pub batch: Option<BatchInfo>,
+}
+
+/// 选择报告文件夹：返回是否已有数据库及批次信息
+#[tauri::command]
+pub async fn pick_pdf_folder(app: tauri::AppHandle) -> Result<Picked, String> {
+    let picked = app.dialog().file().pick_folder().await;
+    let Some(path) = picked else {
+        return Err("已取消选择".into());
+    };
+    let folder = path.to_string();
+    let has_db = Path::new(&folder).join(db::DATA_DIR).join(db::DB_NAME).exists();
+    let mut batch = None;
+    if has_db {
+        if let Ok(conn) = db::open(&folder) {
+            if let Ok(Some((id, name))) = db::find_batch_by_folder(&conn) {
+                batch = Some(BatchInfo { id, name });
+            }
+        }
+    }
+    Ok(Picked { folder, has_db, batch })
+}
+
+/// 初始化批次：建库 + 报告名称 + 导入名单
+#[tauri::command]
+pub fn init_batch(
+    folder: String,
+    report_name: String,
+    students: Vec<db::StudentIn>,
+    teacher: String,
+) -> Result<(), String> {
+    let conn = db::open(&folder)?;
+    let bid = db::get_or_create_batch(&conn, &report_name, &teacher)?;
+    db::insert_students(&conn, bid, &students)?;
+    Ok(())
+}
+
+/// 增量同步（每次打开文件夹自动执行）
+#[tauri::command]
+pub fn sync_folder(folder: String) -> Result<scan::SyncResult, String> {
+    let conn = db::open(&folder)?;
+    let bid = db::find_batch_by_folder(&conn)?.map(|b| b.0).ok_or("未找到批次")?;
+    scan::sync_folder(&conn, &folder, bid)
+}
+
+/// 处理未匹配：student_no 为空 = 不导入；否则挂到该学生并生成改名版
+#[tauri::command]
+pub fn resolve_unmatched(folder: String, path: String, student_no: String) -> Result<(), String> {
+    let conn = db::open(&folder)?;
+    scan::resolve_unmatched(&conn, &folder, &path, &student_no)
+}
+
+/// 读取 PDF 字节（path 为相对所选文件夹的相对路径）
+#[tauri::command]
+pub fn read_pdf(folder: String, path: String) -> Result<Vec<u8>, String> {
+    let full = Path::new(&folder).join(&path);
+    fs::read(&full).map_err(|e| format!("读取PDF失败: {e}"))
+}
+
+/// 保存批阅状态；snapshot.done=true 视为提交固化
+#[tauri::command]
+pub fn save_grading_state(
+    folder: String,
+    report_key: String,
+    snapshot: serde_json::Value,
+) -> Result<(), String> {
+    let conn = db::open(&folder)?;
+    let bid = db::find_batch_by_folder(&conn)?.map(|b| b.0).ok_or("未找到批次")?;
+    let rid = db::report_id_by_key(&conn, bid, &report_key)?.ok_or("未找到报告")?;
+    let done = snapshot.get("done").and_then(|v| v.as_bool()).unwrap_or(false);
+    let json = serde_json::to_string(&snapshot).map_err(|e| format!("序列化失败: {e}"))?;
+    db::save_state(&conn, rid, &json, done)?;
+    Ok(())
+}
+
+/// 导出产物写入 output/ 目录
+#[tauri::command]
+pub fn save_to_output(folder: String, name: String, data: Vec<u8>) -> Result<String, String> {
+    let out_dir = Path::new(&folder).join(db::OUTPUT_DIR);
+    fs::create_dir_all(&out_dir).map_err(|e| format!("创建 output 失败: {e}"))?;
+    let safe: String = name
+        .chars()
+        .map(|c| if "\\/:*?\"<>|".contains(c) { '_' } else { c })
+        .collect();
+    let path = out_dir.join(&safe);
+    fs::write(&path, &data).map_err(|e| format!("写入 output 失败: {e}"))?;
+    Ok(path.to_string_lossy().into_owned())
+}

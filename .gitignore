@@ -1,0 +1,32 @@
+# 内层历史副本（本地保留，不推送、不动它）
+/新建文件夹/
+
+# Rust / Tauri 构建产物
+/src-tauri/target/
+target/
+
+# 临时文件与 Office 锁文件
+*.tmp
+~$*
+*.lnk
+
+# 本地安装包与办公文档（非工程源码，不推送）
+*.exe
+*.msi
+*.docx
+
+# Node（如有）
+node_modules/
+package-lock.json
+
+# 日志
+*.log
+
+# 历史前端版本目录（本地保留，不推送）
+/report_marker/
+/report_marker_step1/
+/report_marker_step2A/
+/report_marker_step2B/
+
+# 无关临时文件
+新建 文本文档.txt

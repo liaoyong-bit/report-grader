@@ -1,0 +1,116 @@
+/* Tauri 桥接层 v2
+ * Tauri 环境下（打包成 exe）：
+ *  - 覆盖"载入报告文件夹"：pick_pdf_folder → 无库弹初始化向导 / 有库增量同步 → 渲染三态列表
+ *  - 读取 PDF 字节 → read_pdf
+ *  - 批阅进度持久化 → save_grading_state（done=true 即视为提交固化）
+ *  - 导出产物写入 output/ → save_to_output
+ * 纯浏览器环境（直接打开 index.html）本文件不生效，走 app.js 默认的文件选择逻辑。
+ * 依赖：加载顺序必须在 app.js 之后（使用 window.__app 暴露的接口）。
+ */
+(function () {
+  if (!window.__TAURI__) return; // 非 Tauri 环境
+
+  const { invoke } = window.__TAURI__.core;
+  const app = window.__app;
+
+  // 后端返回的字节构造 file-like 对象（喂给 app.js 的加载/渲染）
+  function toFile(name, path, bytes){
+    const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    return { name, _path: path, arrayBuffer: async () => ab };
+  }
+
+  // 把后端同步结果构建成前端 reports 数组并渲染
+  function buildReports(syncResult){
+    app.S.reports = [];
+    for(const it of (syncResult.reports || [])){
+      const r = {
+        id: it.path || (it.no + '_' + it.name),
+        name: it.path || ((it.no||'') + '_' + (it.name||'')),
+        path: it.path || null,
+        student: { no: it.no, name: it.name, cls: it.cls },
+        missing: !it.path,
+      };
+      app.initReportState(r);
+      app.S.reports.push(r);
+    }
+    app.renderReportList();
+  }
+
+  // —— 载入报告文件夹（覆盖 app.js 默认行为）
+  document.getElementById('btnLoadFolder').onclick = async () => {
+    try {
+      const picked = await invoke('pick_pdf_folder'); // {folder, hasDb, batch}
+      if(!picked || !picked.folder){ return; }
+      app.S.folder = picked.folder;
+      app.S.mode = 'tauri';
+
+      if(picked.hasDb){
+        // 已有批次 → 增量同步（自动识别新放入的 PDF）
+        const sync = await invoke('sync_folder', { folder: picked.folder });
+        buildReports(sync);
+        if(sync.unmatched && sync.unmatched.length){ app.showUnmatched(sync.unmatched); }
+        app.setDetect('✅ 已同步批次：' + (picked.batch ? picked.batch.name : '') +
+          (sync.added ? '，新增 ' + sync.added + ' 份' : ''));
+        if(app.S.reports.length){ app.selectReport(0); }
+      } else {
+        // 无数据库 → 初始化向导（报告名称 + 名单 + 模板）
+        app.openWizard();
+      }
+    } catch(e) { app.setErr('⚠ ' + e); }
+  };
+
+  window.__bridge = window.__bridge || {};
+
+  // —— 初始化批次（向导"开始"）
+  window.__bridge.initBatch = async (folder, reportName, students) => {
+    try {
+      await invoke('init_batch', { folder, reportName, students, teacher: app.S.teacher });
+      const sync = await invoke('sync_folder', { folder });
+      buildReports(sync);
+      if(sync.unmatched && sync.unmatched.length){ app.showUnmatched(sync.unmatched); }
+      app.setDetect('✅ 批次已初始化并扫描报告');
+      if(app.S.reports.length){ app.selectReport(0); }
+    } catch(e) { app.setErr('⚠ ' + e); }
+  };
+
+  // —— 处理未匹配：挂到某学生 / 不导入
+  window.__bridge.resolveUnmatched = async (folder, item, action) => {
+    try {
+      const studentNo = action === '__skip' ? '' : action;
+      await invoke('resolve_unmatched', { folder, path: item.path, studentNo });
+      const sync = await invoke('sync_folder', { folder });   // 重新同步刷新
+      buildReports(sync);
+      app.setDetect('✅ 已处理：' + item.name);
+    } catch(e) { app.setErr('⚠ ' + e); }
+  };
+
+  // —— 首次打开某份报告时从磁盘读入 PDF（包装 app.selectReport）
+  const origSelect = app.selectReport;
+  app.selectReport = async function(idx){
+    const r = app.S.reports[idx];
+    if(r && !r.missing && !r.pdf){
+      try {
+        const file = toFile(r.name, r.path, await invoke('read_pdf', { folder: app.S.folder, path: r.path }));
+        const bytes = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+        r.pdf = pdf; r.bytes = bytes; r.file = file;
+      } catch(e) { app.setErr('读取报告失败: ' + e); }
+    }
+    return origSelect.call(this, idx);
+  };
+
+  // —— 批阅进度持久化 → 后端数据库（done=true 视为提交，由后端固化；localStorage 由 app.js 兜底）
+  window.__backendPersist = (r, snap) => {
+    if(!app.S.folder) return;
+    try { invoke('save_grading_state', { folder: app.S.folder, reportKey: r.name, snapshot: snap }); }
+    catch(e){ /* 忽略，回退 localStorage */ }
+  };
+
+  // —— 导出产物写入 output/（替代浏览器下载）
+  window.__bridge.saveToOutput = async (name, bytes) => {
+    await invoke('save_to_output', { folder: app.S.folder, name, data: Array.from(bytes) });
+  };
+
+  console.log('[tauri-bridge] Tauri 能力已启用');
+})();
+//（注：内容由AI生成）

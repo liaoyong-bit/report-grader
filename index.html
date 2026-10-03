@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>实验报告批阅系统</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; font-family: "Microsoft YaHei", "微软雅黑", sans-serif; }
+  body { display: flex; flex-direction: column; background: #f5f6f8; color: #222; }
+
+  /* ===== 顶部工具栏 ===== */
+  #topbar {
+    display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+    background: #2b3a55; color: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.2); flex: 0 0 auto;
+  }
+  #topbar h1 { font-size: 18px; font-weight: 600; margin-right: 8px; white-space: nowrap; }
+  #topbar .teacher { font-size: 13px; opacity: .92; background: rgba(255,255,255,.15); padding: 3px 10px; border-radius: 12px; }
+  #topbar button, #topbar select {
+    background: #3d5a80; color: #fff; border: none; padding: 6px 14px; border-radius: 6px;
+    cursor: pointer; font-size: 13px;
+  }
+  #topbar button:hover { background: #4d6d99; }
+  #topbar button.primary { background: #e07b39; }
+  #topbar button.primary:hover { background: #f08c4d; }
+  #topbar .spacer { flex: 1; }
+
+  /* ===== 主体三栏 ===== */
+  #main { display: flex; flex: 1; min-height: 0; }
+  #left {
+    width: 240px; min-width: 200px; background: #fff; border-right: 1px solid #dde1e6;
+    display: flex; flex-direction: column; overflow: hidden; padding: 0;
+  }
+  #center { flex: 1; background: #e9edf2; overflow: auto; position: relative; }
+  #right {
+    width: 320px; min-width: 280px; background: #fff; border-left: 1px solid #dde1e6;
+    display: flex; flex-direction: column; overflow-y: auto; padding: 12px;
+  }
+
+  /* 左栏 */
+  .side-title { font-size: 14px; font-weight: 700; color: #2b3a55; margin: 10px 0 8px; }
+  #reportListWrap { flex: 1; overflow-y: auto; padding: 12px; }
+  #reportList { list-style: none; }
+  #reportList li {
+    padding: 7px 10px; border: 1px solid #dde1e6; border-radius: 6px; margin-bottom: 6px;
+    font-size: 13px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;
+  }
+  #reportList li:hover { background: #f0f4fa; }
+  #reportList li.active { border-color: #e07b39; background: #fff3e8; }
+  #reportList .state { font-size: 11px; color: #888; }
+  #reportList .state.done { color: #2e7d32; }
+
+  /* 底部统计 */
+  #statArea {
+    flex: 0 0 auto; padding: 12px; border-top: 1px solid #dde1e6; background: #fff;
+    display: flex; flex-wrap: wrap; gap: 14px; align-items: baseline;
+  }
+  .stat { font-size: 16px; font-weight: 700; }
+  .stat-total { color: #222; }
+  .stat-done { color: #2e7d32; }
+  .stat-pending { color: #e07b39; }   /* 待批：橙 */
+  .stat-missing { color: #c62828; }   /* 待提交：红 */
+
+  /* 初始化向导 & 未匹配弹窗 */
+  #wizardMask, #unmatchMask {
+    position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 98;
+  }
+  #wizardBox, #unmatchBox {
+    background: #fff; border-radius: 10px; padding: 24px 28px; width: 420px; box-shadow: 0 8px 30px rgba(0,0,0,.3);
+  }
+  #wizardBox h2, #unmatchBox h2 { font-size: 16px; margin-bottom: 14px; color: #2b3a55; }
+  #unmatchBox .urow { display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px dashed #eceff1; font-size:13px; }
+  #unmatchBox .urow .uname { flex:1; word-break:break-all; }
+  #unmatchBox select, #unmatchBox button { padding:5px 8px; border:1px solid #dde1e6; border-radius:5px; font-size:12px; background:#fff; cursor:pointer; }
+  .state.todo { color:#e07b39; }
+  .state.miss { color:#c62828; }
+
+  /* 中栏 PDF 预览 */
+  #pdfHost { padding: 16px; }
+  .pdf-page-wrap { position: relative; margin: 0 auto 16px; box-shadow: 0 2px 10px rgba(0,0,0,.25); background: #fff; }
+  .pdf-page-wrap canvas { display: block; }
+  /* 得分叠加层（预览用） */
+  .ov-score {
+    position: absolute; color: #d32f2f; font-weight: 700; font-size: 15px;
+    line-height: 1; pointer-events: none; text-shadow: 0 0 2px #fff, 0 0 2px #fff;
+  }
+  .ov-title-score { font-size: 16px; color: #c62828; }
+  .ov-table-score { color: #c62828; }
+  .ov-tag {
+    position: absolute; color: #1a73e8; font-size: 12px; pointer-events: none;
+    text-shadow: 0 0 2px #fff;
+  }
+
+  #pdfEmpty { text-align: center; color: #888; padding: 60px 0; }
+  #pdfEmpty .big { font-size: 26px; margin-bottom: 10px; }
+
+  /* 右栏 */
+  .field { margin-bottom: 10px; }
+  .field label { display: block; font-size: 12px; color: #666; margin-bottom: 3px; }
+  .field input, .field select, .field textarea {
+    width: 100%; padding: 7px 9px; border: 1px solid #dde1e6; border-radius: 6px; font-size: 13px; background: #fff;
+  }
+  .field input:focus { border-color: #e07b39; outline: none; }
+  #scoreRows { margin-top: 6px; }
+  .score-row {
+    display: flex; align-items: center; justify-content: space-between; padding: 7px 4px;
+    border-bottom: 1px dashed #eceff1; font-size: 13px;
+  }
+  .score-row .name { flex: 1; }
+  .score-row .max { color: #999; margin-right: 8px; }
+  .score-row input { width: 64px; text-align: center; padding: 4px 6px; border: 1px solid #dde1e6; border-radius: 5px; }
+  .score-row input.ungraded { color: #b0b4bb; }   /* 未批阅：灰色 */
+  .score-row input.graded { color: #2e7d32; font-weight: 700; }  /* 已批阅：绿色 */
+  .score-row .cur { width: 46px; text-align: right; color: #e07b39; font-weight: 700; font-size: 15px; }
+  #totalRow {
+    display: flex; justify-content: space-between; align-items: center; margin-top: 10px;
+    padding: 10px 4px; background: #f7f9fb; border-radius: 6px;
+  }
+  #totalRow .lbl { font-weight: 700; color: #2b3a55; }
+  #totalRow .val { font-size: 20px; font-weight: 700; color: #e07b39; }
+  .btn-block { width: 100%; margin-top: 8px; padding: 9px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+  .btn-block.primary { background: #e07b39; color: #fff; }
+  .btn-block.primary:hover { background: #f08c4d; }
+  .btn-block.ghost { background: #eef1f5; color: #2b3a55; }
+  .btn-block.ghost:hover { background: #e2e7ee; }
+
+  #statusBar {
+    flex: 0 0 auto; background: #fff; border-top: 1px solid #dde1e6; padding: 6px 16px;
+    font-size: 12px; color: #666; display: flex; gap: 16px;
+  }
+  #statusBar .ok { color: #2e7d32; }
+  #statusBar .err { color: #c62828; }
+
+  /* 登录弹窗 */
+  #loginMask {
+    position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 99;
+  }
+  #loginBox {
+    background: #fff; border-radius: 10px; padding: 26px 32px; width: 320px; box-shadow: 0 8px 30px rgba(0,0,0,.3);
+  }
+  #loginBox h2 { font-size: 17px; margin-bottom: 16px; color: #2b3a55; }
+  #loginBox input { width: 100%; padding: 9px; border: 1px solid #dde1e6; border-radius: 6px; font-size: 14px; margin-bottom: 14px; }
+  #loginBox .row { display: flex; gap: 10px; }
+  #loginBox button { flex: 1; padding: 9px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+  #loginBox #btnLoginConfirm { background: #e07b39; color: #fff; }
+  #loginBox #btnLoginCancel { background: #eef1f5; color: #555; }
+</style>
+</head>
+<body>
+
+  <!-- 登录弹窗 -->
+  <div id="loginMask">
+    <div id="loginBox">
+      <h2>教师登录</h2>
+      <input id="loginName" placeholder="请输入批阅教师姓名" autocomplete="off">
+      <div class="row">
+        <button id="btnLoginConfirm">确认登录</button>
+        <button id="btnLoginCancel">进入(游客)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 初始化向导弹窗（Tauri 模式下无数据库时弹出） -->
+  <div id="wizardMask" style="display:none">
+    <div id="wizardBox">
+      <h2>初始化报告批次</h2>
+      <div class="field"><label>报告名称</label><input id="wizReportName" placeholder="如：医用物理仿真实验"></div>
+      <div class="field"><label>学生名单（学号 / 姓名 / 班级）</label>
+        <div class="row" style="display:flex;gap:8px">
+          <button id="btnDownloadTpl" class="btn-block ghost" style="margin:0">下载名单模板</button>
+          <button id="btnImportStudents" class="btn-block ghost" style="margin:0">导入名单</button>
+        </div>
+      </div>
+      <div id="wizHint" style="font-size:12px;color:#888;margin:8px 0">先「下载名单模板」填好学生名单，再「导入名单」；导入后点「开始」建库并扫描报告。</div>
+      <div class="row">
+        <button id="btnWizardStart" style="background:#e07b39;color:#fff">开始</button>
+        <button id="btnWizardCancel" style="background:#eef1f5;color:#555">取消</button>
+      </div>
+    </div>
+  </div>
+  <input type="file" id="rosterInput" accept=".xlsx,.xls,.csv" style="display:none">
+
+  <!-- 未匹配报告弹窗（新增文件解析不出学号时人工处理） -->
+  <div id="unmatchMask" style="display:none">
+    <div id="unmatchBox">
+      <h2>以下报告未能自动匹配</h2>
+      <div id="unmatchList" style="max-height:260px;overflow:auto;margin:10px 0"></div>
+      <div class="row"><button id="btnUnmatchDone" style="background:#e07b39;color:#fff">完成</button></div>
+    </div>
+  </div>
+
+  <!-- 顶部 -->
+  <div id="topbar">
+    <h1>实验报告批阅系统</h1>
+    <span class="teacher" id="teacherLabel">未登录</span>
+    <button id="btnLogin">切换教师</button>
+    <button id="btnOpen">📂 打开PDF报告</button>
+    <button id="btnLoadFolder">📁 载入报告文件夹</button>
+    <div class="spacer"></div>
+    <select id="selStudent" style="display:none"></select>
+  </div>
+
+  <!-- 主体三栏 -->
+  <div id="main">
+    <aside id="left">
+      <div class="side-title">报告列表</div>
+      <div id="reportListWrap">
+        <ul id="reportList"></ul>
+      </div>
+      <div id="statArea">
+        <span class="stat stat-total">总计：<span id="statTotal">0</span></span>
+        <span class="stat stat-done">已批：<span id="statDone">0</span></span>
+        <span class="stat stat-pending">待批：<span id="statPending">0</span></span>
+        <span class="stat stat-missing">待提交：<span id="statMissing">0</span></span>
+      </div>
+    </aside>
+
+    <section id="center">
+      <div id="pdfHost">
+        <div id="pdfEmpty">
+          <div class="big">📄</div>
+          点击上方「打开PDF报告」或「载入报告文件夹」开始批阅
+        </div>
+      </div>
+    </section>
+
+    <aside id="right">
+      <div class="side-title">学生信息（自动识别）</div>
+      <div class="field"><label>学号</label><input id="inpId"></div>
+      <div class="field"><label>姓名</label><input id="inpName"></div>
+      <div class="field"><label>班级</label><input id="inpClass"></div>
+      <div class="field"><label>实验名称</label><input id="inpExp"></div>
+      <div class="side-title">评分（统分区）</div>
+      <div id="scoreRows"></div>
+      <div id="totalRow"><span class="lbl">总分</span><span class="val" id="totalVal">0 / 100</span></div>
+      <button class="btn-block primary" id="btnSubmitNext">提交并下一份 <span style="font-weight:400;opacity:.85">(Ctrl+Enter)</span></button>
+      <button class="btn-block primary" id="btnExport">导出带分PDF</button>
+      <button class="btn-block ghost" id="btnSaveRecord">保存批阅记录(CSV)</button>
+      <button class="btn-block ghost" id="btnExportJson">导出记录JSON</button>
+    </aside>
+  </div>
+
+  <div id="statusBar">
+    <span id="stFile">未打开报告</span>
+    <span id="stDetect"></span>
+    <span id="stErr"></span>
+  </div>
+
+  <input type="file" id="fileInput" accept="application/pdf,.pdf" style="display:none" multiple>
+  <input type="file" id="dirInput" webkitdirectory style="display:none">
+
+  <!-- pdf.js 与 pdf-lib：本地优先，失败则回退CDN -->
+  <script>
+  // ---- 库加载策略：先尝试本地 lib/，再回退 CDN ----
+  function loadScript(urls, done){
+    let i = 0;
+    (function next(){
+      if(i>=urls.length){ if(done)done(new Error('load failed')); return; }
+      const s = document.createElement('script');
+      s.src = urls[i++];
+      s.onload = () => done && done(null);
+      s.onerror = next;
+      document.head.appendChild(s);
+    })();
+  }
+  const localPdfjs = ['lib/pdf.min.js','lib/pdf.worker.min.js'];
+  const cdnPdfjs  = ['https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+                     'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'];
+  const localPdfLib = ['lib/pdf-lib.min.js'];
+  const cdnPdfLib  = ['https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js'];
+
+  window.__libs = { pdfjs: false, pdflib: false };
+  function ensureLibs(cb){
+    if (window.pdfjsLib && window.PDFLib) { cb(); return; }
+    let left = 2;
+    const loaded = (name)=>{ __libs[name]=true; if(--left===0) cb(); };
+    const fail = (name)=>{ __libs[name]=false; if(--left===0) cb(); };
+    loadScript(localPdfjs, (e)=>{ if(e){ loadScript(cdnPdfjs, (e2)=>{ if(e2){ fail('pdfjs'); } else { loaded('pdfjs'); } }); } else { loaded('pdfjs'); } });
+    loadScript(localPdfLib, (e)=>{ if(e){ loadScript(cdnPdfLib, (e2)=>{ if(e2){ fail('pdflib'); } else { loaded('pdflib'); } }); } else { loaded('pdflib'); } });
+  }
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+  <script src="app.js"></script>
+  <script src="tauri-bridge.js"></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+[package]
+name = "report-grader"
+version = "0.1.0"
+description = "实验报告批阅系统（Tauri v2 + Rust + JS）"
+authors = ["report-grader"]
+edition = "2021"
+
+[lib]
+name = "report_grader_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.31", features = ["bundled"] }
