@@ -111,6 +111,9 @@
     await invoke('save_to_output', { folder: app.S.folder, name, data: Array.from(bytes) });
   };
 
+  // 启动标记：桥接激活时状态区可见，用于确认 Tauri 后端已连接
+  if(app.setDetect) app.setDetect('Tauri 后端已连接 ✓');
+
   console.log('[tauri-bridge] Tauri 能力已启用');
 })();
 //（注：内容由AI生成）
