@@ -2,9 +2,9 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "实验报告批阅系统",
   "version": "0.1.0",
-  "identifier": "com.reportgrader.app",
+  "identifier": "com.reportgrader.desktop",
   "build": {
-    "frontendDist": "../"
+    "frontendDist": "../web"
   },
   "app": {
     "windows": [
