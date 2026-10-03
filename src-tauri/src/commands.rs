@@ -112,7 +112,7 @@ pub fn save_template(app: tauri::AppHandle, data: Vec<u8>, suggested: String) ->
         .file()
         .set_file_name(&suggested)
         .add_filter("Excel", &["xlsx"])
-        .blocking_pick_file();
+        .blocking_save_file();
     let Some(path) = picked else {
         return Ok(()); // 用户取消
     };
