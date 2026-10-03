@@ -122,8 +122,7 @@ function initLibs(){
     S.pdfjsOk = !!(window.pdfjsLib);
     S.pdflibOk = !!(window.PDFLib);
     if(S.pdfjsOk){
-      const workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-      pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
       el.stDetect.textContent = 'pdf.js ' + pdfjsLib.version + (S.pdflibOk ? ' / pdf-lib 就绪' : ' (pdf-lib未加载,导出受限)');
     } else {
       el.stErr.textContent = '⚠ 未能加载 pdf.js，请检查网络或 lib 目录';
