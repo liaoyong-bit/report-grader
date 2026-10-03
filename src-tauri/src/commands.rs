@@ -103,3 +103,18 @@ pub fn save_to_output(folder: String, name: String, data: Vec<u8>) -> Result<Str
     fs::write(&path, &data).map_err(|e| format!("写入 output 失败: {e}"))?;
     Ok(path.to_string_lossy().into_owned())
 }
+
+/// 保存名单模板：弹系统保存对话框，用户选位置后写入（供"下载名单模板"使用）
+#[tauri::command]
+pub fn save_template(app: tauri::AppHandle, data: Vec<u8>, suggested: String) -> Result<(), String> {
+    let picked = app
+        .dialog()
+        .file()
+        .set_file_name(&suggested)
+        .add_filter("Excel", &["xlsx"])
+        .blocking_pick_file();
+    let Some(path) = picked else {
+        return Ok(()); // 用户取消
+    };
+    fs::write(path.as_path(), &data).map_err(|e| format!("保存模板失败: {e}"))
+}

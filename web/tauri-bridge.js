@@ -111,6 +111,25 @@
     await invoke('save_to_output', { folder: app.S.folder, name, data: Array.from(bytes) });
   };
 
+  // —— 名单模板下载：Tauri 下弹系统保存对话框写文件（覆盖浏览器 downloadBlob）
+  document.getElementById('btnDownloadTpl').onclick = async () => {
+    try {
+      if(!window.ExcelJS){ app.setErr('exceljs 未加载，无法生成模板'); return; }
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('学生名单');
+      ws.columns = [
+        { header: '学号', key: 'no', width: 16 },
+        { header: '姓名', key: 'name', width: 12 },
+        { header: '班级', key: 'cls', width: 18 },
+      ];
+      ws.addRow({ no: '2024010101', name: '张三', cls: '2024级临床1班' });
+      ws.addRow({ no: '2024010102', name: '李四', cls: '2024级临床1班' });
+      const buf = await wb.xlsx.writeBuffer();
+      await invoke('save_template', { data: Array.from(new Uint8Array(buf)), suggested: '学生名单模板.xlsx' });
+      app.setDetect('✅ 已保存名单模板');
+    } catch(e){ app.setErr('保存模板失败: ' + e); }
+  };
+
   // 启动标记：桥接激活时状态区可见，用于确认 Tauri 后端已连接
   if(app.setDetect) app.setDetect('Tauri 后端已连接 ✓');
 
