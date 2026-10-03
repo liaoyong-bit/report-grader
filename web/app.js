@@ -206,10 +206,21 @@ async function selectReport(idx){
   setFile('解析中: ' + r.name);
 
   // 待提交：名单里有名字但尚未收到报告文件
-  if(r.missing || !r.pdf){
+  if(r.missing){
     el.pdfHost.innerHTML = '<div id="pdfEmpty"><div class="big">📭</div>该学生尚未提交报告</div>';
     setFile(reportLabel(r) + '（未提交）');
     setDetect('状态: 待提交');
+    el.inpId.value   = (r.student && r.student.no)  || '';
+    el.inpName.value = (r.student && r.student.name)|| '';
+    el.inpClass.value= (r.student && r.student.cls) || '';
+    el.inpExp.value  = '';
+    return;
+  }
+  // 有报告但 pdf 未就绪：加载失败（真实原因见红字），不要误报"未提交"
+  if(!r.pdf){
+    el.pdfHost.innerHTML = '<div id="pdfEmpty"><div class="big">⚠</div>报告加载失败，请重试</div>';
+    setFile(reportLabel(r) + '（加载失败）');
+    setDetect('状态: 加载失败');
     el.inpId.value   = (r.student && r.student.no)  || '';
     el.inpName.value = (r.student && r.student.name)|| '';
     el.inpClass.value= (r.student && r.student.cls) || '';
