@@ -116,5 +116,6 @@ pub fn save_template(app: tauri::AppHandle, data: Vec<u8>, suggested: String) ->
     let Some(path) = picked else {
         return Ok(()); // 用户取消
     };
-    fs::write(path.as_path(), &data).map_err(|e| format!("保存模板失败: {e}"))
+    let p = path.as_path().ok_or("保存路径无效")?;
+    fs::write(p, &data).map_err(|e| format!("保存模板失败: {e}"))
 }
