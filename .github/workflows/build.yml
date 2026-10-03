@@ -29,3 +29,10 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload NSIS bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-grader-windows
+          path: src-tauri/target/release/bundle/nsis/*
+          if-no-files-found: error
