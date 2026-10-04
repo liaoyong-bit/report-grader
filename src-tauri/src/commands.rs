@@ -119,3 +119,16 @@ pub fn save_template(app: tauri::AppHandle, data: Vec<u8>, suggested: String) ->
     let p = path.as_path().ok_or("保存路径无效")?;
     fs::write(p, &data).map_err(|e| format!("保存模板失败: {e}"))
 }
+
+/// 追加调试日志到系统临时目录（用于定位运行期问题）
+#[tauri::command]
+pub fn append_log(line: String) -> Result<(), String> {
+    use std::io::Write;
+    let path = std::env::temp_dir().join("report_grader_debug.log");
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| format!("打开日志失败: {e}"))?;
+    writeln!(f, "{}", line).map_err(|e| format!("写日志失败: {e}"))
+}

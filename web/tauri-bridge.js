@@ -13,6 +13,12 @@
   const { invoke } = window.__TAURI__.core;
   const app = window.__app;
 
+  // 调试日志 → 系统临时目录 report_grader_debug.log
+  function log(line){
+    try { invoke('append_log', { line: new Date().toISOString().slice(11,19) + ' ' + line }); } catch(e){}
+  }
+  log('=== bridge LOADED, withGlobalTauri OK, selectReport=' + typeof app.selectReport + ' reports=' + app.S.reports.length);
+
   // 后端返回的字节构造 file-like 对象（喂给 app.js 的加载/渲染）
   // Tauri invoke 返回的 Vec<u8> 在 JS 里是 number[]（非 Uint8Array），需先转换
   function toFile(name, path, data){
@@ -36,12 +42,15 @@
       app.S.reports.push(r);
     }
     app.renderReportList();
+    log('buildReports n=' + app.S.reports.length);
   }
 
   // —— 载入报告文件夹（覆盖 app.js 默认行为）
   document.getElementById('btnLoadFolder').onclick = async () => {
     try {
+      log('click btnLoadFolder');
       const picked = await invoke('pick_pdf_folder'); // {folder, hasDb, batch}
+      log('pick_pdf_folder → folder=' + (picked ? picked.folder : 'null') + ' hasDb=' + (picked && picked.hasDb));
       if(!picked || !picked.folder){ return; }
       app.S.folder = picked.folder;
       app.S.mode = 'tauri';
@@ -90,19 +99,28 @@
   const origSelect = app.selectReport;
   app.selectReport = async function(idx){
     const r = app.S.reports[idx];
+    log('selectReport idx=' + idx + ' exists=' + (r?'yes':'NO') +
+        ' missing=' + (r ? r.missing : '-') + ' hasPdf=' + (r ? !!r.pdf : '-') +
+        ' path=' + (r ? r.path : '?') + ' folder=' + (app.S.folder || '?'));
     if(r && !r.missing && !r.pdf){
       try {
-        const file = toFile(r.name, r.path, await invoke('read_pdf', { folder: app.S.folder, path: r.path }));
+        log('  read_pdf → folder=' + (app.S.folder||'?') + ' path=' + (r.path||'?'));
+        const data = await invoke('read_pdf', { folder: app.S.folder, path: r.path });
+        log('  read_pdf ok, type=' + (data instanceof Uint8Array ? 'Uint8Array' : Array.isArray(data) ? 'Array len=' + data.length : typeof data));
+        const file = toFile(r.name, r.path, data);
         const bytes = await file.arrayBuffer();
+        log('  getDocument start, bytes=' + bytes.byteLength);
         const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
         r.pdf = pdf; r.bytes = bytes; r.file = file;
+        log('  getDocument OK, pages=' + (pdf && pdf.numPages));
       } catch(e) {
         const msg = String(e && e.message ? e.message : e);
         r.pdfError = '文件夹[' + (app.S.folder||'?') + '] 路径[' + (r.path||'?') + '] → ' + msg;
         app.setErr('读取报告失败: ' + msg);
+        log('  ERROR ' + msg);
       }
-    } else if(!r || r.missing || !r.pdf){
-      r.pdfError = '未触发加载: missing=' + (r ? r.missing : 'r为空') + ' hasPdf=' + (r ? !!r.pdf : '-') + ' 路径[' + (r && r.path ? r.path : '?') + ']';
+    } else {
+      log('  NO-LOAD: missing=' + (r ? r.missing : 'r为空') + ' hasPdf=' + (r ? !!r.pdf : '-'));
     }
     return origSelect.call(this, idx);
   };
