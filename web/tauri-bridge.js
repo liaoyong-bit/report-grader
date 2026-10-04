@@ -96,9 +96,11 @@
     } catch(e) { app.setErr('⚠ ' + e); }
   };
 
-  // —— 首次打开某份报告时从磁盘读入 PDF（包装 app.selectReport）
+  // —— 首次打开某份报告时从磁盘读入 PDF
+  // 关键：app.js 里列表点击 li.onclick 与"下一份"逻辑调用的都是【全局 selectReport】，
+  // 而 initBatch/buildReports 自动选第一个用的是 app.selectReport —— 两者必须同时覆盖。
   const origSelect = app.selectReport;
-  app.selectReport = async function(idx){
+  const wrappedSelect = async function(idx){
     const r = app.S.reports[idx];
     log('selectReport idx=' + idx + ' exists=' + (r?'yes':'NO') +
         ' missing=' + (r ? r.missing : '-') + ' hasPdf=' + (r ? !!r.pdf : '-') +
@@ -125,6 +127,8 @@
     }
     return origSelect.call(this, idx);
   };
+  app.selectReport = wrappedSelect;
+  window.selectReport = wrappedSelect;
 
   // —— 批阅进度持久化 → 后端数据库（done=true 视为提交，由后端固化；localStorage 由 app.js 兜底）
   window.__backendPersist = (r, snap) => {
