@@ -1024,6 +1024,8 @@ window.__app = { S, el, reportLabel, reportState, renderReportList, updateStats,
 /* ==================== 评分项模板设置（步骤一） ==================== */
 let S_ITEMS = [];        // 手动添加的项
 let S_TPL_RECTS = [];    // 模板框选矩形 {x,y,w,h,pageIndex,text,item_name,max_score}
+let S_ocrWorker = null;  // OCR worker（懒加载，复用）
+let S_tplScale = 1;      // 模板预览缩放（冗余引用，避免误删）
 
 // 进入批次后：若还没有评分项模板则弹设置框；已有则直接用
 async function ensureItemsSetup(force){
