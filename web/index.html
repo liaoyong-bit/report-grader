@@ -73,6 +73,13 @@
   #overviewMask {
     position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 97;
   }
+  #batchMask {
+    position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 97;
+  }
+  #batchBox {
+    background: #fff; border-radius: 10px; padding: 24px 28px; width: 460px; box-shadow: 0 8px 30px rgba(0,0,0,.3);
+  }
+  #batchBox h2 { font-size: 16px; color: #2b3a55; }
   #overviewBox {
     background: #fff; border-radius: 10px; padding: 20px 24px; width: 720px; max-width: 92vw;
     box-shadow: 0 8px 30px rgba(0,0,0,.3);
@@ -214,6 +221,19 @@
       <h2>以下报告未能自动匹配</h2>
       <div id="unmatchList" style="max-height:260px;overflow:auto;margin:10px 0"></div>
       <div class="row"><button id="btnUnmatchDone" style="background:#e07b39;color:#fff">完成</button></div>
+    </div>
+  </div>
+
+  <!-- 已有批次提示：继续使用 / 重新设置 -->
+  <div id="batchMask" style="display:none">
+    <div id="batchBox">
+      <h2>该文件夹已有批次信息</h2>
+      <p id="batchInfoText" style="margin:12px 0;font-size:14px;color:#333"></p>
+      <p style="font-size:12px;color:#888">可继续使用现有报告名称与名单；也可重新设置（会更新 source_files 中的名单存档）。</p>
+      <div class="row" style="margin-top:18px">
+        <button id="btnBatchKeep" style="background:#2e7d32;color:#fff">继续使用，直接进入</button>
+        <button id="btnBatchReset" style="background:#e07b39;color:#fff">重新设置</button>
+      </div>
     </div>
   </div>
 

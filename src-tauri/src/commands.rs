@@ -112,6 +112,54 @@ pub fn list_all_grading(folder: String) -> Result<Vec<db::GradeRow>, String> {
     db::list_all_grading(&conn, bid)
 }
 
+#[derive(Serialize)]
+pub struct StudentOut {
+    pub no: String,
+    pub name: String,
+    pub cls: String,
+}
+
+#[derive(Serialize)]
+pub struct BatchInfoDetail {
+    pub report_name: String,
+    pub count: usize,
+    pub students: Vec<StudentOut>,
+}
+
+/// 读取当前批次信息（报告名称 + 学生名单），供"已有批次提示"对话框
+#[tauri::command]
+pub fn get_batch_info(folder: String) -> Result<BatchInfoDetail, String> {
+    let conn = db::open(&folder)?;
+    let (bid, name) = db::find_batch_by_folder(&conn)?.ok_or("当前文件夹尚未初始化批次")?;
+    let students = db::get_students(&conn, bid)?;
+    Ok(BatchInfoDetail {
+        report_name: name,
+        count: students.len(),
+        students: students
+            .into_iter()
+            .map(|s| StudentOut { no: s.no, name: s.name, cls: s.cls })
+            .collect(),
+    })
+}
+
+/// 把"名单 + 报告名称"写成 CSV 存到 source_files，供查看/迁移
+#[tauri::command]
+pub fn save_roster(folder: String, report_name: String, students: Vec<db::StudentIn>) -> Result<String, String> {
+    let src_dir = Path::new(&folder).join(db::SOURCE_DIR);
+    fs::create_dir_all(&src_dir).map_err(|e| format!("创建 source_files 失败: {e}"))?;
+    let safe: String = report_name
+        .chars()
+        .map(|c| if "\\/:*?\"<>|".contains(c) { '_' } else { c })
+        .collect();
+    let path = src_dir.join(format!("_名单_{}.csv", safe));
+    let mut csv = String::from("\u{feff}学号,姓名,班级,报告名称\n");
+    for s in &students {
+        csv.push_str(&format!("{},{},{},{}\n", s.no, s.name, s.cls, report_name));
+    }
+    fs::write(&path, csv).map_err(|e| format!("写入名单失败: {e}"))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 /// 保存名单模板：弹系统保存对话框，用户选位置后写入（供"下载名单模板"使用）
 #[tauri::command]
 pub fn save_template(app: tauri::AppHandle, data: Vec<u8>, suggested: String) -> Result<(), String> {

@@ -17,6 +17,8 @@ pub fn run() {
             commands::save_template,
             commands::append_log,
             commands::list_all_grading,
+            commands::get_batch_info,
+            commands::save_roster,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

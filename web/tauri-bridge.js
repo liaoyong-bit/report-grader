@@ -57,13 +57,10 @@
       app.S.mode = 'tauri';
 
       if(hasDb){
-        // 已有批次 → 增量同步（自动识别新放入的 PDF）
-        const sync = await invoke('sync_folder', { folder: picked.folder });
-        buildReports(sync);
-        if(sync.unmatched && sync.unmatched.length){ app.showUnmatched(sync.unmatched); }
-        app.setDetect('✅ 已同步批次：' + (picked.batch ? picked.batch.name : '') +
-          (sync.added ? '，新增 ' + sync.added + ' 份' : ''));
-        if(app.S.reports.length){ app.selectReport(0); }
+        // 已有批次 → 读取批次信息，弹提示让教师选择继续使用/重新设置
+        const info = await invoke('get_batch_info', { folder: picked.folder });
+        document.getElementById('batchInfoText').textContent = '报告名称：' + (info ? info.report_name : '') + '　已导入 ' + (info ? info.count : 0) + ' 名同学';
+        document.getElementById('batchMask').style.display = 'flex';
       } else {
         // 无数据库 → 初始化向导（报告名称 + 名单 + 模板）
         app.openWizard();
@@ -78,6 +75,7 @@
   window.__bridge.initBatch = async (folder, reportName, students) => {
     try {
       await invoke('init_batch', { folder, reportName, students, teacher: app.S.teacher });
+      await invoke('save_roster', { folder, reportName, students });   // 名单+报告名存到 source_files
       const sync = await invoke('sync_folder', { folder });
       buildReports(sync);
       if(sync.unmatched && sync.unmatched.length){ app.showUnmatched(sync.unmatched); }
@@ -87,6 +85,23 @@
   };
 
   // —— 处理未匹配：挂到某学生 / 不导入
+  // —— 已有批次提示：继续使用 → 增量同步进界面
+  document.getElementById('btnBatchKeep').onclick = async () => {
+    document.getElementById('batchMask').style.display = 'none';
+    try {
+      const folder = app.S.folder;
+      const sync = await invoke('sync_folder', { folder });
+      buildReports(sync);
+      if(sync.unmatched && sync.unmatched.length){ app.showUnmatched(sync.unmatched); }
+      app.setDetect('已同步批次' + (sync.added ? '，新增 ' + sync.added + ' 份' : ''));
+      if(app.S.reports.length){ app.selectReport(0); }
+    } catch(e) { app.setErr('⚠ ' + e); }
+  };
+  // —— 已有批次提示：重新设置 → 打开初始化向导
+  document.getElementById('btnBatchReset').onclick = () => {
+    document.getElementById('batchMask').style.display = 'none';
+    app.openWizard();
+  };
   window.__bridge.resolveUnmatched = async (folder, item, action) => {
     try {
       const studentNo = action === '__skip' ? '' : action;
