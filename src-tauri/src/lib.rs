@@ -23,6 +23,7 @@ pub fn run() {
             commands::save_batch_items,
             commands::get_batch_items,
             commands::get_template_path,
+            commands::ocr_image_b64,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

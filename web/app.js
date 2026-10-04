@@ -1263,14 +1263,16 @@ async function runOcr(rt){
     const txt = await textLayerMatch(rt);
     if(txt && txt.trim()) return txt.trim();
   }catch(e){}
-  // OCR worker 备用（扫描版无文本层时）
-  if(window.Tesseract){
-    try{
-      const img = cropTemplate(rt);
-      if(img){ const t = await recognizeOcr(img); if(t && t.trim()) return t.trim(); }
-      if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR 返回空');
-    }catch(e){ if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR 失败: '+String(e&&e.message||e)); }
-  }
+  // 后端 Windows OCR 备用（扫描版无文本层时）
+  try{
+    const img = cropTemplate(rt);
+    if(img && window.__bridge && window.__bridge.ocrImageB64){
+      const b64 = img.indexOf(',')>=0 ? img.split(',')[1] : img;
+      const t = await window.__bridge.ocrImageB64(b64);
+      if(t && t.trim()) return t.trim();
+    }
+    if(window.__bridge && window.__bridge.log) window.__bridge.log('后端 OCR 返回空');
+  }catch(e){ if(window.__bridge && window.__bridge.log) window.__bridge.log('后端 OCR 失败: '+String(e&&e.message||e)); }
   return '';
 }
 async function ensureOcrWorker(){
