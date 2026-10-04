@@ -64,7 +64,7 @@ const el = {
   btnOverview: $('btnOverview'), btnHelp: $('btnHelp'),
   helpPanel: $('helpPanel'),
   overviewMask: $('overviewMask'), overviewBody: $('overviewBody'), btnOverviewClose: $('btnOverviewClose'),
-  itemMask: $('itemMask'), tplPreview: $('tplPreview'), itemList: $('itemList'),
+  itemMask: $('itemMask'), tplPreview: $('tplPreview'), itemList: $('itemList'), btnItems: $('btnItems'),
   btnItemAdd: $('btnItemAdd'), btnItemSave: $('btnItemSave'), btnItemCancel: $('btnItemCancel'),
   btnTotalMode: $('btnTotalMode'), totalInfo: $('totalInfo'),
 };
@@ -1026,12 +1026,14 @@ let S_ITEMS = [];        // 手动添加的项
 let S_TPL_RECTS = [];    // 模板框选矩形 {x,y,w,h,pageIndex,text,item_name,max_score}
 
 // 进入批次后：若还没有评分项模板则弹设置框；已有则直接用
-async function ensureItemsSetup(){
+async function ensureItemsSetup(force){
   if(!window.__bridge || !window.__bridge.getBatchItems){ return; }
   const items = await window.__bridge.getBatchItems(S.folder).catch(e=>{ setErr('⚠ '+e); return null; });
-  if(items && items.length){
+  if(items && items.length && !force){
     S.totalRegion = (items.find(x=>x.item_index<0)||{}).total_region || null;
     S.itemsTemplate = items.filter(x=>x.item_index>=0).map(x=>({item_name:x.item_name, max_score:x.max_score, score_x:x.score_x||0}));
+    if(window.__bridge.log) window.__bridge.log('已存在评分项 N='+S.itemsTemplate.length+' 项，直接沿用（force='+(force?1:0)+'）');
+    setDetect('已设置 '+S.itemsTemplate.length+' 项评分项，如需修改点「✏️ 设置评分项」');
     return;
   }
   const tplPath = await window.__bridge.getTemplatePath(S.folder).catch(()=>null);
@@ -1301,6 +1303,8 @@ async function pickTemplateAndSetup(){
   if(b1) b1.onclick = ()=> pickTemplateAndSetup();
   const b2=document.getElementById('btnItemPickTpl');
   if(b2) b2.onclick = ()=> pickTemplateAndSetup();
+  // 主界面「设置评分项」：强制重新进入框选设置
+  if(el.btnItems) el.btnItems.onclick = ()=> ensureItemsSetup(true);
 })();
 
 // ==================== 评分项列表渲染 & 按钮绑定（恢复） ====================
