@@ -5,6 +5,17 @@ use std::fs;
 use std::path::Path;
 use tauri_plugin_dialog::DialogExt;
 
+/// 追加一行到调试日志（与前端 append_log 同一文件，便于统一诊断）
+fn dbglog(s: &str) {
+    use std::io::Write;
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) % 86400;
+    let line = format!("[{:02}:{:02}:{:02}] RUST {s}", secs/3600, (secs/60)%60, secs%60);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true)
+        .open(std::env::temp_dir().join("report_grader_debug.log")) {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
 #[derive(Serialize)]
 pub struct BatchInfo {
     pub id: i64,
@@ -86,8 +97,17 @@ pub fn save_grading_state(
     let rid = db::report_id_by_key(&conn, bid, &report_key)?.ok_or("未找到报告")?;
     let done = snapshot.get("done").and_then(|v| v.as_bool()).unwrap_or(false);
     let json = serde_json::to_string(&snapshot).map_err(|e| format!("序列化失败: {e}"))?;
-    db::save_state(&conn, rid, &json, done)?;
-    Ok(())
+    dbglog(&format!("save_grading_state key={report_key} done={done} json_len={}", json.len()));
+    let conn = db::open(&folder)?;
+    let bid = db::find_batch_by_folder(&conn)?.map(|b| b.0).ok_or("未找到批次")?;
+    let rid = match db::report_id_by_key(&conn, bid, &report_key) {
+        Ok(Some(id)) => id,
+        Ok(None) => { dbglog(&format!("  !save 未找到报告 key={report_key}")); return Err("未找到报告".into()); }
+        Err(e) => { dbglog(&format!("  !report_id_by_key err={e}")); return Err(format!("定位报告失败: {e}")); }
+    };
+    let r = db::save_state(&conn, rid, &json, done);
+    match &r { Ok(_) => dbglog(&format!("  saved rid={rid} done={done}")), Err(e) => dbglog(&format!("  !save_state err={e}")) }
+    r
 }
 
 /// 导出产物写入 output/ 目录
@@ -109,7 +129,11 @@ pub fn save_to_output(folder: String, name: String, data: Vec<u8>) -> Result<Str
 pub fn list_all_grading(folder: String) -> Result<Vec<db::GradeRow>, String> {
     let conn = db::open(&folder)?;
     let bid = db::find_batch_by_folder(&conn)?.map(|b| b.0).ok_or("当前文件夹尚未初始化批次")?;
-    db::list_all_grading(&conn, bid)
+    let rows = db::list_all_grading(&conn, bid)?;
+    for r in &rows {
+        dbglog(&format!("list_all_grading no={} name={} status={} draft_len={}", r.no, r.name, r.status, r.draft.as_deref().map(str::len).unwrap_or(0)));
+    }
+    Ok(rows)
 }
 
 #[derive(Serialize)]

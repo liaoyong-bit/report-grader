@@ -168,8 +168,8 @@
   // —— 批阅进度持久化 → 后端数据库（done=true 视为提交，由后端固化；localStorage 由 app.js 兜底）
   window.__backendPersist = (r, snap) => {
     if(!app.S.folder) return;
-    try { invoke('save_grading_state', { folder: app.S.folder, reportKey: r.name, snapshot: snap }); }
-    catch(e){ /* 忽略，回退 localStorage */ }
+    invoke('save_grading_state', { folder: app.S.folder, reportKey: r.name, snapshot: snap })
+      .catch(e => log('save_grading_state 失败: ' + String(e && e.message || e)));
   };
 
   // —— 导出产物写入 output/（替代浏览器下载）
