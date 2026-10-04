@@ -295,7 +295,7 @@ pub fn save_state(conn: &Connection, report_id: i64, draft_json: &str, done: boo
 /// 按改名版文件名或源文件名定位报告 id
 pub fn report_id_by_key(conn: &Connection, batch_id: i64, key: &str) -> Result<Option<i64>, String> {
     conn.query_row(
-        "SELECT id FROM reports WHERE batch_id=?1 AND (renamed_path=?2 OR source_path=?2 OR orig_name=?2) LIMIT 1",
+        "SELECT id FROM reports WHERE batch_id=?1 AND (renamed_path=?2 OR source_path=?2 OR orig_name=?2) ORDER BY id DESC LIMIT 1",
         params![batch_id, key],
         |r| r.get(0),
     )
