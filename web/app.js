@@ -1082,71 +1082,110 @@ function bindTemplateDrag(){
   const pre = el.tplPreview;
   let drag=null;
   pre.onmousedown=(e)=>{
+    const t=e.target;
+    if(t && t.classList && t.classList.contains('tpl-box') && !t.classList.contains('active') && t.dataset.idx!=null){
+      drag={mode:'move', idx:parseInt(t.dataset.idx,10), x0:e.clientX, y0:e.clientY};
+      return;
+    }
     const r=pre.getBoundingClientRect();
-    drag={x0:e.clientX-r.left, y0:e.clientY-r.top};
+    drag={mode:'new', x0:e.clientX-r.left, y0:e.clientY-r.top};
   };
   pre.onmousemove=(e)=>{
     if(!drag) return;
     const r=pre.getBoundingClientRect();
-    const x=e.clientX-r.left, y=e.clientY-r.top;
-    const box=Math.min(drag.x0,x), bbox=Math.min(drag.y0,y);
-    const w=Math.abs(x-drag.x0), h=Math.abs(y-drag.y0);
-    pre.querySelectorAll('.tpl-box.active').forEach(n=>n.remove());
-    const d=document.createElement('div');
-    d.className='tpl-box active';
-    d.style.left=box+'px'; d.style.top=bbox+'px'; d.style.width=w+'px'; d.style.height=h+'px';
-    pre.appendChild(d);
+    if(drag.mode==='new'){
+      const x=e.clientX-r.left, y=e.clientY-r.top;
+      const box=Math.min(drag.x0,x), bbox=Math.min(drag.y0,y);
+      const w=Math.abs(x-drag.x0), h=Math.abs(y-drag.y0);
+      pre.querySelectorAll('.tpl-box.active').forEach(n=>n.remove());
+      const d=document.createElement('div');
+      d.className='tpl-box active';
+      d.style.left=box+'px'; d.style.top=bbox+'px'; d.style.width=w+'px'; d.style.height=h+'px';
+      pre.appendChild(d);
+    } else {
+      const rt=S_TPL_RECTS[drag.idx];
+      if(!rt) return;
+      const dx=e.clientX-drag.x0, dy=e.clientY-drag.y0;
+      drag.x0=e.clientX; drag.y0=e.clientY;
+      rt.x=Math.max(0, Math.round(rt.x+dx));
+      rt.y=Math.max(0, Math.round(rt.y+dy));
+      renderTitleBoxes(); renderScoreBoxes();
+    }
   };
   pre.onmouseup=(e)=>{
     if(!drag) return;
     const r=pre.getBoundingClientRect();
-    const x0=drag.x0,y0=drag.y0,x=e.clientX-r.left,y=e.clientY-r.top;
-    drag=null;
-    const box=Math.min(x0,x),bbox=Math.min(y0,y),w=Math.abs(x-x0),h=Math.abs(y-y0);
-    if(w<8||h<8){ pre.querySelectorAll('.tpl-box.active').forEach(n=>n.remove()); return; }
-    pre.querySelectorAll('.tpl-box.active').forEach(n=>n.remove());
-    if(S_TOTAL_MODE){
-      S_TOTAL_MODE=false;
-      if(el.btnTotalMode) el.btnTotalMode.style.background='#1a73e8';
-      S_TOTAL_RECT={x:box,y:bbox,w:w,h:h,count:Math.max(1,S_TPL_RECTS.length+1)};
-      renderTotalBox();
-      return;
+    if(drag.mode==='new'){
+      const x0=drag.x0,y0=drag.y0,x=e.clientX-r.left,y=e.clientY-r.top;
+      const box=Math.min(x0,x),bbox=Math.min(y0,y),w=Math.abs(x-x0),h=Math.abs(y-y0);
+      if(w>=8 && h>=8){
+        pre.querySelectorAll('.tpl-box.active').forEach(n=>n.remove());
+        if(S_TOTAL_MODE){
+          S_TOTAL_MODE=false;
+          if(el.btnTotalMode) el.btnTotalMode.style.background='#1a73e8';
+          S_TOTAL_RECT={x:box,y:bbox,w:w,h:h,count:Math.max(1,S_TPL_RECTS.length+1)};
+          renderTotalBox();
+        } else {
+          addTemplateBox(box,bbox,w,h);
+        }
+      } else {
+        pre.querySelectorAll('.tpl-box.active').forEach(n=>n.remove());
+      }
     }
-    addTemplateBox(box,bbox,w,h);
+    drag=null;
   };
 }
 
-// 框选标题：记录矩形 + 文本层提取题名 + 自动算出打分区偏移
+// 框选标题：记录矩形 + 提取题名 + 画标题框/打分区蓝框
 function addTemplateBox(box,bbox,w,h){
-  const vp=S.tplVp;
-  const hit=[];
-  for(const it of (S.tplTextItems||[])){
-    const pt=vp.convertToViewportPoint(it.x, it.y);
-    if(pt[0]>=box && pt[0]<=box+w && pt[1]>=bbox && pt[1]<=bbox+h) hit.push(it);
-  }
-  hit.sort((a,b)=>a.yTop-b.yTop);
-  const text=hit.map(i=>i.str.trim()).filter(Boolean).join(' ');
-  const pageW = vp.width;
-  const offset = Math.max(0, Math.round((pageW - 52) - box));
-  S_TPL_RECTS.push({pageIndex:0, x:box, y:bbox, w:w, h:h, text:text, item_name:'', max_score:20, score_x:offset});
-  pre.querySelectorAll('.tpl-box').forEach(n=>n.classList.remove('active'));
-  renderItemList();
-  renderScoreBoxes();
+  S_TPL_RECTS.push({pageIndex:0, x:box, y:bbox, w:w, h:h, text:'', item_name:'', max_score:20});
+  renderTitleBoxes(); renderItemList(); renderScoreBoxes();
+  runOcr(box,bbox,w,h).then(name=>{
+    const rt=S_TPL_RECTS[S_TPL_RECTS.length-1];
+    if(rt && name && name.trim()){ rt.item_name=name.trim(); renderItemList(); }
+  }).catch(()=>{});
 }
 
-// 打分区蓝框（标题行右侧）
-function renderScoreBoxes(){
+// 标题框（橙，可拖动微调）
+function renderTitleBoxes(){
   const pre = el.tplPreview;
-  pre.querySelectorAll('.tpl-score').forEach(n=>n.remove());
-  S_TPL_RECTS.forEach(rt=>{
-    const x = rt.x + (rt.score_x||0);
-    const d=document.createElement('div'); d.className='tpl-score';
-    d.style.left=(x-26)+'px'; d.style.top=(rt.y-2)+'px'; d.style.width='52px'; d.style.height=(rt.h+6)+'px';
+  pre.querySelectorAll('.tpl-box:not(.active)').forEach(n=>n.remove());
+  S_TPL_RECTS.forEach((rt,i)=>{
+    const d=document.createElement('div'); d.className='tpl-box'; d.dataset.idx=i;
+    d.style.left=rt.x+'px'; d.style.top=rt.y+'px'; d.style.width=rt.w+'px'; d.style.height=rt.h+'px';
+    d.style.pointerEvents='auto'; d.style.cursor='move';
+    d.title='拖动可微调标题框位置';
+    const idx=document.createElement('span'); idx.className='tpl-idx'; idx.textContent=(i+1)+'.';
+    d.appendChild(idx);
     pre.appendChild(d);
   });
 }
 
-// 统分区框 + 等分位置点
+// 打分区蓝框：同一固定列（所有题竖向对齐）
+function renderScoreBoxes(){
+  const pre = el.tplPreview;
+  pre.querySelectorAll('.tpl-score').forEach(n=>n.remove());
+  const colX = S.tplVp.width - 52;
+  S_TPL_RECTS.forEach(rt=>{
+    const d=document.createElement('div'); d.className='tpl-score';
+    d.style.left=(colX-26)+'px'; d.style.top=(rt.y-2)+'px'; d.style.width='52px'; d.style.height=(rt.h+6)+'px';
+    pre.appendChild(d);
+  });
+}
+
+// 题名识别：优先 OCR，未就绪回退文本层
+async function runOcr(box,bbox,w,h){
+  if(window.Tesseract){
+    try{
+      const img = cropTemplate(box,bbox,w,h);
+      if(img){ const t = await recognizeOcr(img); if(t && t.trim()) return t.trim(); }
+    }catch(e){ /* 回退文本层 */ }
+  }
+  const hit=[];
+  for(const it of (S.tplTextItems||[])){ const pt=S.tplVp.convertToViewportPoint(it.x,it.y); if(pt[0]>=box&&pt[0]<=box+w&&pt[1]>=bbox&&pt[1]<=bbox+h) hit.push(it); }
+  hit.sort((a,b)=>a.yTop-b.yTop);
+  return hit.map(i=>i.str.trim()).filter(Boolean).join(' ');
+}
 function renderTotalBox(){
   const pre = el.tplPreview;
   pre.querySelectorAll('.tpl-total,.tpl-total-dot').forEach(n=>n.remove());
@@ -1242,3 +1281,33 @@ el.btnItemSave.onclick=async ()=>{
   setDetect('✅ 评分项已固化：'+S.itemsTemplate.length+' 项'+(hasTotal?'，含统分区':''));
   if(S.reports.length){ selectReport(0); }
 };
+/* ==================== OCR（tesseract.js，本地嵌入） ==================== */
+let S_ocrWorker=null;
+async function ensureOcrWorker(){
+  if(S_ocrWorker) return S_ocrWorker;
+  S_ocrWorker = await Tesseract.createWorker({
+    logger: ()=>{},
+    workerPath: 'lib/ocr/package/dist/worker.min.js',
+    corePath: 'lib/ocr/package/tesseract-core-lstm.wasm.js',
+    langPath: 'lib/ocr/',
+  });
+  await S_ocrWorker.loadLanguage('chi_sim');
+  await S_ocrWorker.initialize('chi_sim');
+  return S_ocrWorker;
+}
+async function recognizeOcr(img){
+  if(!window.Tesseract) throw new Error('OCR 未加载');
+  const w = await ensureOcrWorker();
+  const { data } = await w.recognize(img);
+  return (data && data.text) || '';
+}
+function cropTemplate(box,bbox,w,h){
+  const canvas = el.tplPreview.querySelector('canvas');
+  if(!canvas) return null;
+  const pad=3;
+  const out=document.createElement('canvas');
+  out.width=Math.max(4, Math.round(w+pad*2));
+  out.height=Math.max(4, Math.round(h+pad*2));
+  try{ out.getContext('2d').drawImage(canvas, box-pad, bbox-pad, w+pad*2, h+pad*2, 0, 0, out.width, out.height); }catch(e){ return null; }
+  return out.toDataURL('image/png');
+}
