@@ -665,65 +665,91 @@ async function loadCJKFont(doc){
   return null;
 }
 
-async function exportScoredPdf(){
-  try{
-  const r = S.current;
-  if(!r){ setErr('请先打开报告'); return; }
-  if(!S.pdflibOk){ setErr('pdf-lib 未加载, 无法导出（检查 web/lib 目录）'); return; }
-  if(!r.bytes){ setErr('当前报告未加载PDF字节，请先在预览区打开后再导出'); return; }
-  if(window.__bridge && window.__bridge.log){ window.__bridge.log('exportScoredPdf: name='+r.name+' bytes='+r.bytes.byteLength+' pdflib='+S.pdflibOk+' analysis='+!!(r.analysis)); }
+async function ensureLoaded(r){
+  if(r.bytes && r.analysis) return;
+  if(window.__bridge && window.__bridge.readPdf && S.folder){
+    const data = await window.__bridge.readPdf(S.folder, r.path);
+    const u8 = data instanceof Uint8Array ? data : new Uint8Array(data);
+    const bytes = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+    r.bytes = bytes;
+    const pdfData = bytes.slice(0);
+    const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
+    r.pdf = pdf;
+  }
+  if(r.pdf && !r.analysis){
+    const analysis = await analyze(r.pdf);
+    if(S.itemsTemplate && S.itemsTemplate.length){
+      S.itemsTemplate.forEach((tpl,i)=>{ if(analysis.items[i]){ analysis.items[i].name=tpl.item_name; analysis.items[i].max=tpl.max_score; } });
+    }
+    r.analysis = analysis;
+  }
+}
+
+async function exportOne(r){
   const { PDFDocument, StandardFonts, rgb } = PDFLib;
   const pdfDoc = await PDFDocument.load(r.bytes);
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const cjkFont = await loadCJKFont(pdfDoc);   // 有中文字体才写"得分："，否则只写数字
+  const cjkFont = await loadCJKFont(pdfDoc);
   const color = rgb(0.82, 0.05, 0.05);
   const a = r.analysis;
-
   for(let i=0;i<a.items.length;i++){
     const it = a.items[i];
     if(it.titleY==null) continue;
     const page = pdfDoc.getPage(it.pageIndex);
-    const H = page.getHeight();
     const W = page.getWidth();
-    const y = H - it.titleY;
+    const y = it.titleY;            // PDF 用户空间 y(距底)，直接使用（修复坐标偏移）
     const label = '得分：';
     if(cjkFont){
-      // 中文字体可渲染"得分："，右对齐到文字区最右端内侧
       const labelW = cjkFont.widthOfTextAtSize(label, 11);
       const num = String(r.scores[i]||0);
       const numW = font.widthOfTextAtSize(num, 11);
-      const drawX = W - 70 - numW;   // 分数紧跟标签
+      const drawX = W - 70 - numW;
       page.drawText(label, { x: drawX - labelW, y, size: 11, font: cjkFont, color });
       page.drawText(num, { x: drawX, y, size: 11, font, color });
     } else {
-      // 无中文字体：仅导出数字，避免中文乱码
       const text = String(r.scores[i]||0);
       const w = font.widthOfTextAtSize(text, 11);
       page.drawText(text, { x: W - 70 - w, y, size: 11, font, color });
     }
   }
-  // 统分区得分回填
   if(a.scoreCols){
     const sc = a.scoreCols;
     const page = pdfDoc.getPage(sc.pageIndex);
-    const H = page.getHeight();
     const total = r.scores.reduce((x,y)=>x+y,0);
     const vals = [...r.scores, total];
     for(let i=0;i<sc.x.length;i++){
       const txt = String(vals[i]||0);
       const w = font.widthOfTextAtSize(txt, 11);
-      page.drawText(txt, { x: sc.x[i] - w/2, y: H - sc.y, size: 11, font, color });
+      page.drawText(txt, { x: sc.x[i] - w/2, y: sc.y, size: 11, font, color });   // 修复 y
     }
   }
-
   const bytes = await pdfDoc.save();
   const blob = new Blob([bytes], {type:'application/pdf'});
   await deliverExport((r.name.replace(/\.pdf$/i,'') || 'report') + '_已批阅.pdf', blob);
-  setErr('');
-  setDetect('✅ 已导出带分PDF，文件保存在所选文件夹的 output/ 目录');
+}
+
+async function exportScoredPdf(){
+  try{
+    if(!S.pdflibOk){ setErr('pdf-lib 未加载, 无法导出（检查 web/lib 目录）'); return; }
+    const list = (S.reports||[]).filter(r=>r && !r.missing);
+    if(!list.length){ setErr('没有可导出的报告'); return; }
+    setDetect('⏳ 正在导出 ' + list.length + ' 份...');
+    let ok=0, fail=0;
+    for(const r of list){
+      try{
+        await ensureLoaded(r);
+        if(!r.analysis){ fail++; continue; }
+        await exportOne(r);
+        ok++;
+      }catch(e){
+        fail++;
+        if(window.__bridge && window.__bridge.log){ window.__bridge.log('exportOne 失败 '+(r.name||'')+': '+(e&&e.message?e.message:e)); }
+      }
+    }
+    setErr('');
+    setDetect('✅ 已导出 ' + ok + ' 份' + (fail ? '，失败 ' + fail + ' 份' : '') + ' 到 output/');
   }catch(e){
     setErr('导出失败: ' + (e && e.message ? e.message : e));
-    if(window.__bridge && window.__bridge.log){ window.__bridge.log('exportScoredPdf ERROR: ' + (e&&e.message?e.message:e)); }
   }
 }
 el.btnExport.onclick = exportScoredPdf;
