@@ -235,14 +235,12 @@ async function selectReport(idx){
   }
 
   try{
-    // 用批次评分项模板覆盖题名/满分（每题位置仍由 analyze 定位）
-    if(S.itemsTemplate && S.itemsTemplate.length){
-      S.itemsTemplate.forEach((tpl,i)=>{
-        if(analysis.items[i]){ analysis.items[i].name = tpl.item_name; analysis.items[i].max = tpl.max_score; analysis.items[i].score_x = tpl.score_x; }
-      });
-    }
     const analysis = await analyze(r.pdf);
     r.analysis = analysis;
+    // 用批次评分项模板覆盖题名/满分（每题位置仍由 analyze 定位）
+    if(S.itemsTemplate && S.itemsTemplate.length){
+      S.itemsTemplate.forEach((tpl,i)=>{ if(analysis.items[i]){ analysis.items[i].name = tpl.item_name; analysis.items[i].max = tpl.max_score; analysis.items[i].score_x = tpl.score_x; } });
+    }
     // 保留已保存/已恢复的状态，不重置（P0-1 / P0-4 已批可重开）
     if(!r.maxs) r.maxs = analysis.items.map(it=>it.max);
     if(!r.basic) r.basic = analysis.basic;
