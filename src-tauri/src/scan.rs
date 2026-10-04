@@ -48,14 +48,14 @@ fn clean(s: &str) -> String {
     s.chars().filter(|c| !"\\/:*?\"<>|".contains(*c)).collect()
 }
 
-/// 递归收集所有 PDF（跳过 data / source_files / output 及隐藏目录）
+/// 递归收集所有 PDF（跳过 data / output 及隐藏目录；source_files 需扫描以识别改名版）
 fn collect_pdfs(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(rd) = fs::read_dir(dir) else { return };
     for e in rd.flatten() {
         let p = e.path();
         if p.is_dir() {
             let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            if name == db::DATA_DIR || name == db::SOURCE_DIR || name == db::OUTPUT_DIR || name.starts_with('.') {
+            if name == db::DATA_DIR || name == db::OUTPUT_DIR || name.starts_with('.') {
                 continue;
             }
             collect_pdfs(&p, out);
