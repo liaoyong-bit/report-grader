@@ -80,6 +80,7 @@
       buildReports(sync);
       if(sync.unmatched && sync.unmatched.length){ app.showUnmatched(sync.unmatched); }
       app.setDetect('✅ 批次已初始化并扫描报告');
+      await app.ensureItemsSetup();
       if(app.S.reports.length){ app.selectReport(0); }
     } catch(e) { app.setErr('⚠ ' + e); }
   };
