@@ -313,5 +313,6 @@ fn ocr_file(path: &str) -> Result<String, String> {
         .map_err(|e| format!("识别失败: {e}"))?
         .get()
         .map_err(|e| format!("等待识别失败: {e}"))?;
-    Ok(res.Text().to_string())
+    let text = res.Text().map_err(|e| format!("读取识别文本失败: {e}"))?;
+    Ok(text.to_string())
 }
