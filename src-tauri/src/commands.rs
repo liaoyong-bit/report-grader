@@ -188,3 +188,38 @@ pub fn append_log(line: String) -> Result<(), String> {
         .map_err(|e| format!("打开日志失败: {e}"))?;
     writeln!(f, "{}", line).map_err(|e| format!("写日志失败: {e}"))
 }
+
+/// 保存批次评分项模板（固化：题名/满分/统分区等）
+#[tauri::command]
+pub fn save_batch_items(folder: String, items: Vec<db::BatchItem>) -> Result<(), String> {
+    let conn = db::open(&folder)?;
+    let bid = db::find_batch_by_folder(&conn)?.map(|b| b.0).ok_or("当前文件夹尚未初始化批次")?;
+    db::save_batch_items(&conn, bid, &items)
+}
+
+/// 读取批次评分项模板
+#[tauri::command]
+pub fn get_batch_items(folder: String) -> Result<Vec<db::BatchItem>, String> {
+    let conn = db::open(&folder)?;
+    let bid = db::find_batch_by_folder(&conn)?.map(|b| b.0).ok_or("当前文件夹尚未初始化批次")?;
+    db::get_batch_items(&conn, bid)
+}
+
+/// 检测 template/ 目录下第一个 PDF 模板文件（相对路径或 null）
+#[tauri::command]
+pub fn get_template_path(folder: String) -> Result<Option<String>, String> {
+    let tpl_dir = Path::new(&folder).join(db::TEMPLATE_DIR);
+    if !tpl_dir.exists() { return Ok(None); }
+    let mut names: Vec<String> = fs::read_dir(&tpl_dir)
+        .map_err(|e| format!("读取 template 目录失败: {e}"))?
+        .flatten()
+        .filter_map(|e| {
+            let p = e.path();
+            if p.extension().map(|x| x.to_string_lossy().to_lowercase()) == Some("pdf".into()) {
+                Some(p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
+            } else { None }
+        })
+        .collect();
+    names.sort();
+    Ok(names.first().map(|n| format!("{}/{}", db::TEMPLATE_DIR, n)))
+}

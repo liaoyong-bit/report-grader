@@ -6,6 +6,7 @@ use std::path::Path;
 pub const DATA_DIR: &str = "data";
 pub const SOURCE_DIR: &str = "source_files";
 pub const OUTPUT_DIR: &str = "output";
+pub const TEMPLATE_DIR: &str = "template";
 pub const DB_NAME: &str = "grading.db";
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
@@ -73,6 +74,18 @@ pub fn open(folder: &str) -> Result<Connection, String> {
              submitted_at TEXT,
              created_at TEXT DEFAULT (datetime('now','localtime')),
              updated_at TEXT DEFAULT (datetime('now','localtime'))
+         );
+         CREATE TABLE IF NOT EXISTS batch_items(
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             batch_id INTEGER NOT NULL,
+             item_index INTEGER NOT NULL,
+             item_name TEXT NOT NULL,
+             max_score INTEGER DEFAULT 0,
+             score_page INTEGER DEFAULT 0,
+             score_x REAL DEFAULT 0,
+             title_rect TEXT DEFAULT '{}',
+             total_region TEXT DEFAULT '{}',
+             UNIQUE(batch_id, item_index)
          );
          CREATE TABLE IF NOT EXISTS report_items(
              id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -331,4 +344,63 @@ pub fn list_all_grading(conn: &Connection, batch_id: i64) -> Result<Vec<GradeRow
         })
         .map_err(|e| format!("查询成绩失败: {e}"))?;
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| format!("解析成绩失败: {e}"))
+}
+
+/// 批次评分项模板（固化：题名/满分/统分区/每题打分区等）
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+pub struct BatchItem {
+    pub item_index: i32,
+    pub item_name: String,
+    #[serde(default)]
+    pub max_score: i32,
+    #[serde(default)]
+    pub score_page: i32,
+    #[serde(default)]
+    pub score_x: f64,
+    #[serde(default)]
+    pub title_rect: String,
+    #[serde(default)]
+    pub total_region: String,
+}
+
+pub fn save_batch_items(conn: &Connection, batch_id: i64, items: &[BatchItem]) -> Result<(), String> {
+    conn.execute("DELETE FROM batch_items WHERE batch_id=?1", params![batch_id])
+        .map_err(|e| format!("清空评分项失败: {e}"))?;
+    let mut st = conn
+        .prepare(
+            "INSERT INTO batch_items(batch_id,item_index,item_name,max_score,score_page,score_x,title_rect,total_region)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+        )
+        .map_err(|e| format!("准备评分项写入失败: {e}"))?;
+    for it in items {
+        st.execute(params![
+            batch_id, it.item_index, it.item_name, it.max_score,
+            it.score_page, it.score_x, it.title_rect, it.total_region
+        ])
+        .map_err(|e| format!("写入评分项失败: {e}"))?;
+    }
+    Ok(())
+}
+
+pub fn get_batch_items(conn: &Connection, batch_id: i64) -> Result<Vec<BatchItem>, String> {
+    let mut st = conn
+        .prepare(
+            "SELECT item_index,item_name,max_score,score_page,score_x,title_rect,total_region
+             FROM batch_items WHERE batch_id=?1 ORDER BY item_index",
+        )
+        .map_err(|e| format!("准备评分项查询失败: {e}"))?;
+    let rows = st
+        .query_map(params![batch_id], |r| {
+            Ok(BatchItem {
+                item_index: r.get(0)?,
+                item_name: r.get(1)?,
+                max_score: r.get(2)?,
+                score_page: r.get(3)?,
+                score_x: r.get(4)?,
+                title_rect: r.get(5)?,
+                total_region: r.get(6)?,
+            })
+        })
+        .map_err(|e| format!("查询评分项失败: {e}"))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| format!("解析评分项失败: {e}"))
 }
