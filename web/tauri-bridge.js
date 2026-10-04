@@ -94,7 +94,7 @@
         const bytes = await file.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
         r.pdf = pdf; r.bytes = bytes; r.file = file;
-      } catch(e) { app.setErr('读取报告失败: ' + e); }
+      } catch(e) { r.pdfError = String(e && e.message ? e.message : e); app.setErr('读取报告失败: ' + e); }
     }
     return origSelect.call(this, idx);
   };
