@@ -705,6 +705,7 @@ async function exportOne(r){
     const page = pdfDoc.getPage(it.pageIndex);
     const W = page.getWidth();
     const baseX = (it.titleX!=null && it.score_x) ? (it.titleX + it.score_x) : (W - 70);
+    const y = it.titleY;            // PDF 用户空间 y(距底)，直接使用（修复坐标偏移）
     const label = '得分：';
     if(cjkFont){
       const labelW = cjkFont.widthOfTextAtSize(label, 11);
@@ -1036,7 +1037,28 @@ async function ensureItemsSetup(){
     return;
   }
   const tplPath = await window.__bridge.getTemplatePath(S.folder).catch(()=>null);
-  if(!tplPath){ setErr('请先把空白模板 PDF 放到所选文件夹的 template/ 子目录，再重新载入'); return; }
+  if(!tplPath){
+    // 无模板：显示引导遮罩，提示教师把空白模板 PDF 放到 template/ 子目录
+    const g=document.getElementById('tplGuideMask');
+    if(g){
+      const gp=document.getElementById('tplGuidePath');
+      if(gp) gp.textContent = S.folder.replace(/[\\\/]+$/,'') + '\\template\\';
+      g.style.display='flex';
+      const ok=document.getElementById('btnTplGuideOk');
+      ok.onclick = async ()=>{
+        const tp = await window.__bridge.getTemplatePath(S.folder).catch(()=>null);
+        if(!tp){ setErr('还没检测到模板，请确认已放入 template/ 目录'); return; }
+        g.style.display='none';
+        S.tplPath=tp;
+        await openItemSetup();
+      };
+      const sk=document.getElementById('btnTplGuideSkip');
+      sk.onclick = ()=>{ g.style.display='none'; };
+    } else {
+      setErr('请先把空白模板 PDF 放到所选文件夹的 template/ 子目录，再重新载入');
+    }
+    return;
+  }
   S.tplPath = tplPath;
   await openItemSetup();
 }
