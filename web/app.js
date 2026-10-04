@@ -1083,6 +1083,10 @@ function renderTemplatePreview(){
   S_ITEMS=[]; S_TPL_RECTS=[]; S_TOTAL_RECT=null; S_TOTAL_MODE=false;
   if(el.btnTotalMode) el.btnTotalMode.style.background='#1a73e8';
   if(el.totalInfo) el.totalInfo.style.display='none';
+  const inner=document.createElement('div');
+  inner.style.position='relative'; inner.style.width='100%';
+  pre.appendChild(inner);
+  S.tplInner=inner;
   S.tplPdf.getPage(1).then(async (page1)=>{
     const pvp1 = page1.getViewport({scale:1});
     const availW = Math.max(300, pre.clientWidth-4);
@@ -1098,12 +1102,12 @@ function renderTemplatePreview(){
       canvas.width=vp.width; canvas.height=vp.height;
       canvas.style.position='absolute'; canvas.style.left='0'; canvas.style.top=totalH+'px';
       canvas.dataset.page=pi;
-      pre.appendChild(canvas);
+      inner.appendChild(canvas);
       await page.render({canvasContext:canvas.getContext('2d'), viewport:vp}).promise;
       pages[pi]={ canvas, vp, height: vp.height, offset: totalH };
       totalH += vp.height;
     }
-    pre.style.height=totalH+'px';
+    inner.style.height=totalH+'px';
     S.tplPages=pages; S.tplTotalH=totalH;
     S.tplVp=pages[1].vp; S.tplPage=pages[1];
     S.tplTextItems=await getPageText(page1);
@@ -1124,6 +1128,8 @@ function pageByAbsY(absY){
 function bindTemplateDrag(){
   const pre = el.tplPreview;
   let drag=null;
+  const xAbs=(e,r)=> e.clientX - r.left;
+  const yAbs=(e,r)=> e.clientY - r.top + pre.scrollTop;
   pre.onmousedown=(e)=>{
     const t=e.target;
     if(t && t.classList && (t.classList.contains('tpl-box')||t.classList.contains('tpl-score')) && !t.classList.contains('active') && t.dataset.idx!=null){
@@ -1132,20 +1138,20 @@ function bindTemplateDrag(){
       return;
     }
     const r=pre.getBoundingClientRect();
-    drag={mode:'new', x0:e.clientX-r.left, y0:e.clientY-r.top};
+    drag={mode:'new', x0:xAbs(e,r), y0:yAbs(e,r)};
   };
   pre.onmousemove=(e)=>{
     if(!drag) return;
     const r=pre.getBoundingClientRect();
     if(drag.mode==='new'){
-      const x=e.clientX-r.left, y=e.clientY-r.top;
+      const x=xAbs(e,r), y=yAbs(e,r);
       const box=Math.min(drag.x0,x), bbox=Math.min(drag.y0,y);
       const w=Math.abs(x-drag.x0), h=Math.abs(y-drag.y0);
       pre.querySelectorAll('.tpl-box.active').forEach(n=>n.remove());
       const d=document.createElement('div');
       d.className='tpl-box active';
       d.style.left=box+'px'; d.style.top=bbox+'px'; d.style.width=w+'px'; d.style.height=h+'px';
-      pre.appendChild(d);
+      (S.tplInner||pre).appendChild(d);
     } else {
       const rt=S_TPL_RECTS[drag.idx];
       if(!rt) return;
@@ -1153,7 +1159,6 @@ function bindTemplateDrag(){
       drag.x0=e.clientX; drag.y0=e.clientY;
       if(drag.mode==='score'){
         rt.scoreX = Math.max(0, Math.round(rt.scoreX + dx));
-        rt.scoreY = Math.max(0, Math.round(rt.scoreY + dy));
         renderScoreBoxes();
       } else {
         rt.x=Math.max(0, Math.round(rt.x+dx));
@@ -1166,7 +1171,7 @@ function bindTemplateDrag(){
     if(!drag) return;
     const r=pre.getBoundingClientRect();
     if(drag.mode==='new'){
-      const x0=drag.x0,y0=drag.y0,x=e.clientX-r.left,y=e.clientY-r.top;
+      const x0=drag.x0,y0=drag.y0,x=xAbs(e,r),y=yAbs(e,r);
       const box=Math.min(x0,x),bbox=Math.min(y0,y),w=Math.abs(x-x0),h=Math.abs(y-y0);
       if(w>=8 && h>=8){
         pre.querySelectorAll('.tpl-box.active').forEach(n=>n.remove());
@@ -1192,7 +1197,6 @@ function addTemplateBox(box,bbox,w,h){
   const rt={pageIndex:pi, x:box, y:bbox-off, w:w, h:h, text:'', item_name:'', max_score:20};
   const pageW = S.tplPages[pi].vp.width;
   rt.scoreX = pageW - 26;
-  rt.scoreY = rt.y + rt.h/2;
   S_TPL_RECTS.push(rt);
   renderTitleBoxes(); renderItemList(); renderScoreBoxes();
   runOcr(rt).then(name=>{
@@ -1202,6 +1206,7 @@ function addTemplateBox(box,bbox,w,h){
 
 function renderTitleBoxes(){
   const pre = el.tplPreview;
+  const host = S.tplInner||pre;
   pre.querySelectorAll('.tpl-box:not(.active)').forEach(n=>n.remove());
   S_TPL_RECTS.forEach((rt,i)=>{
     const off=S.tplPages[rt.pageIndex].offset;
@@ -1211,24 +1216,24 @@ function renderTitleBoxes(){
     d.title='拖动可微调标题框位置';
     const idx=document.createElement('span'); idx.className='tpl-idx'; idx.textContent=(i+1)+'.';
     d.appendChild(idx);
-    pre.appendChild(d);
+    host.appendChild(d);
   });
 }
 
 function renderScoreBoxes(){
   const pre = el.tplPreview;
+  const host = S.tplInner||pre;
   pre.querySelectorAll('.tpl-score').forEach(n=>n.remove());
   S_TPL_RECTS.forEach((rt,i)=>{
     const off=S.tplPages[rt.pageIndex].offset;
     const d=document.createElement('div'); d.className='tpl-score'; d.dataset.idx=i;
-    d.style.left=(rt.scoreX-26)+'px'; d.style.top=(off+rt.scoreY-2)+'px'; d.style.width='52px'; d.style.height=(rt.h+6)+'px';
+    d.style.left=(rt.scoreX-13)+'px'; d.style.top=(off+rt.y)+'px'; d.style.width='26px'; d.style.height=(rt.h)+'px';
     d.style.pointerEvents='auto'; d.style.cursor='ew-resize';
-    d.title='拖动可调整打分区位置';
-    pre.appendChild(d);
+    d.title='拖动可左右调整打分区位置';
+    host.appendChild(d);
   });
 }
 
-// 题名识别：优先 OCR，未就绪回退文本层；rt 含页信息
 async function runOcr(rt){
   if(window.Tesseract){
     try{
@@ -1245,18 +1250,19 @@ async function runOcr(rt){
 }
 function renderTotalBox(){
   const pre = el.tplPreview;
+  const host = S.tplInner||pre;
   pre.querySelectorAll('.tpl-total,.tpl-total-dot').forEach(n=>n.remove());
   if(!S_TOTAL_RECT) return;
   const t=S_TOTAL_RECT;
   const d=document.createElement('div'); d.className='tpl-total';
   d.style.left=t.x+'px'; d.style.top=t.y+'px'; d.style.width=t.w+'px'; d.style.height=t.h+'px';
-  pre.appendChild(d);
+  host.appendChild(d);
   const n=Math.max(1,t.count);
   for(let i=0;i<n;i++){
     const cx=t.x+(i+0.5)*t.w/n;
     const dot=document.createElement('div'); dot.className='tpl-total-dot';
     dot.style.left=cx+'px'; dot.style.top=t.y+'px';
-    pre.appendChild(dot);
+    host.appendChild(dot);
   }
   el.totalInfo.style.display='block';
   el.totalInfo.innerHTML='统分区已框选（绿色框），共 <b>'+n+'</b> 个分数位置（各题分+总分）按等分分布。数量：';
@@ -1265,7 +1271,6 @@ function renderTotalBox(){
   el.totalInfo.appendChild(inp);
   el.totalInfo.appendChild(document.createTextNode(' 个（改后点任意处应用）'));
 }
-
 function renderItemList(){
   const out=[];
   S_TPL_RECTS.forEach((rt,i)=>{

@@ -96,14 +96,16 @@
   }
   #itemBox {
     background: #fff; border-radius: 10px; padding: 20px 24px; width: 860px; max-width: 94vw; max-height: 90vh;
-    display: flex; flex-direction: column; box-shadow: 0 8px 30px rgba(0,0,0,.3); overflow: auto;
+    display: flex; flex-direction: column; box-shadow: 0 8px 30px rgba(0,0,0,.3); overflow: hidden;
   }
   #itemBox h2 { font-size: 16px; color: #2b3a55; margin-bottom: 6px; }
   #itemBox .tiphint { font-size: 12px; color: #666; margin: 0 0 10px; }
   #tplPreview {
-    position: relative; border: 1px solid #dde1e6; border-radius: 6px; overflow: hidden;
-    background: #f4f6f9; margin-bottom: 12px; cursor: crosshair; flex: 0 0 auto; min-height: 200px;
+    position: relative; border: 1px solid #dde1e6; border-radius: 6px; overflow: auto;
+    background: #f4f6f9; margin-bottom: 12px; cursor: crosshair; flex: 1 1 0; min-height: 160px;
   }
+  #itemList { max-height: 170px; overflow: auto; flex: 0 0 auto; margin-bottom: 10px; }
+  #itemBox .iops { flex: 0 0 auto; }
   #tplPreview canvas { display: block; width: 100%; height: auto; }
   #tplPreview .tpl-box {
     position: absolute; border: 2px solid #e07b39; background: rgba(224,123,57,.12); box-sizing: border-box; pointer-events: none;
@@ -315,7 +317,7 @@
         <button id="btnTotalMode" style="background:#1a73e8;color:#fff">框选统分区</button>
         <button id="btnItemPickTpl">更换模板</button>
         <button id="btnItemAdd">＋ 手动添加一项</button>
-        <button id="btnItemSave">保存评分项</button>
+        <button id="btnItemSave" style="background:#2e7d32;color:#fff">确定并保存（完成）</button>
         <button id="btnItemCancel">跳过</button>
         <span class="ino-note">框选题后核对题名/满分/打分区蓝框</span>
       </div>
