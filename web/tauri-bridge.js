@@ -14,8 +14,10 @@
   const app = window.__app;
 
   // 后端返回的字节构造 file-like 对象（喂给 app.js 的加载/渲染）
-  function toFile(name, path, bytes){
-    const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  // Tauri invoke 返回的 Vec<u8> 在 JS 里是 number[]（非 Uint8Array），需先转换
+  function toFile(name, path, data){
+    const u8 = data instanceof Uint8Array ? data : new Uint8Array(data);
+    const ab = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
     return { name, _path: path, arrayBuffer: async () => ab };
   }
 
