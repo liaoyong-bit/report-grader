@@ -1207,7 +1207,8 @@ function parseTitleScore(txt){
 function addTemplateBox(box,bbox,w,h){
   const pi = pageByAbsY(bbox);
   const off = S.tplPages[pi].offset;
-  const rt={pageIndex:pi, x:box, y:bbox-off, w:w, h:h, text:'', item_name:'', max_score:20};
+  const rt={pageIndex:pi, x:box, y:bbox-off, w:w, h:h, text:'', item_name:'', max_score:20, title_img:''};
+  rt.title_img = cropTemplate(rt) || '';   // 存标题裁剪图，供扫描版找图定位
   const pageW = S.tplPages[pi].vp.width;
   rt.scoreX = pageW - 80;   // 打分区默认落在文字区最右（页面右侧留边距），可拖动微调
   el.tplPreview.querySelectorAll('.tpl-box.active').forEach(n=>n.remove());   // 清理拖选残留临时框
@@ -1430,7 +1431,7 @@ el.btnItemSave.onclick=async ()=>{
   S_TPL_RECTS.forEach((rt,i)=>{
     items.push({ item_index:i, item_name:rt.item_name||('第'+(i+1)+'项'),
       max_score:rt.max_score||0, score_page:rt.pageIndex||0, score_x:Math.round((rt.scoreX||0)/(S.tplScale||1)),
-      title_rect:JSON.stringify({x:rt.x,y:rt.y,w:rt.w,h:rt.h}), total_region:'{}' });
+      title_rect:JSON.stringify({x:rt.x,y:rt.y,w:rt.w,h:rt.h}), total_region:'{}', title_img:rt.title_img||'' });
   });
   S_ITEMS.forEach((it,ix)=>{
     items.push({ item_index:S_TPL_RECTS.length+ix,

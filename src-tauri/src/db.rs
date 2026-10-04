@@ -71,6 +71,7 @@ pub fn open(folder: &str) -> Result<Connection, String> {
              draft TEXT DEFAULT '{}',
              final_scores TEXT DEFAULT '{}',
              teacher TEXT DEFAULT '',
+             locate_json TEXT DEFAULT '{}',
              submitted_at TEXT,
              created_at TEXT DEFAULT (datetime('now','localtime')),
              updated_at TEXT DEFAULT (datetime('now','localtime'))
@@ -85,6 +86,7 @@ pub fn open(folder: &str) -> Result<Connection, String> {
              score_x REAL DEFAULT 0,
              title_rect TEXT DEFAULT '{}',
              total_region TEXT DEFAULT '{}',
+             title_img TEXT DEFAULT '',
              UNIQUE(batch_id, item_index)
          );
          CREATE TABLE IF NOT EXISTS report_items(
@@ -98,7 +100,27 @@ pub fn open(folder: &str) -> Result<Connection, String> {
          );",
     )
     .map_err(|e| format!("建表失败: {e}"))?;
+    // 迁移：老库补新增列（新库已含）
+    ensure_column(&conn, "reports", "locate_json", "locate_json TEXT DEFAULT '{}'")?;
+    ensure_column(&conn, "batch_items", "title_img", "title_img TEXT DEFAULT ''")?;
     Ok(conn)
+}
+
+/// 若表缺少某列则 ALTER TABLE 补上（幂等迁移）
+fn ensure_column(conn: &Connection, table: &str, col: &str, ddl: &str) -> Result<(), String> {
+    let cnt: i64 = conn
+        .query_row(
+            &format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name=?1"),
+            [col],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("检查列失败: {e}"))?;
+    if cnt == 0 {
+        conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {ddl}"), [])
+            .map(|_| ())
+            .map_err(|e| format!("添加列 {table}.{col} 失败: {e}"))?;
+    }
+    Ok(())
 }
 
 /* ---------------- 批次 ---------------- */
@@ -361,6 +383,8 @@ pub struct BatchItem {
     pub title_rect: String,
     #[serde(default)]
     pub total_region: String,
+    #[serde(default)]
+    pub title_img: String,
 }
 
 pub fn save_batch_items(conn: &Connection, batch_id: i64, items: &[BatchItem]) -> Result<(), String> {
@@ -368,14 +392,14 @@ pub fn save_batch_items(conn: &Connection, batch_id: i64, items: &[BatchItem]) -
         .map_err(|e| format!("清空评分项失败: {e}"))?;
     let mut st = conn
         .prepare(
-            "INSERT INTO batch_items(batch_id,item_index,item_name,max_score,score_page,score_x,title_rect,total_region)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+            "INSERT INTO batch_items(batch_id,item_index,item_name,max_score,score_page,score_x,title_rect,total_region,title_img)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
         )
         .map_err(|e| format!("准备评分项写入失败: {e}"))?;
     for it in items {
         st.execute(params![
             batch_id, it.item_index, it.item_name, it.max_score,
-            it.score_page, it.score_x, it.title_rect, it.total_region
+            it.score_page, it.score_x, it.title_rect, it.total_region, it.title_img
         ])
         .map_err(|e| format!("写入评分项失败: {e}"))?;
     }
@@ -385,7 +409,7 @@ pub fn save_batch_items(conn: &Connection, batch_id: i64, items: &[BatchItem]) -
 pub fn get_batch_items(conn: &Connection, batch_id: i64) -> Result<Vec<BatchItem>, String> {
     let mut st = conn
         .prepare(
-            "SELECT item_index,item_name,max_score,score_page,score_x,title_rect,total_region
+            "SELECT item_index,item_name,max_score,score_page,score_x,title_rect,total_region,title_img
              FROM batch_items WHERE batch_id=?1 ORDER BY item_index",
         )
         .map_err(|e| format!("准备评分项查询失败: {e}"))?;
@@ -399,6 +423,7 @@ pub fn get_batch_items(conn: &Connection, batch_id: i64) -> Result<Vec<BatchItem
                 score_x: r.get(4)?,
                 title_rect: r.get(5)?,
                 total_region: r.get(6)?,
+                title_img: r.get::<_, Option<String>>(7)?.unwrap_or_default(),
             })
         })
         .map_err(|e| format!("查询评分项失败: {e}"))?;
