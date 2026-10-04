@@ -664,6 +664,7 @@ async function loadCJKFont(doc){
 }
 
 async function exportScoredPdf(){
+  try{
   const r = S.current;
   if(!r){ setErr('请先打开报告'); return; }
   if(!S.pdflibOk){ setErr('pdf-lib 未加载, 无法导出（检查 web/lib 目录）'); return; }
@@ -718,6 +719,10 @@ async function exportScoredPdf(){
   await deliverExport((r.name.replace(/\.pdf$/i,'') || 'report') + '_已批阅.pdf', blob);
   setErr('');
   setDetect('✅ 已导出带分PDF，文件保存在所选文件夹的 output/ 目录');
+  }catch(e){
+    setErr('导出失败: ' + (e && e.message ? e.message : e));
+    if(window.__bridge && window.__bridge.log){ window.__bridge.log('exportScoredPdf ERROR: ' + (e&&e.message?e.message:e)); }
+  }
 }
 el.btnExport.onclick = exportScoredPdf;
 
@@ -767,8 +772,9 @@ function gradesToTable(rows){
 function csvEscape(v){ v = String(v==null?'':v); return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; }
 function dateStamp(){ const d=new Date(); return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0'); }
 
-async function exportCsv(){
+async function exportExcel(){
   if(!S.reports.length){ setErr('还没有报告可导出'); return; }
+  if(!window.ExcelJS){ setErr('exceljs 未加载，无法导出Excel'); return; }
   let rows;
   try { rows = await fetchAllGrades(); } catch(e){ setErr('读取成绩失败: '+e); return; }
   const items = gradesToTable(rows);
@@ -776,16 +782,22 @@ async function exportCsv(){
   const head = ['学号','姓名','班级','批阅教师'];
   for(let i=0;i<n;i++) head.push('第'+(i+1)+'项');
   head.push('总分','满分','状态','文件名');
-  const lines = items.map(it=>[
-    it.no, it.name, it.cls, S.teacher||'',
-    ...it.scores.slice(0,n),
-    it.total, it.maxTotal||'', it.status, it.fname
-  ].map(csvEscape).join(','));
-  await deliverExport('全部成绩_'+dateStamp()+'.csv',
-    new Blob(['\ufeff'+head.join(',')+'\n'+lines.join('\n')+'\n'], {type:'text/csv;charset=utf-8'}));
-  setErr(''); setDetect('✅ 已导出全部成绩CSV（'+items.length+'人）');
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('全部成绩');
+  ws.addRow(head);
+  ws.getRow(1).font = { bold: true };
+  items.forEach(it=>{
+    const row = [it.no, it.name, it.cls, S.teacher||''];
+    for(let i=0;i<n;i++) row.push(it.scores[i]||'');
+    row.push(it.total, it.maxTotal||'', it.status, it.fname);
+    ws.addRow(row);
+  });
+  const buf = await wb.xlsx.writeBuffer();
+  await deliverExport('全部成绩_'+dateStamp()+'.xlsx',
+    new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+  setErr(''); setDetect('已导出全部成绩Excel（'+items.length+'人）');
 }
-el.btnSaveRecord.onclick = exportCsv;
+el.btnSaveRecord.onclick = exportExcel;
 
 /* —— 批阅概览（表格弹窗）与 帮助 —— */
 async function showOverview(){
@@ -815,6 +827,13 @@ function toggleHelp(){
   p.style.display = (p.style.display === 'none' || !p.style.display) ? 'block' : 'none';
 }
 el.btnHelp.onclick = toggleHelp;
+// 点帮助面板以外的任意位置即关闭
+document.addEventListener('click', (e)=>{
+  const p = el.helpPanel;
+  if(p && p.style.display === 'block' && !p.contains(e.target) && e.target !== el.btnHelp){
+    p.style.display = 'none';
+  }
+});
 
 async function exportJson(){
   const r = S.current; if(!r){ setErr('请先打开报告'); return; }
