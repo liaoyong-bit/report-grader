@@ -244,3 +244,18 @@ pub fn get_template_path(folder: String) -> Result<Option<String>, String> {
     names.sort();
     Ok(names.first().map(|n| format!("{}/{}", db::TEMPLATE_DIR, n)))
 }
+
+#[tauri::command]
+pub fn ocr_image(app: tauri::AppHandle, bytes: Vec<u8>) -> Result<String, String> {
+    let res = app.path().resource_dir().map_err(|e| e.to_string())?;
+    let tess_path = res.join("chi_sim.traineddata");
+    if !tess_path.exists() {
+        return Err(format!("未找到 OCR 语言包: {}", tess_path.display()));
+    }
+    let mut lt = leptess::LepTess::new(Some(&res), Some("chi_sim"))
+        .map_err(|e| format!("初始化 OCR 失败: {e}"))?;
+    let _ = lt.set_variable("tessedit_pageseg_mode", "6");
+    lt.set_image_from_mem(&bytes).map_err(|e| format!("读取图片失败: {e}"))?;
+    let txt = lt.get_utf8_text().map_err(|e| format!("识别失败: {e}"))?;
+    Ok(txt.trim().to_string())
+}

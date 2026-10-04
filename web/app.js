@@ -1233,18 +1233,29 @@ function renderScoreBoxes(){
 }
 
 async function runOcr(rt){
-  if(window.Tesseract){
+  if(window.__bridge && window.__bridge.ocrImage){
+    try{
+      const img = cropTemplate(rt);
+      if(img){ const t = await window.__bridge.ocrImage(dataUrlToBytes(img)); if(t && t.trim()) return t.trim(); }
+    }catch(e){ if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR 失败: '+String(e&&e.message||e)); }
+  } else if(window.Tesseract){
     try{
       const img = cropTemplate(rt);
       if(img){ const t = await recognizeOcr(img); if(t && t.trim()) return t.trim(); }
     }catch(e){ if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR 失败: '+String(e&&e.message||e)); }
-  } else if(window.__bridge && window.__bridge.log){
-    window.__bridge.log('Tesseract 未加载，回退文本层');
   }
   const hit=[];
   for(const it of (S.tplTextItems||[])){ const pt=S.tplVp.convertToViewportPoint(it.x,it.y); if(pt[0]>=rt.x&&pt[0]<=rt.x+rt.w&&pt[1]>=rt.y&&pt[1]<=rt.y+rt.h) hit.push(it); }
   hit.sort((a,b)=>a.yTop-b.yTop);
   return hit.map(i=>i.str.trim()).filter(Boolean).join(' ');
+}
+
+function dataUrlToBytes(dataUrl){
+  const b64 = String(dataUrl).split(',')[1] || '';
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+  return arr;
 }
 function renderTotalBox(){
   const pre = el.tplPreview;
