@@ -448,7 +448,7 @@ function addOverlays(r, wrap, pageIndex, vp, page){
   // 标题行得分：格式"得分：N"，放在PDF文字区最右端内侧(不溢出页面)。文本由 fillOverlays 统一填。
   a.items.forEach((it, i)=>{
     if(it.pageIndex===pageIndex && it.titleY!=null){
-      const rightX = (it.titleX!=null && it.score_x) ? (it.titleX + it.score_x) : (pageWidthPt - 52);
+      const rightX = (it.score_x!=null) ? it.score_x : (pageWidthPt - 52);
       const pt = px2(rightX, it.titleY, vp);
       const ov = document.createElement('div');
       ov.className = 'ov-score ov-title-score';
@@ -704,7 +704,7 @@ async function exportOne(r){
     if(it.titleY==null) continue;
     const page = pdfDoc.getPage(it.pageIndex);
     const W = page.getWidth();
-    const baseX = (it.titleX!=null && it.score_x) ? (it.titleX + it.score_x) : (W - 70);
+    const baseX = (it.score_x!=null) ? it.score_x : (W - 70);
     const y = it.titleY;            // PDF 用户空间 y(距底)，直接使用（修复坐标偏移）
     const label = '得分：';
     if(cjkFont){
@@ -1083,21 +1083,42 @@ function renderTemplatePreview(){
   S_ITEMS=[]; S_TPL_RECTS=[]; S_TOTAL_RECT=null; S_TOTAL_MODE=false;
   if(el.btnTotalMode) el.btnTotalMode.style.background='#1a73e8';
   if(el.totalInfo) el.totalInfo.style.display='none';
-  S.tplPdf.getPage(1).then(async (page)=>{
-    const pvp1 = page.getViewport({scale:1});
+  S.tplPdf.getPage(1).then(async (page1)=>{
+    const pvp1 = page1.getViewport({scale:1});
     const availW = Math.max(300, pre.clientWidth-4);
     const scale = availW / pvp1.width;
-    const vp = page.getViewport({scale});
-    const canvas=document.createElement('canvas');
-    canvas.width=vp.width; canvas.height=vp.height;
-    pre.style.height=vp.height+'px';
-    pre.appendChild(canvas);
-    S.tplVp=vp; S.tplPage=page;
-    await page.render({canvasContext:canvas.getContext('2d'), viewport:vp}).promise;
-    S.tplTextItems=await getPageText(page);
+    S.tplScale = scale;
+    const numPages = S.tplPdf.numPages;
+    const pages = [];
+    let totalH = 0;
+    for(let pi=1; pi<=numPages; pi++){
+      const page = await S.tplPdf.getPage(pi);
+      const vp = page.getViewport({scale});
+      const canvas=document.createElement('canvas');
+      canvas.width=vp.width; canvas.height=vp.height;
+      canvas.style.position='absolute'; canvas.style.left='0'; canvas.style.top=totalH+'px';
+      canvas.dataset.page=pi;
+      pre.appendChild(canvas);
+      await page.render({canvasContext:canvas.getContext('2d'), viewport:vp}).promise;
+      pages[pi]={ canvas, vp, height: vp.height, offset: totalH };
+      totalH += vp.height;
+    }
+    pre.style.height=totalH+'px';
+    S.tplPages=pages; S.tplTotalH=totalH;
+    S.tplVp=pages[1].vp; S.tplPage=pages[1];
+    S.tplTextItems=await getPageText(page1);
     bindTemplateDrag();
     renderItemList();
+    if(window.__bridge && window.__bridge.log) window.__bridge.log('模板渲染完成 页数='+numPages+' 高='+Math.round(totalH));
   }).catch(e=>setErr('渲染模板失败: '+e));
+}
+
+function pageByAbsY(absY){
+  const ps=S.tplPages; if(!ps) return 1;
+  for(let pi=1; pi<ps.length; pi++){
+    if(absY>=ps[pi].offset && absY < ps[pi].offset+ps[pi].height) return pi;
+  }
+  return Math.max(1, (ps?ps.length-1:1));
 }
 
 function bindTemplateDrag(){
@@ -1105,8 +1126,9 @@ function bindTemplateDrag(){
   let drag=null;
   pre.onmousedown=(e)=>{
     const t=e.target;
-    if(t && t.classList && t.classList.contains('tpl-box') && !t.classList.contains('active') && t.dataset.idx!=null){
-      drag={mode:'move', idx:parseInt(t.dataset.idx,10), x0:e.clientX, y0:e.clientY};
+    if(t && t.classList && (t.classList.contains('tpl-box')||t.classList.contains('tpl-score')) && !t.classList.contains('active') && t.dataset.idx!=null){
+      const isScore = t.classList.contains('tpl-score');
+      drag={mode:isScore?'score':'move', idx:parseInt(t.dataset.idx,10), x0:e.clientX, y0:e.clientY};
       return;
     }
     const r=pre.getBoundingClientRect();
@@ -1129,9 +1151,15 @@ function bindTemplateDrag(){
       if(!rt) return;
       const dx=e.clientX-drag.x0, dy=e.clientY-drag.y0;
       drag.x0=e.clientX; drag.y0=e.clientY;
-      rt.x=Math.max(0, Math.round(rt.x+dx));
-      rt.y=Math.max(0, Math.round(rt.y+dy));
-      renderTitleBoxes(); renderScoreBoxes();
+      if(drag.mode==='score'){
+        rt.scoreX = Math.max(0, Math.round(rt.scoreX + dx));
+        rt.scoreY = Math.max(0, Math.round(rt.scoreY + dy));
+        renderScoreBoxes();
+      } else {
+        rt.x=Math.max(0, Math.round(rt.x+dx));
+        rt.y=Math.max(0, Math.round(rt.y+dy));
+        renderTitleBoxes(); renderScoreBoxes();
+      }
     }
   };
   pre.onmouseup=(e)=>{
@@ -1158,23 +1186,27 @@ function bindTemplateDrag(){
   };
 }
 
-// 框选标题：记录矩形 + 提取题名 + 画标题框/打分区蓝框
 function addTemplateBox(box,bbox,w,h){
-  S_TPL_RECTS.push({pageIndex:0, x:box, y:bbox, w:w, h:h, text:'', item_name:'', max_score:20});
+  const pi = pageByAbsY(bbox);
+  const off = S.tplPages[pi].offset;
+  const rt={pageIndex:pi, x:box, y:bbox-off, w:w, h:h, text:'', item_name:'', max_score:20};
+  const pageW = S.tplPages[pi].vp.width;
+  rt.scoreX = pageW - 26;
+  rt.scoreY = rt.y + rt.h/2;
+  S_TPL_RECTS.push(rt);
   renderTitleBoxes(); renderItemList(); renderScoreBoxes();
-  runOcr(box,bbox,w,h).then(name=>{
-    const rt=S_TPL_RECTS[S_TPL_RECTS.length-1];
+  runOcr(rt).then(name=>{
     if(rt && name && name.trim()){ rt.item_name=name.trim(); renderItemList(); }
   }).catch(()=>{});
 }
 
-// 标题框（橙，可拖动微调）
 function renderTitleBoxes(){
   const pre = el.tplPreview;
   pre.querySelectorAll('.tpl-box:not(.active)').forEach(n=>n.remove());
   S_TPL_RECTS.forEach((rt,i)=>{
+    const off=S.tplPages[rt.pageIndex].offset;
     const d=document.createElement('div'); d.className='tpl-box'; d.dataset.idx=i;
-    d.style.left=rt.x+'px'; d.style.top=rt.y+'px'; d.style.width=rt.w+'px'; d.style.height=rt.h+'px';
+    d.style.left=rt.x+'px'; d.style.top=(off+rt.y)+'px'; d.style.width=rt.w+'px'; d.style.height=rt.h+'px';
     d.style.pointerEvents='auto'; d.style.cursor='move';
     d.title='拖动可微调标题框位置';
     const idx=document.createElement('span'); idx.className='tpl-idx'; idx.textContent=(i+1)+'.';
@@ -1183,28 +1215,31 @@ function renderTitleBoxes(){
   });
 }
 
-// 打分区蓝框：同一固定列（所有题竖向对齐）
 function renderScoreBoxes(){
   const pre = el.tplPreview;
   pre.querySelectorAll('.tpl-score').forEach(n=>n.remove());
-  const colX = S.tplVp.width - 52;
-  S_TPL_RECTS.forEach(rt=>{
-    const d=document.createElement('div'); d.className='tpl-score';
-    d.style.left=(colX-26)+'px'; d.style.top=(rt.y-2)+'px'; d.style.width='52px'; d.style.height=(rt.h+6)+'px';
+  S_TPL_RECTS.forEach((rt,i)=>{
+    const off=S.tplPages[rt.pageIndex].offset;
+    const d=document.createElement('div'); d.className='tpl-score'; d.dataset.idx=i;
+    d.style.left=(rt.scoreX-26)+'px'; d.style.top=(off+rt.scoreY-2)+'px'; d.style.width='52px'; d.style.height=(rt.h+6)+'px';
+    d.style.pointerEvents='auto'; d.style.cursor='ew-resize';
+    d.title='拖动可调整打分区位置';
     pre.appendChild(d);
   });
 }
 
-// 题名识别：优先 OCR，未就绪回退文本层
-async function runOcr(box,bbox,w,h){
+// 题名识别：优先 OCR，未就绪回退文本层；rt 含页信息
+async function runOcr(rt){
   if(window.Tesseract){
     try{
-      const img = cropTemplate(box,bbox,w,h);
+      const img = cropTemplate(rt);
       if(img){ const t = await recognizeOcr(img); if(t && t.trim()) return t.trim(); }
-    }catch(e){ /* 回退文本层 */ }
+    }catch(e){ if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR 失败: '+String(e&&e.message||e)); }
+  } else if(window.__bridge && window.__bridge.log){
+    window.__bridge.log('Tesseract 未加载，回退文本层');
   }
   const hit=[];
-  for(const it of (S.tplTextItems||[])){ const pt=S.tplVp.convertToViewportPoint(it.x,it.y); if(pt[0]>=box&&pt[0]<=box+w&&pt[1]>=bbox&&pt[1]<=bbox+h) hit.push(it); }
+  for(const it of (S.tplTextItems||[])){ const pt=S.tplVp.convertToViewportPoint(it.x,it.y); if(pt[0]>=rt.x&&pt[0]<=rt.x+rt.w&&pt[1]>=rt.y&&pt[1]<=rt.y+rt.h) hit.push(it); }
   hit.sort((a,b)=>a.yTop-b.yTop);
   return hit.map(i=>i.str.trim()).filter(Boolean).join(' ');
 }
@@ -1241,9 +1276,9 @@ function renderItemList(){
     name.oninput=()=>{ rt.item_name=name.value; };
     const max=document.createElement('input'); max.type='number'; max.min='0'; max.value=rt.max_score; max.placeholder='满分';
     max.oninput=()=>{ rt.max_score=parseInt(max.value,10)||0; };
-    const off=document.createElement('input'); off.type='number'; off.min='0'; off.value=rt.score_x||0; off.placeholder='打分区偏移';
+    const off=document.createElement('input'); off.type='number'; off.min='0'; off.value=Math.round(rt.scoreX||0); off.placeholder='打分区列px';
     off.title='标题向右偏移多少是打分区';
-    off.oninput=()=>{ rt.score_x=parseInt(off.value,10)||0; renderScoreBoxes(); };
+    off.oninput=()=>{ rt.scoreX=parseInt(off.value,10)||0; renderScoreBoxes(); };
     const del=document.createElement('button'); del.textContent='删';
     del.onclick=()=>{ S_TPL_RECTS.splice(i,1); renderItemList(); renderScoreBoxes(); };
     div.appendChild(no); div.appendChild(name); div.appendChild(max); div.appendChild(off); div.appendChild(del);
@@ -1281,7 +1316,7 @@ el.btnItemSave.onclick=async ()=>{
   const items=[];
   S_TPL_RECTS.forEach((rt,i)=>{
     items.push({ item_index:i, item_name:rt.item_name||guessName(rt.text)||('第'+(i+1)+'项'),
-      max_score:rt.max_score||0, score_page:0, score_x:rt.score_x||0,
+      max_score:rt.max_score||0, score_page:rt.pageIndex||0, score_x:Math.round((rt.scoreX||0)/(S.tplScale||1)),
       title_rect:JSON.stringify({x:rt.x,y:rt.y,w:rt.w,h:rt.h}), total_region:'{}' });
   });
   S_ITEMS.forEach((it,ix)=>{
@@ -1323,14 +1358,15 @@ async function recognizeOcr(img){
   const { data } = await w.recognize(img);
   return (data && data.text) || '';
 }
-function cropTemplate(box,bbox,w,h){
-  const canvas = el.tplPreview.querySelector('canvas');
-  if(!canvas) return null;
+function cropTemplate(rt){
+  const ps=S.tplPages; if(!ps) return null;
+  const pg=ps[rt.pageIndex]; if(!pg || !pg.canvas) return null;
+  const canvas = pg.canvas;
   const pad=3;
   const out=document.createElement('canvas');
-  out.width=Math.max(4, Math.round(w+pad*2));
-  out.height=Math.max(4, Math.round(h+pad*2));
-  try{ out.getContext('2d').drawImage(canvas, box-pad, bbox-pad, w+pad*2, h+pad*2, 0, 0, out.width, out.height); }catch(e){ return null; }
+  out.width=Math.max(4, Math.round(rt.w+pad*2));
+  out.height=Math.max(4, Math.round(rt.h+pad*2));
+  try{ out.getContext('2d').drawImage(canvas, rt.x-pad, rt.y-pad, rt.w+pad*2, rt.h+pad*2, 0, 0, out.width, out.height); }catch(e){ return null; }
   return out.toDataURL('image/png');
 }
 // 选择模板 PDF（系统对话框）→ 复制到 template/ → 打开框选
