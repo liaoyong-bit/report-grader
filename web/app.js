@@ -1089,6 +1089,7 @@ function renderTemplatePreview(){
   inner.style.position='relative'; inner.style.width='100%';
   pre.appendChild(inner);
   S.tplInner=inner;
+  S.tplTextCache={};   // 重置每页文本层缓存
   renderItemList();   // 渲染前先显示表格（含空占位），避免"没有表格"的观感
   S.tplPdf.getPage(1).then(async (page1)=>{
     const pvp1 = page1.getViewport({scale:1});
@@ -1238,20 +1239,39 @@ function renderScoreBoxes(){
   });
 }
 
+async function textLayerMatch(rt){
+  try{
+    if(!S.tplPdf || !S.tplPages) return '';
+    if(!S.tplTextCache) S.tplTextCache={};
+    if(!S.tplTextCache[rt.pageIndex]){
+      S.tplTextCache[rt.pageIndex] = await getPageText(await S.tplPdf.getPage(rt.pageIndex));
+    }
+    const vp = S.tplPages[rt.pageIndex].vp;
+    const items = S.tplTextCache[rt.pageIndex] || [];
+    const hit=[];
+    for(const it of items){
+      const p = vp.convertToViewportPoint(it.x, it.y);
+      if(p[0]>=rt.x-6 && p[0]<=rt.x+rt.w+6 && p[1]>=rt.y-6 && p[1]<=rt.y+rt.h+6) hit.push(it);
+    }
+    hit.sort((a,b)=>(a.yTop-b.yTop)||(a.x-b.x));
+    return hit.map(i=>i.str.trim()).filter(Boolean).join(' ');
+  }catch(e){ return ''; }
+}
 async function runOcr(rt){
+  // 优先文本层识别（模板有文本层时最准，不依赖挂起的 OCR worker）
+  try{
+    const txt = await textLayerMatch(rt);
+    if(txt && txt.trim()) return txt.trim();
+  }catch(e){}
+  // OCR worker 备用（扫描版无文本层时）
   if(window.Tesseract){
     try{
       const img = cropTemplate(rt);
       if(img){ const t = await recognizeOcr(img); if(t && t.trim()) return t.trim(); }
       if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR 返回空');
     }catch(e){ if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR 失败: '+String(e&&e.message||e)); }
-  } else if(window.__bridge && window.__bridge.log){
-    window.__bridge.log('Tesseract 未加载，回退文本层');
   }
-  const hit=[];
-  for(const it of (S.tplTextItems||[])){ const pt=S.tplVp.convertToViewportPoint(it.x,it.y); if(pt[0]>=rt.x&&pt[0]<=rt.x+rt.w&&pt[1]>=rt.y&&pt[1]<=rt.y+rt.h) hit.push(it); }
-  hit.sort((a,b)=>a.yTop-b.yTop);
-  return hit.map(i=>i.str.trim()).filter(Boolean).join(' ');
+  return '';
 }
 async function ensureOcrWorker(){
   if(S_ocrWorker) return S_ocrWorker;
