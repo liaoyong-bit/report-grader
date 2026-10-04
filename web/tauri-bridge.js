@@ -94,6 +94,7 @@
       buildReports(sync);
       if(sync.unmatched && sync.unmatched.length){ app.showUnmatched(sync.unmatched); }
       app.setDetect('已同步批次' + (sync.added ? '，新增 ' + sync.added + ' 份' : ''));
+      await app.ensureItemsSetup();
       if(app.S.reports.length){ app.selectReport(0); }
     } catch(e) { app.setErr('⚠ ' + e); }
   };
@@ -111,6 +112,12 @@
       app.setDetect('✅ 已处理：' + item.name);
     } catch(e) { app.setErr('⚠ ' + e); }
   };
+
+  // —— 评分项模板：固化 / 读取 / 模板文件检测 / 读模板PDF
+  window.__bridge.saveBatchItems = async (folder, items) => { await invoke('save_batch_items', { folder, items }); };
+  window.__bridge.getBatchItems = async (folder) => { return await invoke('get_batch_items', { folder }); };
+  window.__bridge.getTemplatePath = async (folder) => { return await invoke('get_template_path', { folder }); };
+  window.__bridge.readPdf = async (folder, path) => { return await invoke('read_pdf', { folder, path }); };
 
   // —— 首次打开某份报告时从磁盘读入 PDF
   // 关键：app.js 里列表点击 li.onclick 与"下一份"逻辑调用的都是【全局 selectReport】，

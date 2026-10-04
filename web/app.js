@@ -64,6 +64,8 @@ const el = {
   btnOverview: $('btnOverview'), btnHelp: $('btnHelp'),
   helpPanel: $('helpPanel'),
   overviewMask: $('overviewMask'), overviewBody: $('overviewBody'), btnOverviewClose: $('btnOverviewClose'),
+  itemMask: $('itemMask'), tplPreview: $('tplPreview'), itemList: $('itemList'),
+  btnItemAdd: $('btnItemAdd'), btnItemSave: $('btnItemSave'), btnItemCancel: $('btnItemCancel'),
 };
 
 /* ==================== 批阅进度持久化（P0-1） ====================
@@ -983,6 +985,159 @@ el.btnUnmatchDone.onclick = ()=>{ el.unmatchMask.style.display='none'; };
 // —— 暴露给 tauri-bridge 的公共接口
 window.__app = { S, el, reportLabel, reportState, renderReportList, updateStats,
   selectReport, loadReports, saveState, initReportState, openWizard, closeWizard,
-  showUnmatched, setFile, setDetect, setErr, downloadBlob, buildRecord };
+  showUnmatched, setFile, setDetect, setErr, downloadBlob, buildRecord,
+  openItemSetup, ensureItemsSetup };
 
 //（注：内容由AI生成）
+/* ==================== 评分项模板设置（步骤一） ==================== */
+let S_ITEMS = [];        // 手动添加的项
+let S_TPL_RECTS = [];    // 模板框选矩形 {x,y,w,h,pageIndex,text,item_name,max_score}
+
+// 进入批次后：若还没有评分项模板则弹设置框；已有则直接用
+async function ensureItemsSetup(){
+  if(!window.__bridge || !window.__bridge.getBatchItems){ return; }
+  const items = await window.__bridge.getBatchItems(S.folder).catch(e=>{ setErr('⚠ '+e); return null; });
+  if(items && items.length){ S.itemsTemplate = items; return; }
+  const tplPath = await window.__bridge.getTemplatePath(S.folder).catch(()=>null);
+  if(!tplPath){ setErr('请先把空白模板 PDF 放到所选文件夹的 template/ 子目录，再重新载入'); return; }
+  S.tplPath = tplPath;
+  await openItemSetup();
+}
+
+async function openItemSetup(){
+  try{
+    if(!window.__bridge || !window.__bridge.readPdf){ setErr('仅 Tauri 模式支持评分项设置'); return; }
+    const bytes = await window.__bridge.readPdf(S.folder, S.tplPath);
+    const pdf = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+    S.tplPdf = pdf;
+    el.itemMask.style.display='flex';
+    renderTemplatePreview();
+  }catch(e){ setErr('加载模板失败: '+e); }
+}
+
+function renderTemplatePreview(){
+  const pre = el.tplPreview;
+  pre.innerHTML='';
+  S_ITEMS=[]; S_TPL_RECTS=[];
+  S.tplPdf.getPage(1).then(async (page)=>{
+    const pvp1 = page.getViewport({scale:1});
+    const availW = Math.max(300, pre.clientWidth-4);
+    const scale = availW / pvp1.width;
+    const vp = page.getViewport({scale});
+    const canvas=document.createElement('canvas');
+    canvas.width=vp.width; canvas.height=vp.height;
+    pre.style.height=vp.height+'px';
+    pre.appendChild(canvas);
+    S.tplVp=vp; S.tplPage=page;
+    await page.render({canvasContext:canvas.getContext('2d'), viewport:vp}).promise;
+    S.tplTextItems=await getPageText(page);
+    bindTemplateDrag();
+    renderItemList();
+  }).catch(e=>setErr('渲染模板失败: '+e));
+}
+
+function bindTemplateDrag(){
+  const pre = el.tplPreview;
+  let drag=null;
+  pre.onmousedown=(e)=>{
+    const r=pre.getBoundingClientRect();
+    drag={x0:e.clientX-r.left, y0:e.clientY-r.top};
+  };
+  pre.onmousemove=(e)=>{
+    if(!drag) return;
+    const r=pre.getBoundingClientRect();
+    const x=e.clientX-r.left, y=e.clientY-r.top;
+    const box=Math.min(drag.x0,x), bbox=Math.min(drag.y0,y);
+    const w=Math.abs(x-drag.x0), h=Math.abs(y-drag.y0);
+    pre.querySelectorAll('.tpl-box.active').forEach(n=>n.remove());
+    const d=document.createElement('div');
+    d.className='tpl-box active';
+    d.style.left=box+'px'; d.style.top=bbox+'px'; d.style.width=w+'px'; d.style.height=h+'px';
+    pre.appendChild(d);
+  };
+  pre.onmouseup=(e)=>{
+    if(!drag) return;
+    const r=pre.getBoundingClientRect();
+    const x0=drag.x0,y0=drag.y0,x=e.clientX-r.left,y=e.clientY-r.top;
+    drag=null;
+    const box=Math.min(x0,x),bbox=Math.min(y0,y),w=Math.abs(x-x0),h=Math.abs(y-y0);
+    if(w<8||h<8){ pre.querySelectorAll('.tpl-box.active').forEach(n=>n.remove()); return; }
+    pre.querySelectorAll('.tpl-box.active').forEach(n=>n.remove());
+    addTemplateBox(box,bbox,w,h);
+  };
+}
+
+// 框选完成：记录矩形 + 从文本层提取框内文字 -> 加入列表
+function addTemplateBox(box,bbox,w,h){
+  const vp=S.tplVp;
+  const hit=[];
+  for(const it of (S.tplTextItems||[])){
+    const pt=vp.convertToViewportPoint(it.x, it.y);
+    if(pt[0]>=box && pt[0]<=box+w && pt[1]>=bbox && pt[1]<=bbox+h) hit.push(it);
+  }
+  hit.sort((a,b)=>a.yTop-b.yTop);
+  const text=hit.map(i=>i.str.trim()).filter(Boolean).join(' ');
+  S_TPL_RECTS.push({pageIndex:0, x:box, y:bbox, w:w, h:h, text:text, item_name:'', max_score:20});
+  pre.querySelectorAll('.tpl-box').forEach(n=>n.classList.remove('active'));
+  renderItemList();
+}
+
+function renderItemList(){
+  const out=[];
+  S_TPL_RECTS.forEach((rt,i)=>{
+    const div=document.createElement('div'); div.className='irow';
+    const no=document.createElement('span'); no.className='ino'; no.textContent=(i+1)+'.';
+    const name=document.createElement('input'); name.type='text';
+    name.value=rt.item_name||guessName(rt.text); name.placeholder='题名';
+    name.oninput=()=>{ rt.item_name=name.value; };
+    const max=document.createElement('input'); max.type='number'; max.min='0'; max.value=rt.max_score; max.placeholder='满分';
+    max.oninput=()=>{ rt.max_score=parseInt(max.value,10)||0; };
+    const del=document.createElement('button'); del.textContent='删';
+    del.onclick=()=>{ S_TPL_RECTS.splice(i,1); renderItemList(); };
+    div.appendChild(no); div.appendChild(name); div.appendChild(max); div.appendChild(del);
+    out.push(div);
+  });
+  S_ITEMS.forEach((it,ix)=>{
+    const div=document.createElement('div'); div.className='irow';
+    const no=document.createElement('span'); no.className='ino'; no.textContent='+';
+    const name=document.createElement('input'); name.type='text'; name.value=it.item_name; name.placeholder='题名';
+    name.oninput=()=>{ it.item_name=name.value; };
+    const max=document.createElement('input'); max.type='number'; max.min='0'; max.value=it.max_score; max.placeholder='满分';
+    max.oninput=()=>{ it.max_score=parseInt(max.value,10)||0; };
+    const del=document.createElement('button'); del.textContent='删';
+    del.onclick=()=>{ S_ITEMS.splice(ix,1); renderItemList(); };
+    div.appendChild(no); div.appendChild(name); div.appendChild(max); div.appendChild(del);
+    out.push(div);
+  });
+  el.itemList.innerHTML='';
+  out.forEach(n=>el.itemList.appendChild(n));
+}
+
+function guessName(t){
+  const m=String(t||'').match(/[一二三四五六七]、([^（]{1,18})/);
+  return m ? m[1].trim() : (t||'').slice(0,18);
+}
+
+el.btnItemAdd.onclick=()=>{ S_ITEMS.push({item_name:'', max_score:20}); renderItemList(); };
+el.btnItemCancel.onclick=()=>{ el.itemMask.style.display='none'; };
+el.btnItemSave.onclick=async ()=>{
+  const items=[];
+  S_TPL_RECTS.forEach((rt,i)=>{
+    items.push({ item_index:i, item_name:rt.item_name||guessName(rt.text)||('第'+(i+1)+'项'),
+      max_score:rt.max_score||0, score_page:0, score_x:0,
+      title_rect:JSON.stringify({x:rt.x,y:rt.y,w:rt.w,h:rt.h}), total_region:'{}' });
+  });
+  S_ITEMS.forEach((it,ix)=>{
+    items.push({ item_index:S_TPL_RECTS.length+ix,
+      item_name:it.item_name||('第'+(S_TPL_RECTS.length+ix+1)+'项'),
+      max_score:it.max_score||0, score_page:0, score_x:0, title_rect:'{}', total_region:'{}' });
+  });
+  if(!items.length){ setErr('请至少框选或添加一项'); return; }
+  if(window.__bridge && window.__bridge.saveBatchItems){
+    await window.__bridge.saveBatchItems(S.folder, items).catch(e=>{ setErr('⚠ '+e); return; });
+  }
+  S.itemsTemplate=items.map(it=>({item_name:it.item_name, max_score:it.max_score}));
+  el.itemMask.style.display='none';
+  setDetect('✅ 评分项已固化：'+items.length+' 项');
+  if(S.reports.length){ selectReport(0); }
+};
