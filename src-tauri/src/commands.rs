@@ -104,6 +104,14 @@ pub fn save_to_output(folder: String, name: String, data: Vec<u8>) -> Result<Str
     Ok(path.to_string_lossy().into_owned())
 }
 
+/// 全量成绩清单（所有学生），供"保存全部成绩 CSV / 批阅概览表格"
+#[tauri::command]
+pub fn list_all_grading(folder: String) -> Result<Vec<db::GradeRow>, String> {
+    let conn = db::open(&folder)?;
+    let bid = db::find_batch_by_folder(&conn)?.map(|b| b.0).ok_or("当前文件夹尚未初始化批次")?;
+    db::list_all_grading(&conn, bid)
+}
+
 /// 保存名单模板：弹系统保存对话框，用户选位置后写入（供"下载名单模板"使用）
 #[tauri::command]
 pub fn save_template(app: tauri::AppHandle, data: Vec<u8>, suggested: String) -> Result<(), String> {

@@ -16,6 +16,7 @@ pub fn run() {
             commands::save_to_output,
             commands::save_template,
             commands::append_log,
+            commands::list_all_grading,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

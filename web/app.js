@@ -61,6 +61,9 @@ const el = {
   btnWizardStart: $('btnWizardStart'), btnWizardCancel: $('btnWizardCancel'),
   rosterInput: $('rosterInput'),
   unmatchMask: $('unmatchMask'), unmatchList: $('unmatchList'), btnUnmatchDone: $('btnUnmatchDone'),
+  btnOverview: $('btnOverview'), btnHelp: $('btnHelp'),
+  helpPanel: $('helpPanel'),
+  overviewMask: $('overviewMask'), overviewBody: $('overviewBody'), btnOverviewClose: $('btnOverviewClose'),
 };
 
 /* ==================== 批阅进度持久化（P0-1） ====================
@@ -663,7 +666,9 @@ async function loadCJKFont(doc){
 async function exportScoredPdf(){
   const r = S.current;
   if(!r){ setErr('请先打开报告'); return; }
-  if(!S.pdflibOk){ setErr('pdf-lib 未加载, 无法导出'); return; }
+  if(!S.pdflibOk){ setErr('pdf-lib 未加载, 无法导出（检查 web/lib 目录）'); return; }
+  if(!r.bytes){ setErr('当前报告未加载PDF字节，请先在预览区打开后再导出'); return; }
+  if(window.__bridge && window.__bridge.log){ window.__bridge.log('exportScoredPdf: name='+r.name+' bytes='+r.bytes.byteLength+' pdflib='+S.pdflibOk+' analysis='+!!(r.analysis)); }
   const { PDFDocument, StandardFonts, rgb } = PDFLib;
   const pdfDoc = await PDFDocument.load(r.bytes);
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -712,7 +717,7 @@ async function exportScoredPdf(){
   const blob = new Blob([bytes], {type:'application/pdf'});
   await deliverExport((r.name.replace(/\.pdf$/i,'') || 'report') + '_已批阅.pdf', blob);
   setErr('');
-  setDetect('✅ 已导出带分PDF');
+  setDetect('✅ 已导出带分PDF，文件保存在所选文件夹的 output/ 目录');
 }
 el.btnExport.onclick = exportScoredPdf;
 
@@ -730,18 +735,86 @@ function buildRecord(){
   };
 }
 
+async function fetchAllGrades(){
+  if(window.__bridge && window.__bridge.getAllGrades && S.folder){
+    return await window.__bridge.getAllGrades();
+  }
+  // 浏览器兜底：从当前 reports 构建
+  return S.reports.filter(r=>r && r.student).map(r=>({
+    no: (r.student&&r.student.no)||'', name: (r.student&&r.student.name)||'',
+    cls: (r.student&&r.student.cls)||'',
+    status: r.done ? 'submitted' : (r.missing ? 'missing' : 'pending'),
+    draft: JSON.stringify({ scores: r.scores||[], maxs: r.maxs||[] }),
+    fname: r.name||''
+  }));
+}
+
+// 解析全量成绩 → 表格行（供 CSV 与概览表格共用）
+function gradesToTable(rows){
+  return (rows||[]).map(g=>{
+    let scores=[], maxs=[];
+    try{ const d = JSON.parse(g.draft||'{}'); scores = d.scores||[]; maxs = d.maxs||[]; }catch(e){}
+    const total = (scores||[]).reduce((x,y)=>x+(Number(y)||0),0)||0;
+    const maxTotal = (maxs||[]).reduce((x,y)=>x+(Number(y)||0),0)||0;
+    return {
+      no: g.no||'', name: g.name||'', cls: g.cls||'',
+      scores, maxs, total, maxTotal,
+      status: g.status==='submitted' ? '已批' : (g.status==='missing' ? '待提交' : '待批'),
+      fname: g.fname||''
+    };
+  });
+}
+function csvEscape(v){ v = String(v==null?'':v); return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; }
+function dateStamp(){ const d=new Date(); return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0'); }
+
 async function exportCsv(){
-  const r = S.current; if(!r){ setErr('请先打开报告'); return; }
-  const rec = buildRecord();
-  const head = ['学号','姓名','班级','实验名称','批阅教师','一、'+rec.items[0].name,
-    '二、'+rec.items[1].name,'三、'+rec.items[2].name,'四、'+rec.items[3].name,'五、'+rec.items[4].name,'总分','满分','状态','文件名'].join(',');
-  const vals = [rec.studentId, rec.name, rec.cls, rec.exp, rec.teacher,
-    ...rec.items.map(it=>it.score), rec.total, rec.maxTotal, rec.status, rec.fileName].join(',');
-  await deliverExport((rec.studentId||'record')+'-'+rec.name+'-实验报告成绩.csv',
-    new Blob(['\ufeff'+head+'\n'+vals+'\n'], {type:'text/csv;charset=utf-8'}));
-  setErr(''); setDetect('✅ 已导出CSV');
+  if(!S.reports.length){ setErr('还没有报告可导出'); return; }
+  let rows;
+  try { rows = await fetchAllGrades(); } catch(e){ setErr('读取成绩失败: '+e); return; }
+  const items = gradesToTable(rows);
+  const n = Math.max(0, ...items.map(it=>it.scores.length));
+  const head = ['学号','姓名','班级','批阅教师'];
+  for(let i=0;i<n;i++) head.push('第'+(i+1)+'项');
+  head.push('总分','满分','状态','文件名');
+  const lines = items.map(it=>[
+    it.no, it.name, it.cls, S.teacher||'',
+    ...it.scores.slice(0,n),
+    it.total, it.maxTotal||'', it.status, it.fname
+  ].map(csvEscape).join(','));
+  await deliverExport('全部成绩_'+dateStamp()+'.csv',
+    new Blob(['\ufeff'+head.join(',')+'\n'+lines.join('\n')+'\n'], {type:'text/csv;charset=utf-8'}));
+  setErr(''); setDetect('✅ 已导出全部成绩CSV（'+items.length+'人）');
 }
 el.btnSaveRecord.onclick = exportCsv;
+
+/* —— 批阅概览（表格弹窗）与 帮助 —— */
+async function showOverview(){
+  if(!S.reports.length){ setErr('还没有报告'); return; }
+  let rows;
+  try { rows = await fetchAllGrades(); } catch(e){ setErr('读取成绩失败: '+e); return; }
+  const items = gradesToTable(rows);
+  const n = Math.max(0, ...items.map(it=>it.scores.length));
+  let h = '<table class="ov-table"><thead><tr><th>学号</th><th>姓名</th><th>班级</th>';
+  for(let i=0;i<n;i++) h += '<th>第'+(i+1)+'项</th>';
+  h += '<th>总分</th><th>满分</th><th>状态</th></tr></thead><tbody>';
+  items.forEach(it=>{
+    h += '<tr><td>'+(it.no||'')+'</td><td>'+(it.name||'')+'</td><td>'+(it.cls||'')+'</td>';
+    for(let i=0;i<n;i++) h += '<td>'+(it.scores[i]||'')+'</td>';
+    h += '<td>'+it.total+'</td><td>'+(it.maxTotal||'')+'</td>';
+    h += '<td class="stc-'+it.status+'">'+it.status+'</td></tr>';
+  });
+  h += '</tbody></table>';
+  el.overviewBody.innerHTML = h;
+  el.overviewMask.style.display = 'flex';
+}
+el.btnOverview.onclick = showOverview;
+el.btnOverviewClose.onclick = ()=> { el.overviewMask.style.display = 'none'; };
+
+function toggleHelp(){
+  const p = el.helpPanel;
+  p.style.display = (p.style.display === 'none' || !p.style.display) ? 'block' : 'none';
+}
+el.btnHelp.onclick = toggleHelp;
 
 async function exportJson(){
   const r = S.current; if(!r){ setErr('请先打开报告'); return; }

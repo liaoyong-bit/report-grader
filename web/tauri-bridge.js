@@ -72,6 +72,7 @@
   };
 
   window.__bridge = window.__bridge || {};
+  window.__bridge.log = log;   // 供 app.js 记录导出等操作日志
 
   // —— 初始化批次（向导"开始"）
   window.__bridge.initBatch = async (folder, reportName, students) => {
@@ -140,6 +141,11 @@
   // —— 导出产物写入 output/（替代浏览器下载）
   window.__bridge.saveToOutput = async (name, bytes) => {
     await invoke('save_to_output', { folder: app.S.folder, name, data: Array.from(bytes) });
+
+  // ---- 全量成绩清单（所有学生，供保存全部成绩 CSV / 批阅概览表格）
+  window.__bridge.getAllGrades = async () => {
+    return await invoke('list_all_grading', { folder: app.S.folder });
+  };
   };
 
   // —— 名单模板下载：Tauri 下弹系统保存对话框写文件（覆盖浏览器 downloadBlob）

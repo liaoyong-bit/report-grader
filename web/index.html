@@ -68,6 +68,34 @@
   #wizardBox, #unmatchBox {
     background: #fff; border-radius: 10px; padding: 24px 28px; width: 420px; box-shadow: 0 8px 30px rgba(0,0,0,.3);
   }
+
+  /* 批阅概览弹窗 */
+  #overviewMask {
+    position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 97;
+  }
+  #overviewBox {
+    background: #fff; border-radius: 10px; padding: 20px 24px; width: 720px; max-width: 92vw;
+    box-shadow: 0 8px 30px rgba(0,0,0,.3);
+  }
+  #overviewBox h2 { font-size: 16px; color: #2b3a55; }
+  .ov-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .ov-table th, .ov-table td { border: 1px solid #dde1e6; padding: 5px 8px; text-align: center; white-space: nowrap; }
+  .ov-table th { background: #2b3a55; color: #fff; position: sticky; top: 0; }
+  .ov-table tr:nth-child(even) td { background: #f6f8fb; }
+  .ov-table td.stc-已批 { color: #2e7d32; font-weight: 600; }
+  .ov-table td.stc-待批 { color: #e07b39; font-weight: 600; }
+  .ov-table td.stc-待提交 { color: #c62828; font-weight: 600; }
+
+  /* 帮助下拉面板 */
+  #helpPanel {
+    position: fixed; top: 58px; right: 16px; width: 380px; max-width: 92vw; max-height: 72vh; overflow: auto;
+    background: #fff; border-radius: 10px; padding: 16px 18px; box-shadow: 0 8px 30px rgba(0,0,0,.3);
+    z-index: 99; font-size: 13px; line-height: 1.6;
+  }
+  #helpPanel h3 { font-size: 15px; color: #2b3a55; margin-bottom: 8px; }
+  #helpPanel p { margin: 4px 0; }
+  #helpPanel hr { border: none; border-top: 1px solid #eef1f5; margin: 10px 0; }
+  .help-steps p { color: #444; }
   #wizardBox h2, #unmatchBox h2 { font-size: 16px; margin-bottom: 14px; color: #2b3a55; }
   #unmatchBox .urow { display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px dashed #eceff1; font-size:13px; }
   #unmatchBox .urow .uname { flex:1; word-break:break-all; }
@@ -189,6 +217,32 @@
     </div>
   </div>
 
+  <!-- 批阅概览弹窗（表格） -->
+  <div id="overviewMask" style="display:none">
+    <div id="overviewBox">
+      <h2>当前批阅情况概览</h2>
+      <div id="overviewBody" style="max-height:60vh;overflow:auto;margin:10px 0"></div>
+      <div class="row"><button id="btnOverviewClose" style="background:#e07b39;color:#fff">关闭</button></div>
+    </div>
+  </div>
+
+  <!-- 帮助下拉面板 -->
+  <div id="helpPanel" style="display:none">
+    <h3>帮助</h3>
+    <p><b>版本：</b>0.1.2</p>
+    <p><b>作者：</b>利奥</p>
+    <hr>
+    <div class="help-steps">
+      <p><b>① 开始批阅：</b>点「载入报告文件夹」选择存放报告的文件夹。若该文件夹尚未建库，会弹出向导：填报告名称 → 下载并填好名单模板 → 导入名单 → 开始。</p>
+      <p><b>② 批阅：</b>在中间预览区查看报告，右侧为自动识别的学生信息和评分项。在评分框输入分数，<b>Enter</b> 确认当前分数并移到下一项。</p>
+      <p><b>③ 提交：</b>点「提交并下一份」或按 <b>Ctrl+Enter</b> 提交当前报告并切到下一份（提交前需所有评分项都已批）。</p>
+      <p><b>④ 复查：</b>已批报告仍可点击左侧列表重新打开查看。</p>
+      <p><b>⑤ 导出：</b>「导出带分PDF」把分数写入报告并保存到所选文件夹的 output/ 目录；「保存批阅记录(CSV)」导出全部学生成绩表；「导出记录JSON」导出当前报告明细。</p>
+      <p><b>⑥ 概览：</b>点「批阅概览」查看全部学生成绩表格。</p>
+      <p><b>⑦ 数据安全：</b>所有批阅进度实时保存到所选文件夹的 data/ 数据库，关闭重开不丢失；改名版 PDF 在 source_files/ 目录。</p>
+    </div>
+  </div>
+
   <!-- 顶部 -->
   <div id="topbar">
     <h1>实验报告批阅系统</h1>
@@ -196,6 +250,8 @@
     <button id="btnLogin">切换教师</button>
     <button id="btnOpen">📂 打开PDF报告</button>
     <button id="btnLoadFolder">📁 载入报告文件夹</button>
+    <button id="btnOverview">📊 批阅概览</button>
+    <button id="btnHelp">❓ 帮助</button>
     <div class="spacer"></div>
     <select id="selStudent" style="display:none"></select>
   </div>
