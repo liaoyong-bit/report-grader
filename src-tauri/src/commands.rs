@@ -250,6 +250,25 @@ pub fn get_batch_items(folder: String) -> Result<Vec<db::BatchItem>, String> {
     db::get_batch_items(&conn, bid)
 }
 
+/// 保存某份报告的标题定位结果（供下次复用）
+#[tauri::command]
+pub fn save_report_locate(folder: String, report_key: String, locate_json: String) -> Result<(), String> {
+    let conn = db::open(&folder)?;
+    let bid = db::find_batch_by_folder(&conn)?.map(|b| b.0).ok_or("未找到批次")?;
+    let rid = db::report_id_by_key(&conn, bid, &report_key)?.ok_or("未找到报告")?;
+    dbglog(&format!("save_report_locate key={report_key} len={}", locate_json.len()));
+    db::save_report_locate(&conn, rid, &locate_json)
+}
+
+/// 读取某份报告的标题定位结果
+#[tauri::command]
+pub fn get_report_locate(folder: String, report_key: String) -> Result<Option<String>, String> {
+    let conn = db::open(&folder)?;
+    let bid = db::find_batch_by_folder(&conn)?.map(|b| b.0).ok_or("未找到批次")?;
+    let rid = db::report_id_by_key(&conn, bid, &report_key)?.ok_or("未找到报告")?;
+    db::get_report_locate(&conn, rid)
+}
+
 /// 检测 template/ 目录下第一个 PDF 模板文件（相对路径或 null）
 #[tauri::command]
 pub fn get_template_path(folder: String) -> Result<Option<String>, String> {

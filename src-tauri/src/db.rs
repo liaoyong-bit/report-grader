@@ -314,6 +314,26 @@ pub fn save_state(conn: &Connection, report_id: i64, draft_json: &str, done: boo
     }
 }
 
+/// 保存某份报告的标题定位结果（locate_json），供下次复用
+pub fn save_report_locate(conn: &Connection, report_id: i64, json: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE reports SET locate_json=?1, updated_at=datetime('now','localtime') WHERE id=?2",
+        params![json, report_id],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("保存定位失败: {e}"))
+}
+
+pub fn get_report_locate(conn: &Connection, report_id: i64) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT locate_json FROM reports WHERE id=?1",
+        params![report_id],
+        |r| r.get(0),
+    )
+    .optional()
+    .map_err(|e| format!("读取定位失败: {e}"))
+}
+
 /// 按改名版文件名或源文件名定位报告 id
 pub fn report_id_by_key(conn: &Connection, batch_id: i64, key: &str) -> Result<Option<i64>, String> {
     conn.query_row(

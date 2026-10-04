@@ -24,6 +24,8 @@ pub fn run() {
             commands::get_batch_items,
             commands::get_template_path,
             commands::ocr_image_b64,
+            commands::save_report_locate,
+            commands::get_report_locate,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

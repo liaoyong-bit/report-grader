@@ -409,6 +409,80 @@ async function analyze(pdf){
   return result;
 }
 
+/* ============ 扫描版标题找图定位（用框选保存的标题图在报告页匹配） ============ */
+function loadImg(src){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=()=>rej(new Error('图像加载失败')); i.src=src; }); }
+
+// 用标题图(模板裁剪)在报告页面canvas上做模板匹配，返回最佳 {pageIndex,yUser,xUser,avg}
+async function matchTitleInReport(r, titleImgSrc){
+  try{
+    const tplImg = await loadImg(titleImgSrc);
+    const tw=96; const th=Math.max(4, Math.round(tplImg.height*tw/tplImg.width));
+    const tp=document.createElement('canvas'); tp.width=tw; tp.height=th;
+    const tpctx=tp.getContext('2d'); tpctx.drawImage(tplImg,0,0,tw,th);
+    const tpd=tpctx.getImageData(0,0,tw,th).data;
+    let best=null;
+    for(let p=0;p<r.pdf.numPages;p++){
+      const pg=r._pages[p]; if(!pg||!pg.canvas) continue;
+      const cv=pg.canvas; const sc=tw/cv.width;
+      const ph=Math.max(th+1, Math.round(cv.height*sc));
+      const pc=document.createElement('canvas'); pc.width=tw; pc.height=ph;
+      const pctx=pc.getContext('2d'); pctx.drawImage(cv,0,0,tw,ph);
+      const imgd=pctx.getImageData(0,0,tw,ph).data;
+      let bestAvg=1e9, bestY=0;
+      const cnt=tw*th*3;
+      for(let y0=0;y0<=ph-th;y0+=1){
+        let diff=0;
+        for(let ty=0;ty<th;ty++){
+          const pRow=(y0+ty)*tw, tRow=ty*tw;
+          for(let x=0;x<tw;x++){
+            const po=(pRow+x)*4, to=(tRow+x)*4;
+            diff += Math.abs(imgd[po]-tpd[to]) + Math.abs(imgd[po+1]-tpd[to+1]) + Math.abs(imgd[po+2]-tpd[to+2]);
+          }
+        }
+        const avg=diff/cnt;
+        if(avg<bestAvg){ bestAvg=avg; bestY=y0; }
+      }
+      const py=bestY/sc;
+      const pt=pg.vp.convertToPdfPoint(0,py);
+      const cand={ pageIndex:p, yUser:pt[1], xUser:pt[0], avg:bestAvg };
+      if(!best || cand.avg<best.avg) best=cand;
+    }
+    return best;
+  }catch(e){ return null; }
+}
+
+async function autoLocateTitles(r){
+  if(!window.__bridge || !r || !r.analysis || !r.analysis.items) return;
+  if(!S.itemsFull){
+    try{ S.itemsFull = await window.__bridge.getBatchItems(S.folder); }catch(e){ S.itemsFull=[]; }
+  }
+  const full=(S.itemsFull||[]).filter(x=>x.item_index>=0 && x.title_img);
+  if(!full.length) return;
+  // 已存定位 → 直接复用
+  if(window.__bridge.getReportLocate){
+    try{
+      const j=await window.__bridge.getReportLocate(S.folder, r.name);
+      if(j){ const loc=JSON.parse(j); (loc.items||[]).forEach(li=>{ const it=r.analysis.items[li.item_index]; if(it){ it.titleY=li.titleY; it.pageIndex=li.pageIndex; if(li.titleX!=null) it.titleX=li.titleX; } }); return; }
+    }catch(e){}
+  }
+  // 找图定位
+  const locItems=[]; let changed=false;
+  for(const tpl of full){
+    const it=r.analysis.items[tpl.item_index]; if(!it) continue;
+    if(it.titleY!=null){ locItems.push({item_index:tpl.item_index, titleY:it.titleY, pageIndex:it.pageIndex, titleX:it.titleX}); continue; }
+    const found=await matchTitleInReport(r, tpl.title_img);
+    if(found && found.avg<60){
+      it.titleY=found.yUser; it.pageIndex=found.pageIndex; it.titleX=found.xUser;
+      locItems.push({item_index:tpl.item_index, titleY:it.titleY, pageIndex:it.pageIndex, titleX:it.titleX});
+      changed=true;
+    }
+  }
+  if(changed && window.__bridge.saveReportLocate){
+    try{ await window.__bridge.saveReportLocate(S.folder, r.name, JSON.stringify({items:locItems})); }catch(e){}
+    await renderPages(r);   // 重建，让打分区出现在定位后的标题行
+  }
+}
+
 /* ==================== 渲染所有页面(自适应中间栏) + 得分叠加（P1-5 缓存） ==================== */
 async function renderPages(r){
   el.pdfHost.innerHTML = '';
@@ -427,6 +501,8 @@ async function renderPages(r){
     wrap.style.width = vp.width + 'px';
     const canvas = document.createElement('canvas');
     canvas.width = vp.width; canvas.height = vp.height;
+    if(!r._pages) r._pages = {};
+    r._pages[p] = { canvas, vp };   // 供扫描版找图定位
     wrap.appendChild(canvas);
     el.pdfHost.appendChild(wrap);
 
@@ -435,6 +511,7 @@ async function renderPages(r){
     addOverlays(r, wrap, p, vp, page);
   }
   fillOverlays(r);   // 叠加层文本统一填充
+  await autoLocateTitles(r);   // 扫描版标题找图定位（渲染后有页面canvas）
 }
 
 function px2(x,y,vp){ return vp.convertToViewportPoint(x,y); }
