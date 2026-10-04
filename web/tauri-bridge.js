@@ -96,7 +96,13 @@
         const bytes = await file.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
         r.pdf = pdf; r.bytes = bytes; r.file = file;
-      } catch(e) { r.pdfError = String(e && e.message ? e.message : e); app.setErr('读取报告失败: ' + e); }
+      } catch(e) {
+        const msg = String(e && e.message ? e.message : e);
+        r.pdfError = '文件夹[' + (app.S.folder||'?') + '] 路径[' + (r.path||'?') + '] → ' + msg;
+        app.setErr('读取报告失败: ' + msg);
+      }
+    } else if(!r || r.missing || !r.pdf){
+      r.pdfError = '未触发加载: missing=' + (r ? r.missing : 'r为空') + ' hasPdf=' + (r ? !!r.pdf : '-') + ' 路径[' + (r && r.path ? r.path : '?') + ']';
     }
     return origSelect.call(this, idx);
   };
