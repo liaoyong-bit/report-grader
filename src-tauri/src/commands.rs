@@ -248,25 +248,32 @@ pub fn get_template_path(folder: String) -> Result<Option<String>, String> {
 // —— Windows 自带 OCR（Windows.Media.Ocr）识别图片中的文字
 #[tauri::command]
 pub async fn ocr_image_b64(b64: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || ocr_b64_impl(&b64))
+    tauri::async_runtime::spawn_blocking(move || ocr_b64_impl(&b64))
         .await
         .map_err(|e| format!("OCR 任务失败: {e}"))?
 }
 
 fn ocr_b64_impl(b64: &str) -> Result<String, String> {
-    use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+    use base64::Engine;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(b64)
         .map_err(|e| format!("base64 解码失败: {e}"))?;
     let tmp = std::env::temp_dir().join("rg_ocr_tmp.png");
     std::fs::write(&tmp, &bytes).map_err(|e| format!("写临时图片失败: {e}"))?;
-    let r = unsafe {
-        CoInitializeEx(None, COINIT_APARTMENTTHREADED).map_err(|e| format!("COM 初始化失败: {e}"))?;
-        let r = ocr_file(&tmp.to_string_lossy());
-        CoUninitialize();
-        r
-    };
+    let r = ocr_file_with_com(&tmp.to_string_lossy());
     let _ = std::fs::remove_file(&tmp);
+    r
+}
+
+fn ocr_file_with_com(path: &str) -> Result<String, String> {
+    use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+    unsafe {
+        if CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_err() {
+            return Err("COM 初始化失败（STA）".to_string());
+        }
+    }
+    let r = ocr_file(path);
+    unsafe { CoUninitialize(); }
     r
 }
 
@@ -277,12 +284,12 @@ fn ocr_file(path: &str) -> Result<String, String> {
     use windows::Graphics::Imaging::BitmapDecoder;
     use windows::Globalization::Language;
     let hpath = HSTRING::from(path);
-    let engine = match OcrEngine::try_create_from_user_profile_languages() {
+    let engine = match OcrEngine::TryCreateFromUserProfileLanguages() {
         Ok(Some(e)) => e,
         _ => {
             let lang = Language::new(HSTRING::from("zh-CN"))
                 .map_err(|e| format!("语言构造失败: {e}"))?;
-            match OcrEngine::try_create_from_language(&lang) {
+            match OcrEngine::TryCreateFromLanguage(&lang) {
                 Ok(Some(e)) => e,
                 Ok(None) | Err(_) => {
                     return Err("无可用 OCR 引擎（请确保系统已安装中文 OCR 语言包）".to_string())
@@ -290,26 +297,26 @@ fn ocr_file(path: &str) -> Result<String, String> {
             }
         }
     };
-    let file = StorageFile::get_file_from_path_async(&hpath)
+    let file = StorageFile::GetFileFromPathAsync(&hpath)
         .map_err(|e| format!("打开文件失败: {e}"))?
         .get()
         .map_err(|e| format!("等待打开文件失败: {e}"))?;
     let stream = file
-        .open_async(FileAccessMode::Read)
+        .OpenAsync(FileAccessMode::Read)
         .map_err(|e| format!("打开流失败: {e}"))?
         .get()
         .map_err(|e| format!("等待打开流失败: {e}"))?;
-    let decoder = BitmapDecoder::create_async(&stream)
+    let decoder = BitmapDecoder::CreateAsync(&stream)
         .map_err(|e| format!("创建解码器失败: {e}"))?
         .get()
         .map_err(|e| format!("等待解码器失败: {e}"))?;
     let bmp = decoder
-        .get_software_bitmap_async()
+        .GetSoftwareBitmapAsync()
         .map_err(|e| format!("获取位图失败: {e}"))?
         .get()
         .map_err(|e| format!("等待位图失败: {e}"))?;
     let res = engine
-        .recognize_async(&bmp)
+        .RecognizeAsync(&bmp)
         .map_err(|e| format!("识别失败: {e}"))?
         .get()
         .map_err(|e| format!("等待识别失败: {e}"))?;
