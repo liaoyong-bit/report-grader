@@ -284,19 +284,12 @@ fn ocr_file(path: &str) -> Result<String, String> {
     use windows::Graphics::Imaging::BitmapDecoder;
     use windows::Globalization::Language;
     let hpath = HSTRING::from(path);
-    let engine = match OcrEngine::TryCreateFromUserProfileLanguages() {
-        Ok(Some(e)) => e,
-        _ => {
-            let lang = Language::new(HSTRING::from("zh-CN"))
-                .map_err(|e| format!("语言构造失败: {e}"))?;
-            match OcrEngine::TryCreateFromLanguage(&lang) {
-                Ok(Some(e)) => e,
-                Ok(None) | Err(_) => {
-                    return Err("无可用 OCR 引擎（请确保系统已安装中文 OCR 语言包）".to_string())
-                }
-            }
-        }
-    };
+    let engine = OcrEngine::TryCreateFromUserProfileLanguages()
+        .or_else(|_| {
+            let lang = Language::CreateLanguage(&HSTRING::from("zh-CN"))?;
+            OcrEngine::TryCreateFromLanguage(&lang)
+        })
+        .map_err(|e| format!("创建 OCR 引擎失败（请确认系统已安装中文 OCR 语言包）: {e}"))?;
     let file = StorageFile::GetFileFromPathAsync(&hpath)
         .map_err(|e| format!("打开文件失败: {e}"))?
         .get()
