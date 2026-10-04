@@ -313,5 +313,5 @@ fn ocr_file(path: &str) -> Result<String, String> {
         .map_err(|e| format!("识别失败: {e}"))?
         .get()
         .map_err(|e| format!("等待识别失败: {e}"))?;
-    Ok(res.text().to_string())
+    Ok(res.Text().to_string())
 }
