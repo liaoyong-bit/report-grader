@@ -1195,6 +1195,15 @@ function bindTemplateDrag(){
   };
 }
 
+// 从 OCR 识别出的标题中提取括号内分数，如 "一、实验目的与原理（30分）" → {title:"一、实验目的与原理", score:30}
+function parseTitleScore(txt){
+  let title=(txt||'').replace(/\s+/g,' ').trim();
+  let score='';
+  const m=title.match(/[（(]\s*(\d+(?:\.\d+)?)\s*分\s*[）)]/);
+  if(m){ score=m[1]; title=title.replace(m[0],'').trim(); }
+  return { title, score: score?Number(score):'' };
+}
+
 function addTemplateBox(box,bbox,w,h){
   const pi = pageByAbsY(bbox);
   const off = S.tplPages[pi].offset;
@@ -1205,7 +1214,12 @@ function addTemplateBox(box,bbox,w,h){
   S_TPL_RECTS.push(rt);
   renderTitleBoxes(); renderItemList(); renderScoreBoxes();
   runOcr(rt).then(name=>{
-    if(rt && name && name.trim()){ rt.item_name=name.trim(); renderItemList(); }
+    if(rt && name && name.trim()){
+      const p = parseTitleScore(name.trim());
+      rt.item_name = p.title;
+      if(p.score) rt.max_score = p.score;
+      renderItemList();
+    }
   }).catch(()=>{});
 }
 
