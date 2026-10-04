@@ -1260,16 +1260,19 @@ async function ensureOcrWorker(){
   const corePath = abs('./lib/ocr/package/tesseract-core-lstm.wasm.js');
   const langPath = abs('./lib/ocr/');
   if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR 启动 workerPath='+workerPath);
+  if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR createWorker 开始(blob模式)');
   S_ocrWorker = await Tesseract.createWorker({
     workerPath, corePath, langPath,
-    workerBlobURL: false,
+    workerBlobURL: true,
     logger: m=>{ if(window.__bridge && window.__bridge.log && m && m.status) window.__bridge.log('OCR '+m.status); },
     errorHandler: e=>{ if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR worker 错误: '+String(e&&e.message||e)); }
   }).catch(err=>{
     if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR createWorker 失败: '+String(err&&err.message||err));
     throw err;
   });
+  if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR createWorker OK');
   await S_ocrWorker.loadLanguage('chi_sim');
+  if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR chi_sim 语言已加载');
   await S_ocrWorker.initialize('chi_sim');
   if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR worker 就绪 chi_sim');
   return S_ocrWorker;
