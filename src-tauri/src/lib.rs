@@ -16,6 +16,7 @@ pub fn run() {
             commands::save_to_output,
             commands::save_template,
             commands::append_log,
+            commands::pick_template,
             commands::list_all_grading,
             commands::get_batch_info,
             commands::save_roster,

@@ -1333,3 +1333,18 @@ function cropTemplate(box,bbox,w,h){
   try{ out.getContext('2d').drawImage(canvas, box-pad, bbox-pad, w+pad*2, h+pad*2, 0, 0, out.width, out.height); }catch(e){ return null; }
   return out.toDataURL('image/png');
 }
+// 选择模板 PDF（系统对话框）→ 复制到 template/ → 打开框选
+async function pickTemplateAndSetup(){
+  if(!window.__bridge || !window.__bridge.pickTemplate){ setErr('仅 Tauri 模式支持选择模板'); return; }
+  const tpl = await window.__bridge.pickTemplate(S.folder).catch(e=>{ setErr('⚠ '+e); return null; });
+  if(!tpl) return;   // 用户取消
+  S.tplPath = tpl;
+  const g=document.getElementById('tplGuideMask'); if(g) g.style.display='none';
+  await openItemSetup();
+}
+(function bindTplPick(){
+  const b1=document.getElementById('btnTplGuidePick');
+  if(b1) b1.onclick = ()=> pickTemplateAndSetup();
+  const b2=document.getElementById('btnItemPickTpl');
+  if(b2) b2.onclick = ()=> pickTemplateAndSetup();
+})();

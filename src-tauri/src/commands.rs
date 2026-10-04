@@ -176,10 +176,31 @@ pub fn save_template(app: tauri::AppHandle, data: Vec<u8>, suggested: String) ->
     fs::write(p, &data).map_err(|e| format!("保存模板失败: {e}"))
 }
 
+/// 选择模板 PDF：弹系统文件对话框选模板，自动复制到所选文件夹/template/ 并返回相对路径
+#[tauri::command]
+pub fn pick_template(app: tauri::AppHandle, folder: String) -> Result<Option<String>, String> {
+    let picked = app
+        .dialog()
+        .file()
+        .add_filter("PDF", &["pdf"])
+        .blocking_pick_file();
+    let Some(path) = picked else { return Ok(None); };
+    let Some(p) = path.as_path() else { return Ok(None); };
+    let tdir = std::path::Path::new(&folder).join("template");
+    std::fs::create_dir_all(&tdir).map_err(|e| format!("创建 template 目录失败: {e}"))?;
+    let fname = p
+        .file_name()
+        .ok_or("模板文件名无效")?
+        .to_string_lossy()
+        .into_owned();
+    let dst = tdir.join(&fname);
+    std::fs::copy(p, &dst).map_err(|e| format!("复制模板失败: {e}"))?;
+    Ok(Some(format!("template/{}", fname)))
+}
+
 /// 追加调试日志到系统临时目录（用于定位运行期问题）
 #[tauri::command]
-pub fn append_log(line: String) -> Result<(), String> {
-    use std::io::Write;
+pub fn append_log(line: String) -> Result<(), String> {    use std::io::Write;
     let path = std::env::temp_dir().join("report_grader_debug.log");
     let mut f = std::fs::OpenOptions::new()
         .create(true)
