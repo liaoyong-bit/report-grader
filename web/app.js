@@ -66,6 +66,7 @@ const el = {
   overviewMask: $('overviewMask'), overviewBody: $('overviewBody'), btnOverviewClose: $('btnOverviewClose'),
   itemMask: $('itemMask'), tplPreview: $('tplPreview'), itemList: $('itemList'),
   btnItemAdd: $('btnItemAdd'), btnItemSave: $('btnItemSave'), btnItemCancel: $('btnItemCancel'),
+  btnTotalMode: $('btnTotalMode'), totalInfo: $('totalInfo'),
 };
 
 /* ==================== 批阅进度持久化（P0-1） ====================
@@ -234,6 +235,12 @@ async function selectReport(idx){
   }
 
   try{
+    // 用批次评分项模板覆盖题名/满分（每题位置仍由 analyze 定位）
+    if(S.itemsTemplate && S.itemsTemplate.length){
+      S.itemsTemplate.forEach((tpl,i)=>{
+        if(analysis.items[i]){ analysis.items[i].name = tpl.item_name; analysis.items[i].max = tpl.max_score; analysis.items[i].score_x = tpl.score_x; }
+      });
+    }
     const analysis = await analyze(r.pdf);
     r.analysis = analysis;
     // 保留已保存/已恢复的状态，不重置（P0-1 / P0-4 已批可重开）
@@ -392,14 +399,14 @@ async function analyze(pdf){
       const maxM = t.match(/（\s*(\d+)\s*分）/);
       const max = maxM ? parseInt(maxM[1],10) : (result.items[idx] && result.items[idx].max) || 0;
       // titleY 用"距底"y(l.yUser)：叠加层通过 convertToViewportPoint 定位需要距底坐标
-      result.items[idx] = { name: ITEM_NAMES[idx], max, titleY: l.yUser, pageIndex: p };
+      result.items[idx] = { name: ITEM_NAMES[idx], max, titleY: l.yUser, titleX: l.items[0].x, pageIndex: p };
       foundIdx.add(idx);
     }
   }
 
   result.detect.titles = foundIdx.size >= 3;
   for(let i=0;i<ITEM_NAMES.length;i++){
-    if(!result.items[i]) result.items[i] = {name:ITEM_NAMES[i], max:(result.items[i]&&result.items[i].max)||0, titleY:null, pageIndex:null};
+    if(!result.items[i]) result.items[i] = {name:ITEM_NAMES[i], max:(result.items[i]&&result.items[i].max)||0, titleY:null, titleX:null, pageIndex:null};
   }
   return result;
 }
@@ -441,7 +448,7 @@ function addOverlays(r, wrap, pageIndex, vp, page){
   // 标题行得分：格式"得分：N"，放在PDF文字区最右端内侧(不溢出页面)。文本由 fillOverlays 统一填。
   a.items.forEach((it, i)=>{
     if(it.pageIndex===pageIndex && it.titleY!=null){
-      const rightX = pageWidthPt - 52;          // 文字区最右侧向内收一点
+      const rightX = (it.titleX!=null && it.score_x) ? (it.titleX + it.score_x) : (pageWidthPt - 52);
       const pt = px2(rightX, it.titleY, vp);
       const ov = document.createElement('div');
       ov.className = 'ov-score ov-title-score';
@@ -679,7 +686,7 @@ async function ensureLoaded(r){
   if(r.pdf && !r.analysis){
     const analysis = await analyze(r.pdf);
     if(S.itemsTemplate && S.itemsTemplate.length){
-      S.itemsTemplate.forEach((tpl,i)=>{ if(analysis.items[i]){ analysis.items[i].name=tpl.item_name; analysis.items[i].max=tpl.max_score; } });
+      S.itemsTemplate.forEach((tpl,i)=>{ if(analysis.items[i]){ analysis.items[i].name=tpl.item_name; analysis.items[i].max=tpl.max_score; analysis.items[i].score_x=tpl.score_x; } });
     }
     r.analysis = analysis;
   }
@@ -697,19 +704,19 @@ async function exportOne(r){
     if(it.titleY==null) continue;
     const page = pdfDoc.getPage(it.pageIndex);
     const W = page.getWidth();
-    const y = it.titleY;            // PDF 用户空间 y(距底)，直接使用（修复坐标偏移）
+    const baseX = (it.titleX!=null && it.score_x) ? (it.titleX + it.score_x) : (W - 70);
     const label = '得分：';
     if(cjkFont){
       const labelW = cjkFont.widthOfTextAtSize(label, 11);
       const num = String(r.scores[i]||0);
       const numW = font.widthOfTextAtSize(num, 11);
-      const drawX = W - 70 - numW;
+      const drawX = baseX - numW;
       page.drawText(label, { x: drawX - labelW, y, size: 11, font: cjkFont, color });
       page.drawText(num, { x: drawX, y, size: 11, font, color });
     } else {
       const text = String(r.scores[i]||0);
       const w = font.widthOfTextAtSize(text, 11);
-      page.drawText(text, { x: W - 70 - w, y, size: 11, font, color });
+      page.drawText(text, { x: baseX - w, y, size: 11, font, color });
     }
   }
   if(a.scoreCols){
@@ -1023,7 +1030,11 @@ let S_TPL_RECTS = [];    // 模板框选矩形 {x,y,w,h,pageIndex,text,item_name
 async function ensureItemsSetup(){
   if(!window.__bridge || !window.__bridge.getBatchItems){ return; }
   const items = await window.__bridge.getBatchItems(S.folder).catch(e=>{ setErr('⚠ '+e); return null; });
-  if(items && items.length){ S.itemsTemplate = items; return; }
+  if(items && items.length){
+    S.totalRegion = (items.find(x=>x.item_index<0)||{}).total_region || null;
+    S.itemsTemplate = items.filter(x=>x.item_index>=0).map(x=>({item_name:x.item_name, max_score:x.max_score, score_x:x.score_x||0}));
+    return;
+  }
   const tplPath = await window.__bridge.getTemplatePath(S.folder).catch(()=>null);
   if(!tplPath){ setErr('请先把空白模板 PDF 放到所选文件夹的 template/ 子目录，再重新载入'); return; }
   S.tplPath = tplPath;
@@ -1041,10 +1052,15 @@ async function openItemSetup(){
   }catch(e){ setErr('加载模板失败: '+e); }
 }
 
+let S_TOTAL_RECT = null;   // 统分区框选 {x,y,w,h,count}
+let S_TOTAL_MODE = false;
+
 function renderTemplatePreview(){
   const pre = el.tplPreview;
   pre.innerHTML='';
-  S_ITEMS=[]; S_TPL_RECTS=[];
+  S_ITEMS=[]; S_TPL_RECTS=[]; S_TOTAL_RECT=null; S_TOTAL_MODE=false;
+  if(el.btnTotalMode) el.btnTotalMode.style.background='#1a73e8';
+  if(el.totalInfo) el.totalInfo.style.display='none';
   S.tplPdf.getPage(1).then(async (page)=>{
     const pvp1 = page.getViewport({scale:1});
     const availW = Math.max(300, pre.clientWidth-4);
@@ -1089,11 +1105,18 @@ function bindTemplateDrag(){
     const box=Math.min(x0,x),bbox=Math.min(y0,y),w=Math.abs(x-x0),h=Math.abs(y-y0);
     if(w<8||h<8){ pre.querySelectorAll('.tpl-box.active').forEach(n=>n.remove()); return; }
     pre.querySelectorAll('.tpl-box.active').forEach(n=>n.remove());
+    if(S_TOTAL_MODE){
+      S_TOTAL_MODE=false;
+      if(el.btnTotalMode) el.btnTotalMode.style.background='#1a73e8';
+      S_TOTAL_RECT={x:box,y:bbox,w:w,h:h,count:Math.max(1,S_TPL_RECTS.length+1)};
+      renderTotalBox();
+      return;
+    }
     addTemplateBox(box,bbox,w,h);
   };
 }
 
-// 框选完成：记录矩形 + 从文本层提取框内文字 -> 加入列表
+// 框选标题：记录矩形 + 文本层提取题名 + 自动算出打分区偏移
 function addTemplateBox(box,bbox,w,h){
   const vp=S.tplVp;
   const hit=[];
@@ -1103,9 +1126,48 @@ function addTemplateBox(box,bbox,w,h){
   }
   hit.sort((a,b)=>a.yTop-b.yTop);
   const text=hit.map(i=>i.str.trim()).filter(Boolean).join(' ');
-  S_TPL_RECTS.push({pageIndex:0, x:box, y:bbox, w:w, h:h, text:text, item_name:'', max_score:20});
+  const pageW = vp.width;
+  const offset = Math.max(0, Math.round((pageW - 52) - box));
+  S_TPL_RECTS.push({pageIndex:0, x:box, y:bbox, w:w, h:h, text:text, item_name:'', max_score:20, score_x:offset});
   pre.querySelectorAll('.tpl-box').forEach(n=>n.classList.remove('active'));
   renderItemList();
+  renderScoreBoxes();
+}
+
+// 打分区蓝框（标题行右侧）
+function renderScoreBoxes(){
+  const pre = el.tplPreview;
+  pre.querySelectorAll('.tpl-score').forEach(n=>n.remove());
+  S_TPL_RECTS.forEach(rt=>{
+    const x = rt.x + (rt.score_x||0);
+    const d=document.createElement('div'); d.className='tpl-score';
+    d.style.left=(x-26)+'px'; d.style.top=(rt.y-2)+'px'; d.style.width='52px'; d.style.height=(rt.h+6)+'px';
+    pre.appendChild(d);
+  });
+}
+
+// 统分区框 + 等分位置点
+function renderTotalBox(){
+  const pre = el.tplPreview;
+  pre.querySelectorAll('.tpl-total,.tpl-total-dot').forEach(n=>n.remove());
+  if(!S_TOTAL_RECT) return;
+  const t=S_TOTAL_RECT;
+  const d=document.createElement('div'); d.className='tpl-total';
+  d.style.left=t.x+'px'; d.style.top=t.y+'px'; d.style.width=t.w+'px'; d.style.height=t.h+'px';
+  pre.appendChild(d);
+  const n=Math.max(1,t.count);
+  for(let i=0;i<n;i++){
+    const cx=t.x+(i+0.5)*t.w/n;
+    const dot=document.createElement('div'); dot.className='tpl-total-dot';
+    dot.style.left=cx+'px'; dot.style.top=t.y+'px';
+    pre.appendChild(dot);
+  }
+  el.totalInfo.style.display='block';
+  el.totalInfo.innerHTML='统分区已框选（绿色框），共 <b>'+n+'</b> 个分数位置（各题分+总分）按等分分布。数量：';
+  const inp=document.createElement('input'); inp.type='number'; inp.min='1'; inp.value=n; inp.style.width='56px';
+  inp.onchange=()=>{ S_TOTAL_RECT.count=Math.max(1,parseInt(inp.value,10)||1); renderTotalBox(); };
+  el.totalInfo.appendChild(inp);
+  el.totalInfo.appendChild(document.createTextNode(' 个（改后点任意处应用）'));
 }
 
 function renderItemList(){
@@ -1118,9 +1180,12 @@ function renderItemList(){
     name.oninput=()=>{ rt.item_name=name.value; };
     const max=document.createElement('input'); max.type='number'; max.min='0'; max.value=rt.max_score; max.placeholder='满分';
     max.oninput=()=>{ rt.max_score=parseInt(max.value,10)||0; };
+    const off=document.createElement('input'); off.type='number'; off.min='0'; off.value=rt.score_x||0; off.placeholder='打分区偏移';
+    off.title='标题向右偏移多少是打分区';
+    off.oninput=()=>{ rt.score_x=parseInt(off.value,10)||0; renderScoreBoxes(); };
     const del=document.createElement('button'); del.textContent='删';
-    del.onclick=()=>{ S_TPL_RECTS.splice(i,1); renderItemList(); };
-    div.appendChild(no); div.appendChild(name); div.appendChild(max); div.appendChild(del);
+    del.onclick=()=>{ S_TPL_RECTS.splice(i,1); renderItemList(); renderScoreBoxes(); };
+    div.appendChild(no); div.appendChild(name); div.appendChild(max); div.appendChild(off); div.appendChild(del);
     out.push(div);
   });
   S_ITEMS.forEach((it,ix)=>{
@@ -1146,11 +1211,16 @@ function guessName(t){
 
 el.btnItemAdd.onclick=()=>{ S_ITEMS.push({item_name:'', max_score:20}); renderItemList(); };
 el.btnItemCancel.onclick=()=>{ el.itemMask.style.display='none'; };
+el.btnTotalMode.onclick=()=>{
+  S_TOTAL_MODE=!S_TOTAL_MODE;
+  el.btnTotalMode.style.background = S_TOTAL_MODE ? '#e07b39' : '#1a73e8';
+  if(S_TOTAL_MODE){ el.totalInfo.style.display='block'; el.totalInfo.textContent='正在框选统分区：请在预览上拖选统分表整行区域（一条线框出所有分数所在处）。'; }
+};
 el.btnItemSave.onclick=async ()=>{
   const items=[];
   S_TPL_RECTS.forEach((rt,i)=>{
     items.push({ item_index:i, item_name:rt.item_name||guessName(rt.text)||('第'+(i+1)+'项'),
-      max_score:rt.max_score||0, score_page:0, score_x:0,
+      max_score:rt.max_score||0, score_page:0, score_x:rt.score_x||0,
       title_rect:JSON.stringify({x:rt.x,y:rt.y,w:rt.w,h:rt.h}), total_region:'{}' });
   });
   S_ITEMS.forEach((it,ix)=>{
@@ -1159,11 +1229,16 @@ el.btnItemSave.onclick=async ()=>{
       max_score:it.max_score||0, score_page:0, score_x:0, title_rect:'{}', total_region:'{}' });
   });
   if(!items.length){ setErr('请至少框选或添加一项'); return; }
+  const hasTotal = !!(S_TOTAL_RECT && S_TOTAL_RECT.w>0);
+  if(hasTotal){
+    items.push({ item_index:-1, item_name:'__total__', max_score:0, score_page:0, score_x:0,
+      title_rect:'{}', total_region:JSON.stringify({x:S_TOTAL_RECT.x,y:S_TOTAL_RECT.y,w:S_TOTAL_RECT.w,h:S_TOTAL_RECT.h,count:S_TOTAL_RECT.count}) });
+  }
   if(window.__bridge && window.__bridge.saveBatchItems){
     await window.__bridge.saveBatchItems(S.folder, items).catch(e=>{ setErr('⚠ '+e); return; });
   }
-  S.itemsTemplate=items.map(it=>({item_name:it.item_name, max_score:it.max_score}));
+  S.itemsTemplate=items.filter(x=>x.item_index>=0).map(it=>({item_name:it.item_name, max_score:it.max_score, score_x:it.score_x||0}));
   el.itemMask.style.display='none';
-  setDetect('✅ 评分项已固化：'+items.length+' 项');
+  setDetect('✅ 评分项已固化：'+S.itemsTemplate.length+' 项'+(hasTotal?'，含统分区':''));
   if(S.reports.length){ selectReport(0); }
 };

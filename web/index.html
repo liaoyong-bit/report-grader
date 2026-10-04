@@ -109,7 +109,10 @@
   #itemBox .iops { display: flex; align-items: center; gap: 10px; }
   #itemBox .iops button { padding: 7px 14px; border: 1px solid #dde1e6; border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px; }
   #btnItemSave { background: #e07b39; color: #fff; border: none !important; }
-  #itemBox .ino-note { font-size: 12px; color: #888; margin-left: auto; }
+  #itemBox .ino-note { font-size: 12px; color: #888; margin-left: auto; }  #tplPreview .tpl-score { position:absolute; border:2px dashed #1a73e8; background:rgba(26,115,232,.08); box-sizing:border-box; pointer-events:none; z-index:2; }
+  #tplPreview .tpl-total { position:absolute; border:2px solid #2e7d32; background:rgba(46,125,50,.10); box-sizing:border-box; pointer-events:none; z-index:2; }
+  #tplPreview .tpl-total-dot { position:absolute; width:4px; height:4px; margin:-2px 0 0 -2px; background:#2e7d32; border-radius:50%; z-index:3; }
+  #totalInfo { font-size:12px; color:#2e7d32; background:#eaf3ea; border:1px solid #cfe3cf; border-radius:6px; padding:6px 10px; margin-bottom:8px; }
 
   #overviewBox {
     background: #fff; border-radius: 10px; padding: 20px 24px; width: 720px; max-width: 92vw;
@@ -280,14 +283,16 @@
   <div id="itemMask" style="display:none">
     <div id="itemBox">
       <h2>设置本批次的评分项</h2>
-      <p class="tiphint">在下方模板上<b>依次拖拽框选</b>每题标题区域（含题名与满分）；框完自动识别题名，可再手动修改题名、填写满分。统分区暂由每份报告自动检测。</p>
+      <p class="tiphint">在下方模板上<b>依次框选</b>每题标题区域；框完自动识别题名、并在标题右侧标出<b>打分区蓝框</b>供确认（可调偏移）；所有题确认后点「框选统分区」<b>一条线框选统分表整行</b>，分数位置按数目平均分配。</p>
       <div id="tplPreview"></div>
       <div id="itemList"></div>
+      <div id="totalInfo" style="display:none"></div>
       <div class="iops">
+        <button id="btnTotalMode" style="background:#1a73e8;color:#fff">框选统分区</button>
         <button id="btnItemAdd">＋ 手动添加一项</button>
         <button id="btnItemSave">保存评分项</button>
         <button id="btnItemCancel">跳过</button>
-        <span class="ino-note">框选后请核对题名与满分</span>
+        <span class="ino-note">框选题后核对题名/满分/打分区蓝框</span>
       </div>
     </div>
   </div>
