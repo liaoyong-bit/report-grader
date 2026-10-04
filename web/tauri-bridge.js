@@ -78,10 +78,11 @@
       await invoke('save_roster', { folder, reportName, students });   // 名单+报告名存到 source_files
       const sync = await invoke('sync_folder', { folder });
       buildReports(sync);
-      if(sync.unmatched && sync.unmatched.length){ app.showUnmatched(sync.unmatched); }
       app.setDetect('✅ 批次已初始化并扫描报告');
-      await app.ensureItemsSetup();
-      if(app.S.reports.length){ app.selectReport(0); }
+      if(sync.unmatched && sync.unmatched.length){
+        app.showUnmatched(sync.unmatched); app.S.pendingItemsSetup = true;
+      } else { await app.ensureItemsSetup(); }
+      if(app.S.reports.length && !app.S.pendingItemsSetup){ app.selectReport(0); }
     } catch(e) { app.setErr('⚠ ' + e); }
   };
 
@@ -93,16 +94,23 @@
       const folder = app.S.folder;
       const sync = await invoke('sync_folder', { folder });
       buildReports(sync);
-      if(sync.unmatched && sync.unmatched.length){ app.showUnmatched(sync.unmatched); }
       app.setDetect('已同步批次' + (sync.added ? '，新增 ' + sync.added + ' 份' : ''));
-      await app.ensureItemsSetup();
-      if(app.S.reports.length){ app.selectReport(0); }
+      if(sync.unmatched && sync.unmatched.length){
+        app.showUnmatched(sync.unmatched); app.S.pendingItemsSetup = true;
+      } else { await app.ensureItemsSetup(); }
+      if(app.S.reports.length && !app.S.pendingItemsSetup){ app.selectReport(0); }
     } catch(e) { app.setErr('⚠ ' + e); }
   };
   // —— 已有批次提示：重新设置 → 打开初始化向导
   document.getElementById('btnBatchReset').onclick = () => {
     document.getElementById('batchMask').style.display = 'none';
     app.openWizard();
+  };
+  // —— 挂载报告完成后再进评分项设置，避免两个弹窗叠加
+  document.getElementById('btnUnmatchDone').onclick = () => {
+    document.getElementById('unmatchMask').style.display = 'none';
+    if(app.S.pendingItemsSetup){ app.S.pendingItemsSetup = false; app.ensureItemsSetup(); }
+    if(app.S.reports.length){ app.selectReport(0); }
   };
   window.__bridge.resolveUnmatched = async (folder, item, action) => {
     try {
