@@ -1233,137 +1233,39 @@ function renderScoreBoxes(){
 }
 
 async function runOcr(rt){
-  if(window.__bridge && window.__bridge.ocrImage){
-    try{
-      const img = cropTemplate(rt);
-      if(img){ const t = await window.__bridge.ocrImage(dataUrlToBytes(img)); if(t && t.trim()) return t.trim(); }
-    }catch(e){ if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR 失败: '+String(e&&e.message||e)); }
-  } else if(window.Tesseract){
+  if(window.Tesseract){
     try{
       const img = cropTemplate(rt);
       if(img){ const t = await recognizeOcr(img); if(t && t.trim()) return t.trim(); }
+      if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR 返回空');
     }catch(e){ if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR 失败: '+String(e&&e.message||e)); }
+  } else if(window.__bridge && window.__bridge.log){
+    window.__bridge.log('Tesseract 未加载，回退文本层');
   }
   const hit=[];
   for(const it of (S.tplTextItems||[])){ const pt=S.tplVp.convertToViewportPoint(it.x,it.y); if(pt[0]>=rt.x&&pt[0]<=rt.x+rt.w&&pt[1]>=rt.y&&pt[1]<=rt.y+rt.h) hit.push(it); }
   hit.sort((a,b)=>a.yTop-b.yTop);
   return hit.map(i=>i.str.trim()).filter(Boolean).join(' ');
 }
-
-function dataUrlToBytes(dataUrl){
-  const b64 = String(dataUrl).split(',')[1] || '';
-  const bin = atob(b64);
-  const arr = new Uint8Array(bin.length);
-  for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
-  return arr;
-}
-function renderTotalBox(){
-  const pre = el.tplPreview;
-  const host = S.tplInner||pre;
-  pre.querySelectorAll('.tpl-total,.tpl-total-dot').forEach(n=>n.remove());
-  if(!S_TOTAL_RECT) return;
-  const t=S_TOTAL_RECT;
-  const d=document.createElement('div'); d.className='tpl-total';
-  d.style.left=t.x+'px'; d.style.top=t.y+'px'; d.style.width=t.w+'px'; d.style.height=t.h+'px';
-  host.appendChild(d);
-  const n=Math.max(1,t.count);
-  for(let i=0;i<n;i++){
-    const cx=t.x+(i+0.5)*t.w/n;
-    const dot=document.createElement('div'); dot.className='tpl-total-dot';
-    dot.style.left=cx+'px'; dot.style.top=t.y+'px';
-    host.appendChild(dot);
-  }
-  el.totalInfo.style.display='block';
-  el.totalInfo.innerHTML='统分区已框选（绿色框），共 <b>'+n+'</b> 个分数位置（各题分+总分）按等分分布。数量：';
-  const inp=document.createElement('input'); inp.type='number'; inp.min='1'; inp.value=n; inp.style.width='56px';
-  inp.onchange=()=>{ S_TOTAL_RECT.count=Math.max(1,parseInt(inp.value,10)||1); renderTotalBox(); };
-  el.totalInfo.appendChild(inp);
-  el.totalInfo.appendChild(document.createTextNode(' 个（改后点任意处应用）'));
-}
-function renderItemList(){
-  const out=[];
-  S_TPL_RECTS.forEach((rt,i)=>{
-    const div=document.createElement('div'); div.className='irow';
-    const no=document.createElement('span'); no.className='ino'; no.textContent=(i+1)+'.';
-    const name=document.createElement('input'); name.type='text';
-    name.value=rt.item_name||guessName(rt.text); name.placeholder='题名';
-    name.oninput=()=>{ rt.item_name=name.value; };
-    const max=document.createElement('input'); max.type='number'; max.min='0'; max.value=rt.max_score; max.placeholder='满分';
-    max.oninput=()=>{ rt.max_score=parseInt(max.value,10)||0; };
-    const off=document.createElement('input'); off.type='number'; off.min='0'; off.value=Math.round(rt.scoreX||0); off.placeholder='打分区列px';
-    off.title='标题向右偏移多少是打分区';
-    off.oninput=()=>{ rt.scoreX=parseInt(off.value,10)||0; renderScoreBoxes(); };
-    const del=document.createElement('button'); del.textContent='删';
-    del.onclick=()=>{ S_TPL_RECTS.splice(i,1); renderItemList(); renderScoreBoxes(); };
-    div.appendChild(no); div.appendChild(name); div.appendChild(max); div.appendChild(off); div.appendChild(del);
-    out.push(div);
-  });
-  S_ITEMS.forEach((it,ix)=>{
-    const div=document.createElement('div'); div.className='irow';
-    const no=document.createElement('span'); no.className='ino'; no.textContent='+';
-    const name=document.createElement('input'); name.type='text'; name.value=it.item_name; name.placeholder='题名';
-    name.oninput=()=>{ it.item_name=name.value; };
-    const max=document.createElement('input'); max.type='number'; max.min='0'; max.value=it.max_score; max.placeholder='满分';
-    max.oninput=()=>{ it.max_score=parseInt(max.value,10)||0; };
-    const del=document.createElement('button'); del.textContent='删';
-    del.onclick=()=>{ S_ITEMS.splice(ix,1); renderItemList(); };
-    div.appendChild(no); div.appendChild(name); div.appendChild(max); div.appendChild(del);
-    out.push(div);
-  });
-  el.itemList.innerHTML='';
-  out.forEach(n=>el.itemList.appendChild(n));
-}
-
-function guessName(t){
-  const m=String(t||'').match(/[一二三四五六七]、([^（]{1,18})/);
-  return m ? m[1].trim() : (t||'').slice(0,18);
-}
-
-el.btnItemAdd.onclick=()=>{ S_ITEMS.push({item_name:'', max_score:20}); renderItemList(); };
-el.btnItemCancel.onclick=()=>{ el.itemMask.style.display='none'; };
-el.btnTotalMode.onclick=()=>{
-  S_TOTAL_MODE=!S_TOTAL_MODE;
-  el.btnTotalMode.style.background = S_TOTAL_MODE ? '#e07b39' : '#1a73e8';
-  if(S_TOTAL_MODE){ el.totalInfo.style.display='block'; el.totalInfo.textContent='正在框选统分区：请在预览上拖选统分表整行区域（一条线框出所有分数所在处）。'; }
-};
-el.btnItemSave.onclick=async ()=>{
-  const items=[];
-  S_TPL_RECTS.forEach((rt,i)=>{
-    items.push({ item_index:i, item_name:rt.item_name||guessName(rt.text)||('第'+(i+1)+'项'),
-      max_score:rt.max_score||0, score_page:rt.pageIndex||0, score_x:Math.round((rt.scoreX||0)/(S.tplScale||1)),
-      title_rect:JSON.stringify({x:rt.x,y:rt.y,w:rt.w,h:rt.h}), total_region:'{}' });
-  });
-  S_ITEMS.forEach((it,ix)=>{
-    items.push({ item_index:S_TPL_RECTS.length+ix,
-      item_name:it.item_name||('第'+(S_TPL_RECTS.length+ix+1)+'项'),
-      max_score:it.max_score||0, score_page:0, score_x:0, title_rect:'{}', total_region:'{}' });
-  });
-  if(!items.length){ setErr('请至少框选或添加一项'); return; }
-  const hasTotal = !!(S_TOTAL_RECT && S_TOTAL_RECT.w>0);
-  if(hasTotal){
-    items.push({ item_index:-1, item_name:'__total__', max_score:0, score_page:0, score_x:0,
-      title_rect:'{}', total_region:JSON.stringify({x:S_TOTAL_RECT.x,y:S_TOTAL_RECT.y,w:S_TOTAL_RECT.w,h:S_TOTAL_RECT.h,count:S_TOTAL_RECT.count}) });
-  }
-  if(window.__bridge && window.__bridge.saveBatchItems){
-    await window.__bridge.saveBatchItems(S.folder, items).catch(e=>{ setErr('⚠ '+e); return; });
-  }
-  S.itemsTemplate=items.filter(x=>x.item_index>=0).map(it=>({item_name:it.item_name, max_score:it.max_score, score_x:it.score_x||0}));
-  el.itemMask.style.display='none';
-  setDetect('✅ 评分项已固化：'+S.itemsTemplate.length+' 项'+(hasTotal?'，含统分区':''));
-  if(S.reports.length){ selectReport(0); }
-};
-/* ==================== OCR（tesseract.js，本地嵌入） ==================== */
-let S_ocrWorker=null;
 async function ensureOcrWorker(){
   if(S_ocrWorker) return S_ocrWorker;
+  const abs = (rel)=> new URL(rel, location.href).href;
+  const workerPath = abs('./lib/ocr/package/dist/worker.min.js');
+  const corePath = abs('./lib/ocr/package/tesseract-core-lstm.wasm.js');
+  const langPath = abs('./lib/ocr/');
+  if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR 启动 workerPath='+workerPath);
   S_ocrWorker = await Tesseract.createWorker({
-    logger: ()=>{},
-    workerPath: 'lib/ocr/package/dist/worker.min.js',
-    corePath: 'lib/ocr/package/tesseract-core-lstm.wasm.js',
-    langPath: 'lib/ocr/',
+    workerPath, corePath, langPath,
+    workerBlobURL: false,
+    logger: m=>{ if(window.__bridge && window.__bridge.log && m && m.status) window.__bridge.log('OCR '+m.status); },
+    errorHandler: e=>{ if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR worker 错误: '+String(e&&e.message||e)); }
+  }).catch(err=>{
+    if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR createWorker 失败: '+String(err&&err.message||err));
+    throw err;
   });
   await S_ocrWorker.loadLanguage('chi_sim');
   await S_ocrWorker.initialize('chi_sim');
+  if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR worker 就绪 chi_sim');
   return S_ocrWorker;
 }
 async function recognizeOcr(img){
