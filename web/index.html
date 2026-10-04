@@ -95,7 +95,7 @@
     position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 97;
   }
   #itemBox {
-    background: #fff; border-radius: 10px; padding: 20px 24px; width: 860px; max-width: 94vw; max-height: 90vh;
+    background: #fff; border-radius: 10px; padding: 20px 24px; width: 860px; max-width: 94vw; height: min(92vh, 940px);
     display: flex; flex-direction: column; box-shadow: 0 8px 30px rgba(0,0,0,.3); overflow: hidden;
   }
   #itemBox h2 { font-size: 16px; color: #2b3a55; margin-bottom: 6px; }
@@ -111,7 +111,7 @@
     position: absolute; border: 2px solid #e07b39; background: rgba(224,123,57,.12); box-sizing: border-box; pointer-events: none;
   }
   #tplPreview .tpl-box .tpl-idx { position:absolute; left:2px; top:-14px; font-size:11px; color:#e07b39; background:#fff; padding:0 4px; border-radius:3px; }
-  #itemList { flex: 1 1 auto; overflow: auto; border: 1px solid #eef1f5; border-radius: 6px; padding: 8px; margin-bottom: 12px; min-height: 120px; }
+  #itemList { flex: 0 0 auto; overflow: auto; border: 1px solid #eef1f5; border-radius: 6px; padding: 8px; margin-bottom: 12px; max-height: 210px; }
   #itemList .irow { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px dashed #eceff1; font-size: 13px; }
   #itemList .irow .ino { width: 34px; color: #2b3a55; font-weight: 600; }
   #itemList .irow input[type=text] { flex: 1; padding: 4px 6px; border: 1px solid #dde1e6; border-radius: 5px; font-size: 13px; }
