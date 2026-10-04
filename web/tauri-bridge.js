@@ -114,7 +114,8 @@
         const file = toFile(r.name, r.path, data);
         const bytes = await file.arrayBuffer();
         log('  getDocument start, bytes=' + bytes.byteLength);
-        const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+        const pdfData = bytes.slice(0);   // 副本给 pdf.js（解析会 detach 传入的 buffer），原件 bytes 保留给导出用
+        const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
         r.pdf = pdf; r.bytes = bytes; r.file = file;
         log('  getDocument OK, pages=' + (pdf && pdf.numPages));
       } catch(e) {
