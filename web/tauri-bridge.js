@@ -120,7 +120,6 @@
   window.__bridge.getTemplatePath = async (folder) => { return await invoke('get_template_path', { folder }); };
   window.__bridge.readPdf = async (folder, path) => { return await invoke('read_pdf', { folder, path }); };
   window.__bridge.pickTemplate = async (folder) => { return await invoke('pick_template', { folder }); };
-  window.__bridge.ocrImage = async (bytes) => { return await invoke('ocr_image', { bytes: Array.from(bytes) }); };
 
   // —— 首次打开某份报告时从磁盘读入 PDF
   // 关键：app.js 里列表点击 li.onclick 与"下一份"逻辑调用的都是【全局 selectReport】，
