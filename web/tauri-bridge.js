@@ -50,12 +50,13 @@
     try {
       log('click btnLoadFolder');
       const picked = await invoke('pick_pdf_folder'); // {folder, hasDb, batch}
-      log('pick_pdf_folder → folder=' + (picked ? picked.folder : 'null') + ' hasDb=' + (picked && picked.hasDb));
+      const hasDb = picked && (picked.has_db !== undefined ? picked.has_db : picked.hasDb);
+      log('pick_pdf_folder → folder=' + (picked ? picked.folder : 'null') + ' hasDb=' + hasDb);
       if(!picked || !picked.folder){ return; }
       app.S.folder = picked.folder;
       app.S.mode = 'tauri';
 
-      if(picked.hasDb){
+      if(hasDb){
         // 已有批次 → 增量同步（自动识别新放入的 PDF）
         const sync = await invoke('sync_folder', { folder: picked.folder });
         buildReports(sync);
