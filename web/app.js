@@ -2178,7 +2178,7 @@ async function ocrReportBasic(path, basicFields){
     for(const f of fields){
       const type=f[0]; let page=f[1]||0; let rect={};
       try{ rect=JSON.parse(f[2]||'{}'); }catch(e){}
-      if(!rect.w || !rect.h) continue;
+      if(!rect.w && !rect.h && !(rect.left!=null && rect.top!=null && rect.right!=null && rect.bottom!=null)) continue;
       try{
         const pobj=await pdf.getPage(Math.max(1,page));
         const vp=await pobj.getViewport({scale:2});
