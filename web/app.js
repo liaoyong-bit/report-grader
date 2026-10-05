@@ -2201,8 +2201,14 @@ async function ocrReportBasic(path, basicFields){
         const c2=document.createElement('canvas'); c2.width=pw; c2.height=ph;
         c2.getContext('2d').putImageData(img,0,0);
         const b64=c2.toDataURL('image/png').split(',')[1];
-        const txt=(await window.__bridge.ocrImageB64(b64).catch(()=>''))||'';
+        let txt='';
+        try{ txt=await window.__bridge.ocrImageB64(b64); }catch(e){ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[ocrERR] type='+type+' err='+e); }
+        txt=(txt||'').trim();
         if(window.__bridge && window.__bridge.log) window.__bridge.log('[ocrtpl] type='+type+' page='+page+' rect='+JSON.stringify(rect)+' px='+px+' py='+py+' w='+pw+' h='+ph+' ocr="'+txt+'"');
+        try{ if(window.__bridge && window.__bridge.saveToOutput){
+          const raw=atob(b64); const arr=new Uint8Array(raw.length); for(let i=0;i<raw.length;i++) arr[i]=raw.charCodeAt(i);
+          await window.__bridge.saveToOutput('ocr_debug/'+type+'_'+Date.now()+'.png', arr).catch(()=>{});
+        }}catch(e){}
         if(type==='no') res.no=txt; else if(type==='name') res.name=txt; else if(type==='class') res.cls=txt; else if(type==='exp') res.exp=txt;
       }catch(e){}
     }
