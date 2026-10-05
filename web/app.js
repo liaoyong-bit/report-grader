@@ -2071,28 +2071,34 @@ document.addEventListener('keydown',(e)=>{
 });
 // —— 保存评分项后自动扫描原始报告并 OCR 基本信息，对比名单生成核心表
 async function runPrepScan(){
-  if(!window.__bridge || !window.__bridge.syncFolder || !S.folder) return;
+  console.log('[runPrepScan] start folder=', S.folder, 'syncBridge=', !!(window.__bridge&&window.__bridge.syncFolder));
+  if(!window.__bridge || !window.__bridge.syncFolder || !S.folder){ console.log('[runPrepScan] abort(缺sync或folder)'); return; }
   setDetect('正在扫描并识别报告基本信息...');
   try{
-    await window.__bridge.syncFolder(S.folder);
-    refreshPrepOverview();
-    const ov = S.prepOv;
-    if(!ov || !ov.rows || !ov.rows.length) return;
-    const roster = await window.__bridge.getRoster(S.folder).catch(()=>[]);
-    const basicFields = await window.__bridge.getBasicFields(S.folder).catch(()=>[]);
-    const need = ov.rows.filter(r=>!r.matched);
-    let ok=0;
-    for(const r of need){
-      try{
-        const ocr = await ocrReportBasic(r.path, basicFields);
-        if(!ocr) continue;
-        await window.__bridge.saveReportOcr(S.folder, r.key, (ocr.no||'').trim(), (ocr.name||'').trim(), (ocr.cls||'').trim(), (ocr.exp||'').trim());
-        const hit = roster.find(s=> (ocr.no && s.no===ocr.no.trim()) || (ocr.name && s.name===ocr.name.trim()));
-        if(hit){ await window.__bridge.resolveUnmatched(S.folder, {path:r.path}, hit.no); ok++; }
-      }catch(e){ /* 单份失败不影响整体 */ }
-    }
-    setDetect('✅ 扫描识别完成'+(ok?('，自动挂靠 '+ok+' 份'):''));
-  }catch(e){ setErr('扫描识别失败: '+e); }
+    const sync = await window.__bridge.syncFolder(S.folder);
+    console.log('[runPrepScan] sync ok added=', sync && sync.added, 'unmatched=', sync && sync.unmatched && sync.unmatched.length);
+  }catch(e){ console.log('[runPrepScan] sync FAIL:', e); setErr('扫描同步失败: '+e); }
+  refreshPrepOverview();
+  const ov = S.prepOv;
+  const rows = (ov && ov.rows) || [];
+  console.log('[runPrepScan] prepOverview rows=', rows.length);
+  if(!rows.length) return;
+  const roster = await window.__bridge.getRoster(S.folder).catch(()=>[]);
+  const basicFields = await window.__bridge.getBasicFields(S.folder).catch(()=>[]);
+  console.log('[runPrepScan] roster=', roster && roster.length, ' basicFields=', basicFields && basicFields.length);
+  const need = rows.filter(r=>!r.matched);
+  let ok=0;
+  for(const r of need){
+    try{
+      const ocr = await ocrReportBasic(r.path, basicFields);
+      if(!ocr){ console.log('[runPrepScan] ocr none:', r.path); continue; }
+      console.log('[runPrepScan] ocr:', JSON.stringify(ocr));
+      await window.__bridge.saveReportOcr(S.folder, r.key, (ocr.no||'').trim(), (ocr.name||'').trim(), (ocr.cls||'').trim(), (ocr.exp||'').trim());
+      const hit = roster.find(s=> (ocr.no && s.no===ocr.no.trim()) || (ocr.name && s.name===ocr.name.trim()));
+      if(hit){ await window.__bridge.resolveUnmatched(S.folder, {path:r.path}, hit.no); ok++; console.log('[runPrepScan] 自动挂靠', hit.no, r.path); }
+    }catch(e){ console.log('[runPrepScan] 单份失败:', e); }
+  }
+  setDetect('✅ 扫描识别完成'+(ok?('，自动挂靠 '+ok+' 份'):''));
   refreshPrepOverview();
 }
 async function ocrReportBasic(path, basicFields){
@@ -2155,7 +2161,9 @@ el.btnItemSave.onclick=async ()=>{
   }
   S.itemsTemplate=items.filter(x=>x.item_index>=0).map(it=>({item_name:it.item_name, max_score:it.max_score, score_x:it.score_x||0}));
   el.itemMask.style.display='none';
+  console.log('[btnItemSave] 保存 items=', items.length, ' basicFields=', S_BASIC_FIELDS.length);
   setDetect('✅ 评分项已固化：'+S.itemsTemplate.length+' 项'+(hasTotal?'，含统分区':''));
+  refreshPrepOverview();
   if(S.reports.length){ selectReport(0); }
   runPrepScan();
 };
