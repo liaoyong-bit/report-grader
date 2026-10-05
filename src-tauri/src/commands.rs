@@ -78,6 +78,23 @@ pub fn resolve_unmatched(folder: String, path: String, student_no: String) -> Re
     scan::resolve_unmatched(&conn, &folder, &path, &student_no)
 }
 
+/// 准备盘点：状态总表数据（挂靠/新增/批改状态）+ 缺交名单
+#[tauri::command]
+pub fn prep_overview(folder: String) -> Result<db::PrepOverview, String> {
+    let conn = db::open(&folder)?;
+    let bid = db::find_batch_by_folder(&conn)?.map(|b| b.0).ok_or("当前文件夹尚未初始化批次")?;
+    db::prep_overview(&conn, bid)
+}
+
+/// 名单列表（挂靠下拉用）
+#[tauri::command]
+pub fn get_roster(folder: String) -> Result<Vec<db::StudentIn>, String> {
+    let conn = db::open(&folder)?;
+    let bid = db::find_batch_by_folder(&conn)?.map(|b| b.0).ok_or("当前文件夹尚未初始化批次")?;
+    let sts = db::get_students(&conn, bid)?;
+    Ok(sts.into_iter().map(|s| db::StudentIn { no: s.no, name: s.name, cls: s.cls }).collect())
+}
+
 /// 读取 PDF 字节（path 为相对所选文件夹的相对路径）
 #[tauri::command]
 pub fn read_pdf(folder: String, path: String) -> Result<Vec<u8>, String> {

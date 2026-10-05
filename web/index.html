@@ -82,6 +82,59 @@
   #loginBox .hint { text-align:center; font-size:12.5px; color:#94a3b8; margin-top:10px; }
   #loginBox .hint a { color:#3b82f6; cursor:pointer; }
 
+  /* ===== 准备面板 ===== */
+  #prepView { display:flex; flex-direction:column; height:100%; background:#f5f6f8; }
+  .pv-head {
+    display:flex; align-items:center; gap:10px; padding:10px 16px; flex:0 0 auto;
+    background:#2b3a55; color:#fff; flex-wrap:wrap;
+  }
+  .pv-title { font-size:17px; font-weight:600; }
+  .pv-folder { font-size:12.5px; color:#cbd5e1; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pv-head button { padding:6px 12px; border:none; border-radius:6px; cursor:pointer; background:#3d5a80; color:#fff; font-size:13px; }
+  .pv-head button:hover { background:#4d6d99; }
+  .pv-head button.ghost { background:rgba(255,255,255,.12); }
+  .pv-selbar { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-left:8px; }
+  .pv-sel { font-size:12px; padding:2px 8px; border-radius:10px; background:rgba(255,255,255,.14); color:#fff; }
+  .pv-sel.ok { background:#22c55e; }
+  .pv-sel.miss { background:#ef4444; }
+  .pv-selbar button { padding:3px 8px; font-size:12px; }
+  .pv-body { flex:1; display:flex; min-height:0; }
+  .pv-left { flex:1; display:flex; flex-direction:column; min-width:0; }
+  .pv-tblwrap { flex:1; overflow:auto; background:#fff; margin:10px 0 0 10px; border:1px solid #dde1e6; border-radius:8px; }
+  #prepTable { width:100%; border-collapse:collapse; font-size:13px; }
+  #prepTable th { position:sticky; top:0; background:#eef1f5; text-align:left; padding:7px 9px; border-bottom:1px solid #dde1e6; font-weight:600; white-space:nowrap; }
+  #prepTable td { padding:6px 9px; border-bottom:1px solid #f0f2f5; vertical-align:middle; white-space:nowrap; }
+  #prepTable tr:hover { background:#f7fafc; }
+  #prepTable .col-check { width:40px; text-align:center; }
+  .tag { display:inline-block; font-size:11px; padding:1px 7px; border-radius:9px; }
+  .tag.mat { background:#e6f7ec; color:#1b7a3d; }
+  .tag.new { background:#fff3e6; color:#c2620a; }
+  .tag.miss { background:#fdecec; color:#c62828; }
+  .tag.done { background:#e6f7ec; color:#1b7a3d; }
+  .tag.todo { background:#eef1f5; color:#64748b; }
+  .opbtn { font-size:12px; padding:2px 8px; margin-right:4px; border:none; border-radius:5px; cursor:pointer; }
+  .opbtn.view { background:#eef1f5; color:#334155; }
+  .opbtn.attach { background:#e07b39; color:#fff; }
+  .opbtn.attached { background:#cbd5e1; color:#64748b; cursor:default; }
+  .pv-stats { flex:0 0 auto; padding:9px 14px; margin:8px 10px 10px; background:#fff; border:1px solid #dde1e6; border-radius:8px; font-size:13px; display:flex; gap:16px; flex-wrap:wrap; }
+  .pv-stats b { font-size:15px; }
+  .s-new { color:#c2620a; } .s-miss { color:#c62828; } .s-done { color:#1b7a3d; } .s-todo { color:#e07b39; }
+  .pv-right { width:300px; min-width:280px; background:#fff; border-left:1px solid #dde1e6; padding:12px; overflow-y:auto; display:flex; flex-direction:column; gap:12px; }
+  .pv-card { border:1px solid #dde1e6; border-radius:8px; padding:12px; }
+  .pv-card-tt { font-size:14px; font-weight:700; color:#2b3a55; margin-bottom:10px; }
+  .pv-card .pv-range { display:block; font-size:13px; margin-bottom:8px; cursor:pointer; }
+  .pv-card button { width:100%; box-sizing:border-box; padding:7px; margin-top:6px; border:none; border-radius:6px; cursor:pointer; font-size:13px; background:#eef1f5; color:#334155; }
+  .pv-start { background:#e07b39 !important; color:#fff !important; font-size:15px; padding:11px !important; font-weight:600; }
+  #attachMask { position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; z-index:100; }
+  #attachBox { background:#fff; border-radius:12px; padding:24px 28px; width:420px; box-shadow:0 10px 36px rgba(0,0,0,.35); }
+  #attachBox h2 { font-size:18px; text-align:center; color:#2b3a55; margin-bottom:12px; }
+  .attach-tt { font-size:12.5px; color:#64748b; margin-bottom:8px; word-break:break-all; }
+  #attachSel { width:100%; box-sizing:border-box; padding:9px; border:1px solid #cbd5e1; border-radius:7px; font-size:14px; margin-bottom:10px; }
+  #attachBox .row { display:flex; gap:10px; }
+  #attachBox .row button { flex:1; padding:10px; border:none; border-radius:7px; cursor:pointer; font-weight:600; }
+  #attachBox .row button.primary { background:#3b82f6; color:#fff; }
+
+
 
   /* 批阅概览弹窗 */
   #overviewMask {
@@ -368,7 +421,7 @@
   <!-- 帮助下拉面板 -->
   <div id="helpPanel" style="display:none">
     <h3>帮助</h3>
-    <p><b>版本：</b>0.1.7</p>
+    <p><b>版本：</b>0.1.8</p>
     <p><b>作者：</b>利奥</p>
     <hr>
     <div class="help-steps">
@@ -476,6 +529,60 @@
     loadScript(localPdfLib, (e)=>{ if(e){ loadScript(cdnPdfLib, (e2)=>{ if(e2){ fail('pdflib'); } else { loaded('pdflib'); } }); } else { loaded('pdflib'); } });
   }
   </script>
+  <!-- 准备面板（第一块：登录后进入） -->
+  <div id="prepView" style="display:none">
+    <div class="pv-head">
+      <div class="pv-title">准备面板</div>
+      <button id="btnPrepFolder">📁 选报告文件夹</button>
+      <span id="prepFolder" class="pv-folder">未选择文件夹</span>
+      <div id="pvSelbar" class="pv-selbar"></div>
+      <div class="spacer"></div>
+      <button id="btnPrepBack" class="ghost">退出登录</button>
+    </div>
+    <div class="pv-body">
+      <div class="pv-left">
+        <div class="pv-tblwrap">
+          <table id="prepTable">
+            <thead><tr>
+              <th class="col-check">勾选</th>
+              <th>学号</th><th>姓名</th><th>班级</th><th>报告名称</th><th>文件</th>
+              <th>匹配</th><th>批改</th><th>操作</th>
+            </tr></thead>
+            <tbody id="prepTbody"></tbody>
+          </table>
+        </div>
+        <div id="prepStats" class="pv-stats"></div>
+      </div>
+      <div class="pv-right">
+        <div class="pv-card">
+          <div class="pv-card-tt">名单管理</div>
+          <div id="prepRoster"></div>
+        </div>
+        <div class="pv-card">
+          <div class="pv-card-tt">批改范围</div>
+          <label class="pv-range"><input type="radio" name="prepRange" value="increment" checked> 增量批改（新增＋未打分）</label>
+          <label class="pv-range"><input type="radio" name="prepRange" value="select"> 选择一部分（请在左侧表中勾选）</label>
+          <label class="pv-range"><input type="radio" name="prepRange" value="all"> 全部重新批改</label>
+        </div>
+        <button id="btnPrepStart" class="primary pv-start">进入批改</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 挂靠弹窗 -->
+  <div id="attachMask" style="display:none">
+    <div id="attachBox">
+      <h2>挂靠到名单学生</h2>
+      <div class="attach-tt" id="attachFile"></div>
+      <select id="attachSel"></select>
+      <div id="attachErr" class="err"></div>
+      <div class="row">
+        <button id="btnAttachOk" class="primary">确认挂靠</button>
+        <button id="btnAttachCancel">取消</button>
+      </div>
+    </div>
+  </div>
+
   <script src="lib/pdf.min.js"></script>
   <script src="lib/pdf-lib.min.js"></script>
   <script src="lib/exceljs.min.js"></script>

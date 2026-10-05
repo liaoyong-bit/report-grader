@@ -33,6 +33,8 @@ pub fn run() {
             commands::save_basic_fields,
             commands::get_basic_fields,
             commands::save_report_ocr,
+            commands::prep_overview,
+            commands::get_roster,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

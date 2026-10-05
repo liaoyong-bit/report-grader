@@ -517,6 +517,113 @@ pub fn list_all_grading(conn: &Connection, batch_id: i64) -> Result<Vec<GradeRow
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| format!("解析成绩失败: {e}"))
 }
 
+/// 准备盘点：每份报告一行（挂靠/新增/批改状态），缺交名单单独列出 —— 供准备面板状态总表
+#[derive(serde::Serialize)]
+pub struct PrepRow {
+    pub key: String,
+    pub path: String,
+    pub fname: String,
+    pub ocr_no: String,
+    pub ocr_name: String,
+    pub ocr_class: String,
+    pub ocr_exp: String,
+    pub report_name: String,
+    pub stu_no: String,
+    pub stu_name: String,
+    pub stu_cls: String,
+    pub matched: bool, // 已挂靠到名单
+    pub is_new: bool,  // 未挂靠 → 需挂靠/新增
+    pub graded: bool,  // 已有打分
+    pub done: bool,    // 已批
+}
+#[derive(serde::Serialize)]
+pub struct PrepMissing {
+    pub no: String,
+    pub name: String,
+    pub cls: String,
+}
+#[derive(serde::Serialize)]
+pub struct PrepOverview {
+    pub rows: Vec<PrepRow>,
+    pub missing: Vec<PrepMissing>,
+}
+
+pub fn prep_overview(conn: &Connection, batch_id: i64) -> Result<PrepOverview, String> {
+    let mut rows_out = Vec::new();
+    {
+        let mut st = conn
+            .prepare(
+                "SELECT r.id, r.orig_name, r.source_path, r.student_id, r.ocr_no, r.ocr_name, r.ocr_class, r.ocr_exp,
+                        r.report_name, r.submit_status,
+                        EXISTS(SELECT 1 FROM report_items ri WHERE ri.report_id=r.id AND ri.score>0 AND ri.activated=1)
+                 FROM reports r WHERE r.batch_id=?1 AND r.match_status='matched'
+                 ORDER BY r.orig_name",
+            )
+            .map_err(|e| format!("准备盘点查询失败: {e}"))?;
+        let rows = st
+            .query_map(params![batch_id], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, Option<i64>>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, String>(5)?,
+                    r.get::<_, String>(6)?,
+                    r.get::<_, String>(7)?,
+                    r.get::<_, String>(8)?,
+                    r.get::<_, String>(9)?,
+                    r.get::<_, bool>(10)?,
+                ))
+            })
+            .map_err(|e| format!("读取准备盘点失败: {e}"))?;
+        for row in rows {
+            let (rid, orig, src, sid, no, nm, cl, ex, rn, submit, graded) =
+                row.map_err(|e| format!("解析准备盘点失败: {e}"))?;
+            let (sno, sname, scls) = match sid {
+                Some(sid) => match find_student_by_id(conn, sid)? {
+                    Some(s) => (s.no, s.name, s.cls),
+                    None => (String::new(), String::new(), String::new()),
+                },
+                None => (String::new(), String::new(), String::new()),
+            };
+            rows_out.push(PrepRow {
+                key: orig.clone(),
+                path: src,
+                fname: orig,
+                ocr_no: no, ocr_name: nm, ocr_class: cl, ocr_exp: ex,
+                report_name: rn,
+                stu_no: sno, stu_name: sname, stu_cls: scls,
+                matched: sid.is_some(),
+                is_new: sid.is_none(),
+                graded,
+                done: submit == "submitted",
+            });
+        }
+    }
+    let mut missing = Vec::new();
+    {
+        let mut st = conn
+            .prepare(
+                "SELECT s.student_no, s.name, s.class FROM students s
+                 WHERE s.batch_id=?1 AND NOT EXISTS(
+                     SELECT 1 FROM reports r
+                     WHERE r.batch_id=s.batch_id AND r.student_id=s.id AND r.match_status='matched'
+                 ) ORDER BY s.student_no",
+            )
+            .map_err(|e| format!("缺交名单查询失败: {e}"))?;
+        let rows = st
+            .query_map(params![batch_id], |r| {
+                Ok(PrepMissing { no: r.get(0)?, name: r.get(1)?, cls: r.get::<_, Option<String>>(2)?.unwrap_or_default() })
+            })
+            .map_err(|e| format!("读取缺交名单失败: {e}"))?;
+        for r in rows {
+            missing.push(r.map_err(|e| format!("解析缺交名单失败: {e}"))?);
+        }
+    }
+    Ok(PrepOverview { rows: rows_out, missing })
+}
+
 /// 批次评分项模板（固化：题名/满分/统分区/每题打分区等）
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct BatchItem {

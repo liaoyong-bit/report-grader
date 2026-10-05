@@ -50,6 +50,11 @@ const el = {
   btnChangePwd: $('btnChangePwd'), pwdMask: $('pwdMask'), pwdUser: $('pwdUser'),
   pwdOld: $('pwdOld'), pwdNew: $('pwdNew'), pwdNew2: $('pwdNew2'), pwdErr: $('pwdErr'),
   btnPwdSave: $('btnPwdSave'), btnPwdCancel: $('btnPwdCancel'),
+  prepView: $('prepView'), main: $('main'), btnPrepFolder: $('btnPrepFolder'), prepFolder: $('prepFolder'),
+  pvSelbar: $('pvSelbar'), prepTable: $('prepTable'), prepTbody: $('prepTbody'), prepStats: $('prepStats'),
+  prepRoster: $('prepRoster'), btnPrepBack: $('btnPrepBack'), btnPrepStart: $('btnPrepStart'),
+  attachMask: $('attachMask'), attachBox: $('attachBox'), attachFile: $('attachFile'),
+  attachSel: $('attachSel'), attachErr: $('attachErr'), btnAttachOk: $('btnAttachOk'), btnAttachCancel: $('btnAttachCancel'),
   btnOpen: $('btnOpen'), btnLoadFolder: $('btnLoadFolder'),
   reportList: $('reportList'),
   statTotal: $('statTotal'), statDone: $('statDone'), statPending: $('statPending'),
@@ -148,7 +153,7 @@ async function doLogin(){
   if(!window.__bridge || !window.__bridge.login){ el.liErr.textContent='当前环境不支持登录'; return; }
   try{
     const name = await window.__bridge.login(u, p);
-    if(name){ S.teacher=name; S.loginUser=u; localStorage.setItem('loginUser',u); applyLogin(); el.loginMask.style.display='none'; }
+    if(name){ S.teacher=name; S.loginUser=u; localStorage.setItem('loginUser',u); applyLogin(); el.loginMask.style.display='none'; showPrep(); }
     else el.liErr.textContent='用户名或密码错误';
   }catch(e){ el.liErr.textContent='登录失败: '+e; }
 }
@@ -160,7 +165,7 @@ async function doCreate(){
   try{
     await window.__bridge.createUser(u, n, p);
     const name = await window.__bridge.login(u, p);
-    if(name){ S.teacher=name; S.loginUser=u; localStorage.setItem('loginUser',u); applyLogin(); el.loginMask.style.display='none'; }
+    if(name){ S.teacher=name; S.loginUser=u; localStorage.setItem('loginUser',u); applyLogin(); el.loginMask.style.display='none'; showPrep(); }
     else el.cuErr.textContent='创建成功但自动登录失败，请手动登录';
   }catch(e){ el.cuErr.textContent='创建失败: '+e; }
 }
@@ -219,6 +224,142 @@ function initLibs(){
     }
   });
 }
+/* ==================== 准备面板（第一块） ==================== */
+S.prepChecked = {}; S.prepFilter = null; S.prepRange = 'increment';
+function showPrep(){ S.inPrep = true; el.prepView.style.display='flex'; el.main.style.display='none'; }
+function hidePrep(){ S.inPrep = false; el.prepView.style.display='none'; el.main.style.display='flex'; }
+async function refreshPrepOverview(){
+  if(!window.__bridge || !window.__bridge.prepOverview || !S.folder) return;
+  try{
+    const ov = await window.__bridge.prepOverview(S.folder);
+    S.prepOv = ov;
+    el.prepFolder.textContent = S.folder;
+    renderPrepTable(ov); renderPrepStats(ov); renderPrepRoster(); renderPrepSelbar();
+  }catch(e){ setErr('准备盘点失败: ' + e); }
+}
+function renderPrepTable(ov){
+  const tbody = el.prepTbody; tbody.innerHTML='';
+  const addTd = (tr, txt)=>{ const td=document.createElement('td'); td.textContent=(txt==null?'':String(txt)); tr.appendChild(td); };
+  (ov.rows||[]).forEach((r,i)=>{
+    const tr = document.createElement('tr');
+    const tdC = document.createElement('td'); tdC.className='col-check';
+    const cb = document.createElement('input'); cb.type='checkbox'; cb.dataset.i = i;
+    cb.checked = !!(S.prepChecked && S.prepChecked[i]);
+    cb.addEventListener('change', ()=>{ S.prepChecked[i]=cb.checked; });
+    tdC.appendChild(cb); tr.appendChild(tdC);
+    addTd(tr, r.matched ? r.stu_no : (r.ocr_no||''));
+    addTd(tr, r.matched ? r.stu_name : (r.ocr_name||''));
+    addTd(tr, r.matched ? r.stu_cls : (r.ocr_class||''));
+    addTd(tr, r.report_name || r.ocr_exp || '');
+    addTd(tr, r.fname || r.path || '');
+    const tdM=document.createElement('td');
+    const tm=document.createElement('span'); tm.className='tag '+(r.matched?'mat':'new'); tm.textContent=r.matched?'已挂靠':'待挂靠'; tdM.appendChild(tm); tr.appendChild(tdM);
+    const tdG=document.createElement('td');
+    const tg=document.createElement('span'); tg.className='tag '+(r.done?'done':'todo'); tg.textContent=r.done?'已批':(r.graded?'部分':'待批'); tdG.appendChild(tg); tr.appendChild(tdG);
+    const tdO=document.createElement('td');
+    const vb=document.createElement('button'); vb.className='opbtn view'; vb.textContent='查看';
+    vb.onclick=()=>{ openAttachOrView(r,false); }; tdO.appendChild(vb);
+    if(r.matched){
+      const ab=document.createElement('button'); ab.className='opbtn attached'; ab.textContent='已挂靠'; tdO.appendChild(ab);
+    } else {
+      const ab=document.createElement('button'); ab.className='opbtn attach'; ab.textContent='挂靠';
+      ab.onclick=()=>{ openAttachOrView(r,true); }; tdO.appendChild(ab);
+    }
+    tr.appendChild(tdO);
+    tbody.appendChild(tr);
+  });
+}
+function renderPrepStats(ov){
+  const rows=ov.rows||[], missing=ov.missing||[];
+  const done=rows.filter(r=>r.done).length, todo=rows.filter(r=>!r.done).length, unattach=rows.filter(r=>!r.matched).length;
+  el.prepStats.innerHTML =
+    '报告 <b>'+rows.length+'</b>' +
+    '　缺交 <b class="s-miss">'+missing.length+'</b>' +
+    '　待挂靠 <b class="s-new">'+unattach+'</b>' +
+    '　已批 <b class="s-done">'+done+'</b>' +
+    '　待批 <b class="s-todo">'+todo+'</b>';
+}
+async function renderPrepRoster(){
+  const box=el.prepRoster;
+  if(!window.__bridge || !window.__bridge.getRoster || !S.folder){ box.innerHTML='<div style="color:#888;font-size:13px">请先选择报告文件夹</div>'; return; }
+  try{
+    const list=await window.__bridge.getRoster(S.folder);
+    if(!list || !list.length){
+      box.innerHTML='<div style="color:#c62828;font-size:13px;margin-bottom:6px">尚未导入学生名单</div>'+
+        '<button onclick="window.__app.openPrepImport()">📋 导入学生名单</button>'+
+        '<button onclick="window.__app.openWizard()">下载名单模板</button>';
+    } else {
+      box.innerHTML='<div style="color:#64748b;font-size:12.5px;margin-bottom:6px">已导入 <b>'+list.length+'</b> 名同学</div>'+
+        '<button onclick="window.__app.openPrepImport()">查阅 / 重新导入名单</button>';
+    }
+  }catch(e){ box.innerHTML='<div style="color:#888;font-size:13px">'+e+'</div>'; }
+}
+function renderPrepSelbar(){
+  const el2=el.pvSelbar;
+  if(!window.__bridge || !S.folder){ el2.innerHTML=''; return; }
+  Promise.all([
+    window.__bridge.getBasicFields(S.folder).catch(()=>[]),
+    window.__bridge.getBatchItems(S.folder).catch(()=>[])
+  ]).then(([bf,items])=>{
+    const have = {
+      no: bf.some(x=>x[0]==='no'), name: bf.some(x=>x[0]==='name'),
+      cls: bf.some(x=>x[0]==='class'), exp: bf.some(x=>x[0]==='exp'),
+      items: !!(items && items.length)
+    };
+    const fieldTag=(txt,ok)=>'<span class="pv-sel '+(ok?'ok':'miss')+'">'+txt+(ok?'✓':'✗')+'</span>';
+    el2.innerHTML = fieldTag('学号',have.no)+fieldTag('姓名',have.name)+fieldTag('班级',have.cls)+
+      fieldTag('报告名称',have.exp)+fieldTag('题目与分值',have.items)+
+      '<button onclick="window.__app.openItemSetup()">设置评分项</button>'+
+      '<button onclick="window.__app.prepBasicField()">框选基本信息</button>';
+  }).catch(()=>{ el2.innerHTML=''; });
+}
+async function openAttachOrView(r, doAttach){
+  if(doAttach){
+    S.attachRow=r; el.attachFile.textContent='文件：'+(r.fname||r.path||''); el.attachErr.textContent='';
+    const sel=el.attachSel; sel.innerHTML='';
+    try{
+      const list=await window.__bridge.getRoster(S.folder);
+      if(!list.length){ el.attachErr.textContent='名单为空，请先导入名单'; return; }
+      list.forEach(s=>{ const o=document.createElement('option'); o.value=s.no; o.textContent=s.no+'　'+(s.name||'')+'　'+(s.cls||''); sel.appendChild(o); });
+      el.attachMask.style.display='flex';
+    }catch(e){ el.attachErr.textContent='读取名单失败: '+e; }
+  } else {
+    alert('进入批改后可查看该报告预览。\n文件：'+(r.fname||r.path||''));
+  }
+}
+async function doAttach(){
+  const r=S.attachRow, no=el.attachSel.value;
+  if(!no){ el.attachErr.textContent='请选择名单学生'; return; }
+  try{
+    await window.__bridge.resolveUnmatched(S.folder, {path:r.path}, no);
+    el.attachMask.style.display='none';
+    refreshPrepOverview();
+  }catch(e){ el.attachErr.textContent='挂靠失败: '+e; }
+}
+el.btnAttachOk.onclick=doAttach;
+el.btnAttachCancel.onclick=()=>{ el.attachMask.style.display='none'; };
+el.btnPrepFolder.onclick=()=>{ if(el.btnLoadFolder.onclick) el.btnLoadFolder.onclick(); };
+el.btnPrepBack.onclick=()=>{ hidePrep(); S.teacher=''; localStorage.removeItem('loginUser'); el.loginMask.style.display='flex'; showLogin(); };
+el.btnPrepStart.onclick=()=>{
+  const range=document.querySelector('input[name="prepRange"]:checked');
+  const rv = range ? range.value : 'increment';
+  S.prepRange = rv;
+  const rows = (S.prepOv && S.prepOv.rows) || [];
+  if(rv==='select'){
+    const checked=Object.keys(S.prepChecked||{}).filter(i=>S.prepChecked[i]).map(Number);
+    if(!checked.length){ setErr('请先在左侧表中勾选要批改的报告'); return; }
+    S.prepFilter=new Set(checked.map(i=>(rows[i]||{}).key).filter(Boolean));
+  } else if(rv==='increment'){
+    S.prepFilter=new Set(rows.filter(r=>!r.done).map(r=>r.key).filter(Boolean));
+  } else { S.prepFilter=null; }
+  setErr('');
+  hidePrep();
+  if(S.reports && S.reports.length){ selectReport(0); setDetect('已进入批改'); }
+  else setDetect('已进入批改界面，请载入报告');
+};
+window.prepBasicField = function(){ alert('基本信息框选（学号/姓名/班级/报告名称）将在下一步实现'); };
+window.openPrepImport = function(){ openWizard(); };
+
 initLibs();
 initLoginGate();
 
@@ -1187,7 +1328,8 @@ el.btnUnmatchDone.onclick = ()=>{ el.unmatchMask.style.display='none'; };
 window.__app = { S, el, reportLabel, reportState, renderReportList, updateStats,
   selectReport, loadReports, saveState, initReportState, openWizard, closeWizard,
   showUnmatched, setFile, setDetect, setErr, downloadBlob, buildRecord,
-  openItemSetup, ensureItemsSetup };
+  openItemSetup, ensureItemsSetup,
+  showPrep, hidePrep, refreshPrepOverview, openPrepImport, prepBasicField };
 
 //（注：内容由AI生成）
 /* ==================== 评分项模板设置（步骤一） ==================== */
