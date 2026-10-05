@@ -1443,6 +1443,8 @@ el.btnWizardStart.onclick = async ()=>{
   if(window.__bridge && window.__bridge.initBatch){
     await window.__bridge.initBatch(S.folder, '', S.students);   // 报告名称在挂靠/OCR 后补，向导中不再设置
     closeWizard();
+    // 导入名单完成后回到「核对原始报告」刷新批次
+    if(window.__bridge && window.__bridge.syncFolder && S.folder){ await runSourceVerify(); }
   } else {
     setErr('当前为浏览器模式，请用「载入报告文件夹」');
   }
@@ -2254,5 +2256,5 @@ el.btnItemSave.onclick=async ()=>{
   setDetect('✅ 评分项已固化：'+S.itemsTemplate.length+' 项'+(hasTotal?'，含统分区':''));
   refreshPrepOverview();
   if(S.reports.length){ selectReport(0); }
-  runPrepScan();
+  runSourceVerify();
 };

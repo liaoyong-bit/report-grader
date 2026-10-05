@@ -93,13 +93,10 @@
       hasSetup = !!((bf && bf.length) || (items && items.length));
     }catch(e){}
     if(hasSetup){
-      const sync = await invoke('sync_folder', { folder: app.S.folder });
-      buildReports(sync);
-      app.setDetect('已同步批次' + (sync.added ? '，新增 ' + sync.added + ' 份' : ''));
-      if(sync.unmatched && sync.unmatched.length){ app.S.pendingItemsSetup = true; }
-      else { await app.ensureItemsSetup(); }
+      // 统一走「核对原始报告」刷新批次（扫描 + OCR 挂靠 + 改名）
+      if(window.__app && window.__app.runSourceVerify){ await window.__app.runSourceVerify(); }
+      else { const sync = await invoke('sync_folder', { folder: app.S.folder }); buildReports(sync); }
       if(app.S.inPrep){ app.refreshPrepOverview(); }
-      else if(app.S.reports.length && !app.S.pendingItemsSetup){ app.selectReport(0); }
     } else {
       app.S.pendingItemsSetup = true;
       app.setDetect('请先点「设置模板（框选）」框选基本信息与题目分值，保存后再扫描识别');
