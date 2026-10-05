@@ -413,14 +413,14 @@ fn ocr_b64_impl(b64: &str) -> Result<String, String> {
 }
 
 fn ocr_file_with_com(path: &str) -> Result<String, String> {
-    use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+    use windows::Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED};
     unsafe {
-        if CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_err() {
-            return Err("COM 初始化失败（STA）".to_string());
+        if let Err(e) = RoInitialize(RO_INIT_MULTITHREADED) {
+            return Err(format!("RoInitialize 失败: {e}"));
         }
     }
     let r = ocr_file(path);
-    unsafe { CoUninitialize(); }
+    unsafe { RoUninitialize(); }
     r
 }
 
