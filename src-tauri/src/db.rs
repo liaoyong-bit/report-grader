@@ -296,7 +296,10 @@ pub fn save_report_ocr(
 }
 
 pub fn insert_students(conn: &Connection, batch_id: i64, list: &[StudentIn]) -> Result<(), String> {    let mut st = conn
-        .prepare("INSERT OR REPLACE INTO students(batch_id, student_no, name, class, report_name) VALUES(?1,?2,?3,?4,?5)")
+        .prepare(
+            "INSERT INTO students(batch_id, student_no, name, class, report_name) VALUES(?1,?2,?3,?4,?5)
+             ON CONFLICT(batch_id, student_no) DO UPDATE SET name=excluded.name, class=excluded.class, report_name=excluded.report_name",
+        )
         .map_err(|e| format!("准备名单插入失败: {e}"))?;
     for s in list {
         st.execute(params![batch_id, s.no, s.name, s.cls, s.report_name])
