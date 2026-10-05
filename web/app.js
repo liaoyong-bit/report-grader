@@ -1501,6 +1501,22 @@ function bindTemplateDrag(){
         drag={mode:'resize', idx:parseInt(t.dataset.idx,10), x0:e.clientX, y0:e.clientY};
         return;
       }
+      if(t.classList.contains('tpl-resize-lt')){  // 左上角缩放手柄
+        drag={mode:'resize-lt', idx:parseInt(t.dataset.idx,10), x0:e.clientX, y0:e.clientY};
+        return;
+      }
+      if(t.classList.contains('tpl-total-del')){  // 统分区删除
+        S_TOTAL_RECT=null; renderTotalBox(); renderItemList();
+        e.preventDefault(); e.stopPropagation(); return;
+      }
+      if(t.classList.contains('tpl-total-resize') || t.classList.contains('tpl-total-resize-lt')){  // 统分区缩放
+        drag={mode:t.classList.contains('tpl-total-resize-lt')?'tresize-lt':'tresize', x0:e.clientX, y0:e.clientY};
+        return;
+      }
+      if(t.classList.contains('tpl-total')){  // 统分区移动
+        drag={mode:'tmove', x0:e.clientX, y0:e.clientY};
+        return;
+      }
       if(t.classList.contains('tpl-basic-del')){   // 基本信息框删除
         const i=parseInt(t.dataset.bidx,10);
         S_BASIC_FIELDS.splice(i,1);
@@ -1545,10 +1561,18 @@ function bindTemplateDrag(){
       br.x=Math.max(0, Math.round(br.x+dx)); br.y=Math.max(0, Math.round(br.y+dy));
       renderBasicBoxes();
     } else {
-      const rt=S_TPL_RECTS[drag.idx];
-      if(!rt) return;
       const dx=e.clientX-drag.x0, dy=e.clientY-drag.y0;
       drag.x0=e.clientX; drag.y0=e.clientY;
+      if(drag.mode==='tmove'||drag.mode==='tresize'||drag.mode==='tresize-lt'){
+        const tt=S_TOTAL_RECT;
+        if(!tt) return;
+        if(drag.mode==='tmove'){ tt.x=Math.max(0,Math.round(tt.x+dx)); tt.y=Math.max(0,Math.round(tt.y+dy)); renderTotalBox(); }
+        else if(drag.mode==='tresize'){ tt.w=Math.max(30,Math.round(tt.w+dx)); tt.h=Math.max(16,Math.round(tt.h+dy)); renderTotalBox(); }
+        else { const nx=Math.max(0,Math.min(tt.x+dx,tt.x+tt.w-30)); const ny=Math.max(0,Math.min(tt.y+dy,tt.y+tt.h-16)); tt.w=Math.max(30,Math.round(tt.w+(tt.x-nx))); tt.h=Math.max(16,Math.round(tt.h+(tt.y-ny))); tt.x=Math.round(nx); tt.y=Math.round(ny); renderTotalBox(); }
+        return;
+      }
+      const rt=S_TPL_RECTS[drag.idx];
+      if(!rt) return;
       if(drag.mode==='score'){
         const ndx = Math.max(0, Math.round(rt.scoreX + dx));
         S_TPL_RECTS.forEach(rt2=>{ rt2.scoreX = ndx; });   // 打分区统一对齐同一竖列，调一个全联动
@@ -1556,6 +1580,13 @@ function bindTemplateDrag(){
       } else if(drag.mode==='resize'){
         rt.w=Math.max(14, Math.round(rt.w+dx));
         rt.h=Math.max(12, Math.round(rt.h+dy));
+        renderTitleBoxes(); renderScoreBoxes();
+      } else if(drag.mode==='resize-lt'){
+        const nx=Math.max(0, Math.min(rt.x+dx, rt.x+rt.w-14));
+        const ny=Math.max(0, Math.min(rt.y+dy, rt.y+rt.h-12));
+        rt.w=Math.max(14, Math.round(rt.w+(rt.x-nx)));
+        rt.h=Math.max(12, Math.round(rt.h+(rt.y-ny)));
+        rt.x=Math.round(nx); rt.y=Math.round(ny);
         renderTitleBoxes(); renderScoreBoxes();
       } else {
         rt.x=Math.max(0, Math.round(rt.x+dx));
@@ -1593,8 +1624,12 @@ function bindTemplateDrag(){
 function parseTitleScore(txt){
   let title=(txt||'').replace(/\s+/g,' ').trim();
   let score='';
-  const m=title.match(/[（(]\s*(\d+(?:\.\d+)?)\s*分\s*[）)]/);
+  let m=title.match(/[（(]\s*(\d+(?:\.\d+)?)\s*分?\s*[）)]/);
   if(m){ score=m[1]; title=title.replace(m[0],'').trim(); }
+  else{
+    m=title.match(/(?:^|[，,;；。:\s])(\d+(?:\.\d+)?)\s*分\s*$/);
+    if(m){ score=m[1]; title=title.replace(m[0],'').trim(); }
+  }
   return { title, score: score?Number(score):'' };
 }
 
@@ -1672,8 +1707,11 @@ function renderTitleBoxes(){
     const idx=document.createElement('span'); idx.className='tpl-idx'; idx.textContent=(i+1)+'.';
     d.appendChild(idx);
     const lab=document.createElement('div'); lab.className='tpl-label';
-    lab.textContent=(rt.item_name||('题目'+(i+1)))+(rt.max_score?('　'+rt.max_score+'分'):'');
+    const shown=rt.item_name||('题目'+(i+1));
+    const hasSc=/[（(]\s*\d+(?:\.\d+)?\s*分?\s*[）)]/.test(shown);
+    lab.textContent=shown+(rt.max_score&&!hasSc?('　'+rt.max_score+'分'):'');
     d.appendChild(lab);
+    const rzlt=document.createElement('div'); rzlt.className='tpl-resize-lt'; rzlt.dataset.idx=i; d.appendChild(rzlt);
     const rz=document.createElement('div'); rz.className='tpl-resize'; rz.dataset.idx=i; d.appendChild(rz);
     const dl=document.createElement('div'); dl.className='tpl-del'; dl.textContent='×'; dl.dataset.idx=i; d.appendChild(dl);
     host.appendChild(d);
@@ -1865,13 +1903,17 @@ function renderIrState(){
 function renderTotalBox(){
   const pre = el.tplPreview;
   const host = S.tplInner||pre;
-  pre.querySelectorAll('.tpl-total,.tpl-total-dot').forEach(n=>n.remove());
+  pre.querySelectorAll('.tpl-total,.tpl-total-dot,.tpl-total-label,.tpl-total-del,.tpl-total-resize,.tpl-total-resize-lt').forEach(n=>n.remove());
   if(!S_TOTAL_RECT) return;
   const t=S_TOTAL_RECT;
   const d=document.createElement('div'); d.className='tpl-total';
   d.style.left=t.x+'px'; d.style.top=t.y+'px'; d.style.width=t.w+'px'; d.style.height=t.h+'px';
   host.appendChild(d);
   const n=Math.max(1,t.count);
+  const lab=document.createElement('div'); lab.className='tpl-total-label'; lab.textContent='统分区：'+n+' 个分数位'; d.appendChild(lab);
+  const rzlt=document.createElement('div'); rzlt.className='tpl-total-resize-lt'; d.appendChild(rzlt);
+  const rz=document.createElement('div'); rz.className='tpl-total-resize'; d.appendChild(rz);
+  const dl=document.createElement('div'); dl.className='tpl-total-del'; dl.textContent='×'; d.appendChild(dl);
   for(let i=0;i<n;i++){
     const cx=t.x+(i+0.5)*t.w/n;
     const dot=document.createElement('div'); dot.className='tpl-total-dot';
@@ -1940,4 +1982,5 @@ el.btnItemSave.onclick=async ()=>{
   el.itemMask.style.display='none';
   setDetect('✅ 评分项已固化：'+S.itemsTemplate.length+' 项'+(hasTotal?'，含统分区':''));
   if(S.reports.length){ selectReport(0); }
+  refreshPrepOverview();
 };
