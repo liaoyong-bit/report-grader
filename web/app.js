@@ -238,8 +238,10 @@ async function refreshPrepOverview(){
     const ov = await window.__bridge.prepOverview(S.folder);
     S.needsInit=false;
     S.prepOv = ov;
+    const roster = await window.__bridge.getRoster(S.folder).catch(()=>[]);
+    S.roster = roster;
     el.prepFolder.textContent = S.folder;
-    renderPrepTable(ov); renderPrepStats(ov); renderPrepRoster(); renderPrepSelbar();
+    renderPrepTable(ov, roster); renderPrepStats(ov); renderPrepRoster(); renderPrepSelbar();
   }catch(e){
     const msg = String(e);
     if(S.needsInit || /初始化|未找到批次/.test(msg)){
@@ -287,45 +289,61 @@ function openFile(path){ openReportPreview(path); }
 el.pvClose.onclick=()=>{ el.pvMask.style.display='none'; };
 el.pvMask.onclick=(e)=>{ if(e.target===el.pvMask){ el.pvMask.style.display='none'; } };
 document.addEventListener('keydown',(e)=>{ if(e.key==='Escape'){ el.pvMask.style.display='none'; } });
-function renderPrepTable(ov){
+function renderPrepTable(ov, roster){
   const tbody = el.prepTbody; tbody.innerHTML='';
-  const addTd = (tr, txt)=>{ const td=document.createElement('td'); td.textContent=(txt==null?'':String(txt)); tr.appendChild(td); };
-  (ov.rows||[]).forEach((r,i)=>{
+  const rows = (ov.rows||[]);
+  const rosterL = roster || S.roster || [];
+  const mkSrc=(r)=>{ const a=document.createElement('a'); a.className='filelink'; a.textContent=r.fname||'原始'; a.title=r.fname||r.path; a.href='#'; a.onclick=(e)=>{ e.preventDefault(); openFile(r.path); }; return a; };
+  const mkRnm=(r)=>{ if(!r.renamed_path) return null; const a=document.createElement('a'); a.className='filelink'; a.textContent='改名'; a.title=r.fname||r.path; a.href='#'; a.onclick=(e)=>{ e.preventDefault(); openFile(r.renamed_path); }; return a; };
+  const addTd=(tr, txt)=>{ const td=document.createElement('td'); td.textContent=(txt==null?'':String(txt)); tr.appendChild(td); };
+  const addNodes=(tr, arr)=>{ const td=document.createElement('td'); if(!arr || !arr.length){ td.textContent='—'; } else { arr.forEach((el,i)=>{ if(el instanceof Node){ td.appendChild(el); if(i<(arr.length-1)){ td.appendChild(document.createElement('br')); } } }); } tr.appendChild(td); };
+  const tagSpan=(cls,txt)=>{ const s=document.createElement('span'); s.className='tag '+cls; s.textContent=txt; return s; };
+
+  rosterL.forEach((s,i)=>{
+    const mine = rows.filter(r=>r.matched && r.stu_no===s.no);
     const tr = document.createElement('tr');
     const tdC = document.createElement('td'); tdC.className='col-check';
     const cb = document.createElement('input'); cb.type='checkbox'; cb.dataset.i = i;
     cb.checked = !!(S.prepChecked && S.prepChecked[i]);
     cb.addEventListener('change', ()=>{ S.prepChecked[i]=cb.checked; });
     tdC.appendChild(cb); tr.appendChild(tdC);
-    addTd(tr, r.matched ? r.stu_no : (r.ocr_no||''));
-    addTd(tr, r.matched ? r.stu_name : (r.ocr_name||''));
-    addTd(tr, r.matched ? r.stu_cls : (r.ocr_class||''));
-    addTd(tr, r.report_name || r.ocr_exp || '');
-    const tSrc=document.createElement('td');
-    const srcL=document.createElement('a'); srcL.className='filelink'; srcL.textContent='原始'; srcL.href='#';
-    srcL.onclick=(e)=>{ e.preventDefault(); openFile(r.path); }; tSrc.appendChild(srcL); tr.appendChild(tSrc);
-    const tRnm=document.createElement('td');
-    if(r.renamed_path){
-      const rl=document.createElement('a'); rl.className='filelink'; rl.textContent='改名'; rl.href='#';
-      rl.onclick=(e)=>{ e.preventDefault(); openFile(r.renamed_path); }; tRnm.appendChild(rl);
-    } else { tRnm.textContent='—'; }
-    tr.appendChild(tRnm);
-    const tdR=document.createElement('td');
-    const trn=document.createElement('span'); trn.className='tag '+(r.renamed_path?'renamed':'unrenamed'); trn.textContent=r.renamed_path?'已改名':'未改名'; tdR.appendChild(trn); tr.appendChild(tdR);
-    const tdM=document.createElement('td');
-    const tm=document.createElement('span'); tm.className='tag '+(r.matched?'mat':'new'); tm.textContent=r.matched?'已挂靠':'待挂靠'; tdM.appendChild(tm); tr.appendChild(tdM);
-    const tdG=document.createElement('td');
-    const tg=document.createElement('span'); tg.className='tag '+(r.done?'done':'todo'); tg.textContent=r.done?'已批':(r.graded?'部分':'待批'); tdG.appendChild(tg); tr.appendChild(tdG);
+    addTd(tr, s.no); addTd(tr, s.name); addTd(tr, s.cls); addTd(tr, s.report_name);
+    addNodes(tr, mine.map(mkSrc));
+    const rnm = mine.map(mkRnm).filter(Boolean);
+    addNodes(tr, rnm);
+    const anyRen = mine.some(r=>r.renamed_path);
+    const tdR=document.createElement('td'); tdR.appendChild(tagSpan(anyRen?'renamed':'unrenamed', anyRen?'已改名':(mine.length?'未改名':'—'))); tr.appendChild(tdR);
+    const tdM=document.createElement('td'); tdM.appendChild(tagSpan(mine.length?'mat':'new', mine.length?'已挂靠':'未交')); tr.appendChild(tdM);
+    const anyDone=mine.some(r=>r.done); const anyGraded=mine.some(r=>r.graded);
+    const tdG=document.createElement('td'); tdG.appendChild(tagSpan(anyDone?'done':'todo', anyDone?'已批':(mine.length?(anyGraded?'部分':'待批'):'—'))); tr.appendChild(tdG);
     const tdO=document.createElement('td');
-    if(r.matched){
-      const ab=document.createElement('button'); ab.className='opbtn attached'; ab.textContent='已挂靠'; tdO.appendChild(ab);
-    } else {
-      const ab=document.createElement('button'); ab.className='opbtn attach'; ab.textContent='挂靠';
-      ab.onclick=()=>{ openAttachBatch(); }; tdO.appendChild(ab);
-    }
+    if(mine.length){ const ab=document.createElement('button'); ab.className='opbtn attached'; ab.textContent=mine.length>1?('自动挂靠 ×'+mine.length):'已挂靠'; tdO.appendChild(ab); }
+    else { tdO.textContent='—'; }
     tr.appendChild(tdO);
     tbody.appendChild(tr);
   });
+
+  const unmatch = rows.filter(r=>!r.matched);
+  if(unmatch.length){
+    const hr=document.createElement('tr'); const htd=document.createElement('td'); htd.colSpan=11;
+    htd.style.cssText='padding:8px 10px;background:#fff6e5;color:#b45309;font-weight:600';
+    htd.textContent='▼ 未匹配原始报告（OCR 后仍对不上名单，请手动挂靠或标记错误）';
+    hr.appendChild(htd); tbody.appendChild(hr);
+    unmatch.forEach((r)=>{
+      const tr=document.createElement('tr');
+      const tdC=document.createElement('td'); tdC.className='col-check'; tr.appendChild(tdC);
+      addTd(tr, r.ocr_no); addTd(tr, r.ocr_name); addTd(tr, r.ocr_class); addTd(tr, r.ocr_exp||r.fname);
+      addNodes(tr, [mkSrc(r)]);
+      addNodes(tr, []);
+      const tdR=document.createElement('td'); tdR.appendChild(tagSpan('unrenamed','未改名')); tr.appendChild(tdR);
+      const tdM=document.createElement('td'); tdM.appendChild(tagSpan('new','待挂靠')); tr.appendChild(tdM);
+      const tdG=document.createElement('td'); tdG.appendChild(tagSpan('todo','待批')); tr.appendChild(tdG);
+      const tdO=document.createElement('td');
+      const ab=document.createElement('button'); ab.className='opbtn attach'; ab.textContent='挂靠';
+      ab.onclick=()=>{ openAttachBatch(); }; tdO.appendChild(ab); tr.appendChild(tdO);
+      tbody.appendChild(tr);
+    });
+  }
 }
 function renderPrepStats(ov){
   const rows=ov.rows||[], missing=ov.missing||[];
@@ -367,7 +385,8 @@ function renderPrepSelbar(){
     const fieldTag=(txt,ok)=>'<span class="pv-sel '+(ok?'ok':'miss')+'">'+txt+(ok?'✓':'✗')+'</span>';
     el2.innerHTML = fieldTag('学号',have.no)+fieldTag('姓名',have.name)+fieldTag('班级',have.cls)+
       fieldTag('报告名称',have.exp)+fieldTag('题目与分值',have.items)+
-      '<button onclick="window.__app.openItemSetup()">设置模板（框选）</button>';
+      '<button onclick="window.__app.openItemSetup()">设置模板（框选）</button>'+
+      '<button onclick="window.__app.runSourceVerify()" style="margin-left:6px;background:#2563eb;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:13px">核对原始报告</button>';
   }).catch(()=>{ el2.innerHTML=''; });
 }
 async function openAttachOrView(r, doAttach){
@@ -477,7 +496,8 @@ el.btnPrepStart.onclick=()=>{
   if(rv==='select'){
     const checked=Object.keys(S.prepChecked||{}).filter(i=>S.prepChecked[i]).map(Number);
     if(!checked.length){ setErr('请先在左侧表中勾选要批改的报告'); return; }
-    S.prepFilter=new Set(checked.map(i=>(rows[i]||{}).key).filter(Boolean));
+    const selRows = checked.flatMap(i=>{ const s=(S.roster||[])[i]; return s ? rows.filter(r=>r.matched&&r.stu_no===s.no) : []; });
+    S.prepFilter=new Set(selRows.map(r=>r.key).filter(Boolean));
   } else if(rv==='increment'){
     S.prepFilter=new Set(rows.filter(r=>!r.done).map(r=>r.key).filter(Boolean));
   } else { S.prepFilter=null; }
@@ -1463,7 +1483,8 @@ window.__app = { S, el, reportLabel, reportState, renderReportList, updateStats,
   selectReport, loadReports, saveState, initReportState, openWizard, closeWizard,
   showUnmatched, setFile, setDetect, setErr, downloadBlob, buildRecord,
   openItemSetup, ensureItemsSetup,
-  showPrep, hidePrep, refreshPrepOverview, openPrepImport, prepBasicField };
+  showPrep, hidePrep, refreshPrepOverview, openPrepImport, prepBasicField,
+  runSourceVerify };
 
 //（注：内容由AI生成）
 /* ==================== 评分项模板设置（步骤一） ==================== */
@@ -2133,6 +2154,37 @@ async function ocrReportBasic(path, basicFields){
     }
     return Object.keys(res).length ? res : null;
   }catch(e){ return null; }
+}
+async function runSourceVerify(){
+  if(!S.folder || !window.__bridge || !window.__bridge.syncFolder){ setErr('请先选报告文件夹'); return; }
+  const bf = await window.__bridge.getBasicFields(S.folder).catch(()=>[]);
+  if(!(bf&&bf.length)){ setErr('请先点「设置模板（框选）」框选基本信息，再核对原始报告'); return; }
+  setDetect('正在核对原始报告：扫描并 OCR 匹配...');
+  if(window.__bridge && window.__bridge.log) window.__bridge.log('[核对] 开始');
+  try{
+    const sync = await window.__bridge.syncFolder(S.folder);
+    if(window.__bridge && window.__bridge.log) window.__bridge.log('[核对] sync added='+(sync&&sync.added)+' unmatched='+(sync&&sync.unmatched&&sync.unmatched.length));
+  }catch(e){ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[核对] sync FAIL '+e); setErr('同步失败: '+e); }
+  refreshPrepOverview();
+  const rows=(S.prepOv&&S.prepOv.rows)||[];
+  if(!rows.length){ setDetect('没有扫描到原始报告，请确认报告 PDF 在所选文件夹内'); return; }
+  const roster = await window.__bridge.getRoster(S.folder).catch(()=>[]);
+  const basicFields = await window.__bridge.getBasicFields(S.folder).catch(()=>[]);
+  const need = rows.filter(r=>!r.matched && !r.ocr_no);
+  if(window.__bridge && window.__bridge.log) window.__bridge.log('[核对] 需OCR '+need.length+' 份');
+  let ok=0;
+  for(const r of need){
+    try{
+      const ocr = await ocrReportBasic(r.path, basicFields);
+      if(!ocr){ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[核对] ocr none '+r.path); continue; }
+      if(window.__bridge && window.__bridge.log) window.__bridge.log('[核对] ocr '+JSON.stringify(ocr));
+      await window.__bridge.saveReportOcr(S.folder, r.key, (ocr.no||'').trim(), (ocr.name||'').trim(), (ocr.cls||'').trim(), (ocr.exp||'').trim());
+      const hit = roster.find(s=> (ocr.no&&ocr.no.trim()&&s.no===ocr.no.trim()) || (ocr.name&&ocr.name.trim()&&s.name===ocr.name.trim()));
+      if(hit){ await window.__bridge.resolveUnmatched(S.folder, {path:r.path}, hit.no); ok++; if(window.__bridge&&window.__bridge.log) window.__bridge.log('[核对] 挂靠 '+hit.no); }
+    }catch(e){ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[核对] 单份失败 '+e); }
+  }
+  refreshPrepOverview();
+  setDetect('✅ 核对完成'+(ok?('，自动挂靠 '+ok+' 份'):''));
 }
 el.btnItemSave.onclick=async ()=>{
   const items=[];
