@@ -189,6 +189,12 @@
   #itemBox .item-right .ir-tag { display: inline-block; margin: 0 2px; font-size: 11px; }
   #itemBox .item-right .ir-tag.ok { color: #2e7d32; font-weight: 600; }
   #itemBox .item-right .ir-tag.miss { color: #c62828; font-weight: 600; }
+  #itemBox .item-right .ir-tpl { font-size:12px; background:#fdf3f3; border:1px solid #f2d7d7; border-radius:6px; padding:6px 8px; }
+  #itemBox .item-right .ir-tpl .ir-tpl-ok { color:#2e7d32; font-weight:600; }
+  #itemBox .item-right .ir-tpl .ir-tpl-miss { color:#c62828; font-weight:600; }
+  #itemBox .item-right .ir-tpl .ir-tpl-path { font-size:11px; color:#64748b; word-break:break-all; margin:3px 0; }
+  #itemBox .item-right .ir-tpl .ir-tpl-hint { font-size:11px; color:#888; margin:3px 0; }
+  #itemBox .item-right .ir-tpl button { margin-top:4px; }
   #itemBox .item-right #btnTitleMode { font-weight: 600; }
   #itemBox .item-right #btnTotalMode { font-weight: 600; }
   #itemBox h2 { font-size: 16px; color: #2b3a55; margin-bottom: 6px; }
@@ -443,6 +449,7 @@
           <div id="itemList"></div>
         </div>
         <div class="item-right">
+          <div id="irTpl" class="ir-tpl"></div>
           <div id="irState" class="ir-state"></div>
           <div class="ir-tt">框选操作（预览上框选对应内容）</div>
           <button id="btnBasicMode" style="background:#eef1f5;color:#555">框选基本信息</button>

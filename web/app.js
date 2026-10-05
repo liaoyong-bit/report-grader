@@ -76,7 +76,7 @@ const el = {
   overviewMask: $('overviewMask'), overviewBody: $('overviewBody'), btnOverviewClose: $('btnOverviewClose'),
   itemMask: $('itemMask'), tplPreview: $('tplPreview'), itemList: $('itemList'), btnItems: $('btnItems'),
   btnItemAdd: $('btnItemAdd'), btnItemSave: $('btnItemSave'), btnItemCancel: $('btnItemCancel'),
-  btnTotalMode: $('btnTotalMode'), btnTitleMode: $('btnTitleMode'), btnBasicMode: $('btnBasicMode'), totalInfo: $('totalInfo'), irState: $('irState'),
+  btnTotalMode: $('btnTotalMode'), btnTitleMode: $('btnTitleMode'), btnBasicMode: $('btnBasicMode'), totalInfo: $('totalInfo'), irState: $('irState'), irTpl: $('irTpl'),
 };
 
 /* ==================== 批阅进度持久化（P0-1） ====================
@@ -1397,13 +1397,38 @@ async function ensureItemsSetup(force){
 async function openItemSetup(){
   try{
     if(!window.__bridge || !window.__bridge.readPdf){ setErr('仅 Tauri 模式支持评分项设置'); return; }
+    el.itemMask.style.display='flex';
+    if(!S.tplPath){
+      const tp = await window.__bridge.getTemplatePath(S.folder).catch(()=>null);
+      if(tp) S.tplPath = tp;
+    }
+    renderTplBar();
+    if(S.tplPath){ await loadTemplatePreview(); }
+  }catch(e){ setErr('加载模板失败: '+e); }
+}
+function renderTplBar(){
+  const host=el.irTpl; if(!host) return;
+  if(S.tplPath){
+    host.innerHTML = '<div class="ir-tpl-ok">✓ 模板已载入</div><div class="ir-tpl-path">'+S.tplPath+'</div><button onclick="window.pickTpl()">重新指定模板</button>';
+  } else {
+    host.innerHTML = '<div class="ir-tpl-miss">✗ 尚未指定模板</div><div class="ir-tpl-hint">必须先指定空白模板 PDF，才能开始框选。</div><button onclick="window.pickTpl()">指定模板</button>';
+  }
+  const disabled = !S.tplPath;
+  [el.btnBasicMode,el.btnTitleMode,el.btnTotalMode,el.btnItemAdd].forEach(b=>{ if(b){ b.style.pointerEvents=disabled?'none':'auto'; b.style.opacity=disabled?0.5:1; } });
+}
+async function loadTemplatePreview(){
+  try{
     const bytes = await window.__bridge.readPdf(S.folder, S.tplPath);
     const pdf = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
     S.tplPdf = pdf;
-    el.itemMask.style.display='flex';
     renderTemplatePreview();
   }catch(e){ setErr('加载模板失败: '+e); }
 }
+window.pickTpl = async function(){
+  if(!window.__bridge || !window.__bridge.pickTemplate){ setErr('仅 Tauri 模式支持'); return; }
+  const tp = await window.__bridge.pickTemplate(S.folder).catch(e=>{ setErr('⚠ '+e); return null; });
+  if(tp){ S.tplPath = tp; renderTplBar(); await loadTemplatePreview(); }
+};
 
 let S_TOTAL_RECT = null;   // 统分区框选 {x,y,w,h,count}
 let S_TOTAL_MODE = false;
