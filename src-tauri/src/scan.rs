@@ -74,6 +74,7 @@ pub fn sync_folder(conn: &Connection, folder: &str, batch_id: i64) -> Result<Syn
 
     let mut pdfs: Vec<PathBuf> = Vec::new();
     collect_pdfs(folder_p, &mut pdfs);
+    println!("[sync] folder={folder} pdfs={}", pdfs.len());
 
     let existing = db::list_reports(conn, batch_id)?;
     let source_reg: HashSet<String> = existing
@@ -142,6 +143,7 @@ pub fn sync_folder(conn: &Connection, folder: &str, batch_id: i64) -> Result<Syn
     }
 
     // 重新拉取登记，构建"学生维度"三态列表
+    println!("[sync] done added={} unmatched={}", result.added, result.unmatched.len());
     let reports = db::list_reports(conn, batch_id)?;
     let students = db::get_students(conn, batch_id)?;
     for s in students {
