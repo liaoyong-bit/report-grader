@@ -1611,7 +1611,43 @@ function renderTemplatePreview(){
     bindTemplateDrag();
     renderItemList();
     if(window.__bridge && window.__bridge.log) window.__bridge.log('模板渲染完成 页数='+numPages+' 高='+Math.round(totalH));
+    loadSavedBoxes();
   }).catch(e=>setErr('渲染模板失败: '+e));
+}
+async function loadSavedBoxes(){
+  if(!window.__bridge || !S.folder || !S.tplPages) return;
+  try{
+    const [bf, items] = await Promise.all([
+      window.__bridge.getBasicFields(S.folder).catch(()=>[]),
+      window.__bridge.getBatchItems(S.folder).catch(()=>[])
+    ]);
+    const BASIC_LABELS={no:'学号',name:'姓名',class:'班级',exp:'报告名称'};
+    S_BASIC_FIELDS = (bf||[]).filter(f=>f&&f[0]).map(f=>{
+      let r={}; try{ r=JSON.parse(f[2]||'{}'); }catch(e){}
+      return { type:f[0], label:(BASIC_LABELS[f[0]]||f[0]), pageIndex:f[1]||0, x:r.x||0, y:r.y||0, w:r.w||0, h:r.h||0, text:'' };
+    });
+    S_TPL_RECTS=[]; S_ITEMS=[]; S_TOTAL_RECT=null;
+    (items||[]).forEach(it=>{
+      if(it.item_index<0){
+        try{ S_TOTAL_RECT=JSON.parse(it.total_region||'{}'); }catch(e){}
+        if(S_TOTAL_RECT && !S_TOTAL_RECT.w) S_TOTAL_RECT=null;
+        return;
+      }
+      let tr={}; try{ tr=JSON.parse(it.title_rect||'{}'); }catch(e){}
+      if(tr.w && tr.h){
+        S_TPL_RECTS.push({ pageIndex:it.score_page||0, x:tr.x||0, y:tr.y||0, w:tr.w||0, h:tr.h||0,
+          item_name:it.item_name||('题目'+(it.item_index+1)), max_score:it.max_score||0,
+          scoreX:(it.score_x||0)*(S.tplScale||1), title_img:it.title_img||'' });
+      } else {
+        S_ITEMS.push({ item_name:it.item_name||('题目'+(it.item_index+1)), max_score:it.max_score||0 });
+      }
+    });
+    if(S_BASIC_FIELDS.length){ renderBasicBoxes(); }
+    if(S_TPL_RECTS.length){ renderTitleBoxes(); renderScoreBoxes(); }
+    if(S_TOTAL_RECT){ renderTotalBox(); }
+    if(S_BASIC_FIELDS.length || S_TPL_RECTS.length || S_TOTAL_RECT || S_ITEMS.length){ renderItemList(); }
+    if(window.__bridge&&window.__bridge.log) window.__bridge.log('[加载框选] basic='+S_BASIC_FIELDS.length+' items='+S_TPL_RECTS.length+(S_TOTAL_RECT?' 统分区':'')+' 已从数据库恢复');
+  }catch(e){ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[加载框选] 失败 '+e); }
 }
 
 function pageByAbsY(absY){
