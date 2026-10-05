@@ -117,15 +117,18 @@ pub fn sync_folder(conn: &Connection, folder: &str, batch_id: i64) -> Result<Syn
             let st = no.as_ref().and_then(|n| db::find_student_by_no(conn, batch_id, n).ok().flatten());
             match st {
                 Some(s) => {
+                    let report_name = if s.report_name.trim().is_empty() { batch_name.clone() } else { s.report_name.clone() };
                     let rename = format!(
                         "{}_{}_{}_{}.pdf",
                         s.no,
                         clean(&s.name),
                         clean(&s.cls),
-                        clean(&batch_name)
+                        clean(&report_name)
                     );
-                    let rel_rename = format!("{}/{}", db::SOURCE_DIR, rename);
-                    fs::copy(&p, source_dir.join(&rename))
+                    let rel_rename = format!("{}/{}", db::RENAME_DIR, rename);
+                    let rename_dir = folder_p.join(db::RENAME_DIR);
+                    fs::create_dir_all(&rename_dir).map_err(|e| format!("创建 renamed 失败: {e}"))?;
+                    fs::copy(&p, rename_dir.join(&rename))
                         .map_err(|e| format!("生成改名版失败: {e}"))?;
                     db::insert_report(conn, batch_id, Some(s.id), &rel, &rel_rename, &fname, "matched")?;
                     result.added += 1;
@@ -186,21 +189,22 @@ pub fn resolve_unmatched(
     }
     let st = db::find_student_by_no(conn, batch_id, student_no)?.ok_or("名单中无该学号")?;
     db::attach_student(conn, rep.id, st.id)?;
-    // 生成改名版
+    // 生成改名版（复制进 renamed/，命名含学生报告名称）
     let batch_name = db::get_batch(conn, batch_id)?.map(|b| b.1).unwrap_or_default();
     let folder_p = Path::new(folder);
-    let source_dir = folder_p.join(db::SOURCE_DIR);
-    fs::create_dir_all(&source_dir).map_err(|e| format!("创建 source_files 失败: {e}"))?;
+    let rename_dir = folder_p.join(db::RENAME_DIR);
+    fs::create_dir_all(&rename_dir).map_err(|e| format!("创建 renamed 失败: {e}"))?;
+    let report_name = if st.report_name.trim().is_empty() { batch_name } else { st.report_name.clone() };
     let rename = format!(
         "{}_{}_{}_{}.pdf",
         st.no,
         clean(&st.name),
         clean(&st.cls),
-        clean(&batch_name)
+        clean(&report_name)
     );
-    let rel_rename = format!("{}/{}", db::SOURCE_DIR, rename);
+    let rel_rename = format!("{}/{}", db::RENAME_DIR, rename);
     let src = folder_p.join(&path);
-    fs::copy(&src, source_dir.join(&rename))
+    fs::copy(&src, rename_dir.join(&rename))
         .map_err(|e| format!("生成改名版失败: {e}"))?;
     db::set_renamed(conn, rep.id, &rel_rename)?;
     Ok(())

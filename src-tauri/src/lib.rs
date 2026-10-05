@@ -34,6 +34,7 @@ pub fn run() {
             commands::get_basic_fields,
             commands::save_report_ocr,
             commands::prep_overview,
+            commands::open_external,
             commands::get_roster,
         ])
         .run(tauri::generate_context!())

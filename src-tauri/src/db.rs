@@ -6,6 +6,7 @@ use std::path::Path;
 pub const DATA_DIR: &str = "data";
 pub const SOURCE_DIR: &str = "source_files";
 pub const OUTPUT_DIR: &str = "output";
+pub const RENAME_DIR: &str = "renamed";
 pub const TEMPLATE_DIR: &str = "template";
 pub const DB_NAME: &str = "grading.db";
 
@@ -15,6 +16,8 @@ pub struct StudentIn {
     pub name: String,
     #[serde(default)]
     pub cls: String,
+    #[serde(default)]
+    pub report_name: String,
 }
 
 #[derive(Clone)]
@@ -23,6 +26,7 @@ pub struct Student {
     pub no: String,
     pub name: String,
     pub cls: String,
+    pub report_name: String,
 }
 
 #[derive(Clone)]
@@ -57,6 +61,7 @@ pub fn open(folder: &str) -> Result<Connection, String> {
              student_no TEXT NOT NULL,
              name TEXT NOT NULL,
              class TEXT DEFAULT '',
+             report_name TEXT DEFAULT '',
              UNIQUE(batch_id, student_no)
          );
          CREATE TABLE IF NOT EXISTS reports(
@@ -123,6 +128,7 @@ pub fn open(folder: &str) -> Result<Connection, String> {
     ensure_column(&conn, "reports", "ocr_class", "ocr_class TEXT DEFAULT ''")?;
     ensure_column(&conn, "reports", "ocr_exp", "ocr_exp TEXT DEFAULT ''")?;
     ensure_column(&conn, "reports", "report_name", "report_name TEXT DEFAULT ''")?;
+    ensure_column(&conn, "students", "report_name", "report_name TEXT DEFAULT ''")?;
     Ok(conn)
 }
 
@@ -286,10 +292,10 @@ pub fn save_report_ocr(
 }
 
 pub fn insert_students(conn: &Connection, batch_id: i64, list: &[StudentIn]) -> Result<(), String> {    let mut st = conn
-        .prepare("INSERT OR REPLACE INTO students(batch_id, student_no, name, class) VALUES(?1,?2,?3,?4)")
+        .prepare("INSERT OR REPLACE INTO students(batch_id, student_no, name, class, report_name) VALUES(?1,?2,?3,?4,?5)")
         .map_err(|e| format!("准备名单插入失败: {e}"))?;
     for s in list {
-        st.execute(params![batch_id, s.no, s.name, s.cls])
+        st.execute(params![batch_id, s.no, s.name, s.cls, s.report_name])
             .map_err(|e| format!("写入名单失败: {e}"))?;
     }
     Ok(())
@@ -297,11 +303,11 @@ pub fn insert_students(conn: &Connection, batch_id: i64, list: &[StudentIn]) -> 
 
 pub fn get_students(conn: &Connection, batch_id: i64) -> Result<Vec<Student>, String> {
     let mut st = conn
-        .prepare("SELECT id, student_no, name, class FROM students WHERE batch_id=?1 ORDER BY student_no")
+        .prepare("SELECT id, student_no, name, class, report_name FROM students WHERE batch_id=?1 ORDER BY student_no")
         .map_err(|e| format!("准备名单查询失败: {e}"))?;
     let rows = st
         .query_map(params![batch_id], |r| {
-            Ok(Student { id: r.get(0)?, no: r.get(1)?, name: r.get(2)?, cls: r.get(3)? })
+            Ok(Student { id: r.get(0)?, no: r.get(1)?, name: r.get(2)?, cls: r.get(3)?, report_name: r.get(4)? })
         })
         .map_err(|e| format!("查询名单失败: {e}"))?;
     rows.collect::<Result<Vec<_>, _>>()
@@ -309,12 +315,12 @@ pub fn get_students(conn: &Connection, batch_id: i64) -> Result<Vec<Student>, St
 }
 
 fn row_to_student(r: &rusqlite::Row) -> rusqlite::Result<Student> {
-    Ok(Student { id: r.get(0)?, no: r.get(1)?, name: r.get(2)?, cls: r.get(3)? })
+    Ok(Student { id: r.get(0)?, no: r.get(1)?, name: r.get(2)?, cls: r.get(3)?, report_name: r.get(4)? })
 }
 
 pub fn find_student_by_no(conn: &Connection, batch_id: i64, no: &str) -> Result<Option<Student>, String> {
     conn.query_row(
-        "SELECT id, student_no, name, class FROM students WHERE batch_id=?1 AND student_no=?2",
+        "SELECT id, student_no, name, class, report_name FROM students WHERE batch_id=?1 AND student_no=?2",
         params![batch_id, no],
         row_to_student,
     )
@@ -324,7 +330,7 @@ pub fn find_student_by_no(conn: &Connection, batch_id: i64, no: &str) -> Result<
 
 pub fn find_student_by_name(conn: &Connection, batch_id: i64, name: &str) -> Result<Option<Student>, String> {
     conn.query_row(
-        "SELECT id, student_no, name, class FROM students WHERE batch_id=?1 AND name=?2 LIMIT 1",
+        "SELECT id, student_no, name, class, report_name FROM students WHERE batch_id=?1 AND name=?2 LIMIT 1",
         params![batch_id, name],
         row_to_student,
     )
@@ -334,7 +340,7 @@ pub fn find_student_by_name(conn: &Connection, batch_id: i64, name: &str) -> Res
 
 pub fn find_student_by_id(conn: &Connection, id: i64) -> Result<Option<Student>, String> {
     conn.query_row(
-        "SELECT id, student_no, name, class FROM students WHERE id=?1",
+        "SELECT id, student_no, name, class, report_name FROM students WHERE id=?1",
         params![id],
         row_to_student,
     )
@@ -528,6 +534,7 @@ pub struct PrepRow {
     pub ocr_class: String,
     pub ocr_exp: String,
     pub report_name: String,
+    pub renamed_path: String,
     pub stu_no: String,
     pub stu_name: String,
     pub stu_cls: String,
@@ -554,7 +561,7 @@ pub fn prep_overview(conn: &Connection, batch_id: i64) -> Result<PrepOverview, S
         let mut st = conn
             .prepare(
                 "SELECT r.id, r.orig_name, r.source_path, r.student_id, r.ocr_no, r.ocr_name, r.ocr_class, r.ocr_exp,
-                        r.report_name, r.submit_status,
+                        r.report_name, r.renamed_path, r.submit_status,
                         EXISTS(SELECT 1 FROM report_items ri WHERE ri.report_id=r.id AND ri.score>0 AND ri.activated=1)
                  FROM reports r WHERE r.batch_id=?1 AND r.match_status='matched'
                  ORDER BY r.orig_name",
@@ -573,12 +580,13 @@ pub fn prep_overview(conn: &Connection, batch_id: i64) -> Result<PrepOverview, S
                     r.get::<_, String>(7)?,
                     r.get::<_, String>(8)?,
                     r.get::<_, String>(9)?,
-                    r.get::<_, bool>(10)?,
+                    r.get::<_, String>(10)?,
+                    r.get::<_, bool>(11)?,
                 ))
             })
             .map_err(|e| format!("读取准备盘点失败: {e}"))?;
         for row in rows {
-            let (rid, orig, src, sid, no, nm, cl, ex, rn, submit, graded) =
+            let (rid, orig, src, sid, no, nm, cl, ex, rn, rnp, submit, graded) =
                 row.map_err(|e| format!("解析准备盘点失败: {e}"))?;
             let (sno, sname, scls) = match sid {
                 Some(sid) => match find_student_by_id(conn, sid)? {
@@ -593,6 +601,7 @@ pub fn prep_overview(conn: &Connection, batch_id: i64) -> Result<PrepOverview, S
                 fname: orig,
                 ocr_no: no, ocr_name: nm, ocr_class: cl, ocr_exp: ex,
                 report_name: rn,
+                renamed_path: rnp,
                 stu_no: sno, stu_name: sname, stu_cls: scls,
                 matched: sid.is_some(),
                 is_new: sid.is_none(),

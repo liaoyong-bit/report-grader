@@ -78,6 +78,16 @@ pub fn resolve_unmatched(folder: String, path: String, student_no: String) -> Re
     scan::resolve_unmatched(&conn, &folder, &path, &student_no)
 }
 
+/// 用系统默认程序打开指定文件（挂靠时查看原始报告）
+#[tauri::command]
+pub fn open_external(folder: String, path: String) -> Result<(), String> {
+    let full = Path::new(&folder).join(&path);
+    let p = full.to_string_lossy().into_owned();
+    let quoted = format!("\"{}\"", p);
+    let _ = std::process::Command::new("cmd").args(["/C", "start", "", &quoted]).spawn();
+    Ok(())
+}
+
 /// 准备盘点：状态总表数据（挂靠/新增/批改状态）+ 缺交名单
 #[tauri::command]
 pub fn prep_overview(folder: String) -> Result<db::PrepOverview, String> {
@@ -92,7 +102,7 @@ pub fn get_roster(folder: String) -> Result<Vec<db::StudentIn>, String> {
     let conn = db::open(&folder)?;
     let bid = db::find_batch_by_folder(&conn)?.map(|b| b.0).ok_or("当前文件夹尚未初始化批次")?;
     let sts = db::get_students(&conn, bid)?;
-    Ok(sts.into_iter().map(|s| db::StudentIn { no: s.no, name: s.name, cls: s.cls }).collect())
+    Ok(sts.into_iter().map(|s| db::StudentIn { no: s.no, name: s.name, cls: s.cls, report_name: s.report_name }).collect())
 }
 
 /// 读取 PDF 字节（path 为相对所选文件夹的相对路径）
@@ -158,6 +168,7 @@ pub struct StudentOut {
     pub no: String,
     pub name: String,
     pub cls: String,
+    pub report_name: String,
 }
 
 #[derive(Serialize)]
@@ -178,7 +189,7 @@ pub fn get_batch_info(folder: String) -> Result<BatchInfoDetail, String> {
         count: students.len(),
         students: students
             .into_iter()
-            .map(|s| StudentOut { no: s.no, name: s.name, cls: s.cls })
+            .map(|s| StudentOut { no: s.no, name: s.name, cls: s.cls, report_name: s.report_name })
             .collect(),
     })
 }
@@ -195,7 +206,7 @@ pub fn save_roster(folder: String, report_name: String, students: Vec<db::Studen
     let path = src_dir.join(format!("_名单_{}.csv", safe));
     let mut csv = String::from("\u{feff}学号,姓名,班级,报告名称\n");
     for s in &students {
-        csv.push_str(&format!("{},{},{},{}\n", s.no, s.name, s.cls, report_name));
+        csv.push_str(&format!("{},{},{},{}\n", s.no, s.name, s.cls, s.report_name));
     }
     fs::write(&path, csv).map_err(|e| format!("写入名单失败: {e}"))?;
     Ok(path.to_string_lossy().into_owned())

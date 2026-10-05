@@ -149,6 +149,7 @@
   window.__bridge.saveReportOcr = async (folder, reportKey, no, name, cls, exp) => { await invoke('save_report_ocr', { folder, reportKey, no, name, class: cls, exp }); };
   window.__bridge.prepOverview = async (folder) => { return await invoke('prep_overview', { folder }); };
   window.__bridge.getRoster = async (folder) => { return await invoke('get_roster', { folder }); };
+  window.__bridge.openExternal = async (folder, path) => { return await invoke('open_external', { folder, path }); };
 
   // —— 首次打开某份报告时从磁盘读入 PDF
   // 关键：app.js 里列表点击 li.onclick 与"下一份"逻辑调用的都是【全局 selectReport】，

@@ -54,6 +54,9 @@ const el = {
   pvSelbar: $('pvSelbar'), prepTable: $('prepTable'), prepTbody: $('prepTbody'), prepStats: $('prepStats'),
   prepRoster: $('prepRoster'), btnPrepBack: $('btnPrepBack'), btnPrepStart: $('btnPrepStart'),
   attachMask: $('attachMask'), attachBox: $('attachBox'), attachFile: $('attachFile'),
+  attachBatchMask: $('attachBatchMask'), abPreview: $('abPreview'), abFileList: $('abFileList'),
+  abCand: $('abCand'), abProgress: $('abProgress'), abPrevBtn: $('abPrevBtn'), abNextBtn: $('abNextBtn'),
+  abCommitBtn: $('abCommitBtn'), abBackBtn: $('abBackBtn'), abErr: $('abErr'),
   attachSel: $('attachSel'), attachErr: $('attachErr'), btnAttachOk: $('btnAttachOk'), btnAttachCancel: $('btnAttachCancel'),
   btnOpen: $('btnOpen'), btnLoadFolder: $('btnLoadFolder'),
   reportList: $('reportList'),
@@ -251,6 +254,12 @@ async function refreshPrepOverview(){
     }
   }
 }
+async function openFile(path){
+  if(!path){ return; }
+  if(window.__bridge && window.__bridge.openExternal && S.folder){
+    try{ await window.__bridge.openExternal(S.folder, path); }catch(e){ setErr('打开文件失败: '+e); }
+  } else { alert('文件路径：'+path); }
+}
 function renderPrepTable(ov){
   const tbody = el.prepTbody; tbody.innerHTML='';
   const addTd = (tr, txt)=>{ const td=document.createElement('td'); td.textContent=(txt==null?'':String(txt)); tr.appendChild(td); };
@@ -265,19 +274,29 @@ function renderPrepTable(ov){
     addTd(tr, r.matched ? r.stu_name : (r.ocr_name||''));
     addTd(tr, r.matched ? r.stu_cls : (r.ocr_class||''));
     addTd(tr, r.report_name || r.ocr_exp || '');
-    addTd(tr, r.fname || r.path || '');
+    const tSrc=document.createElement('td');
+    const srcL=document.createElement('a'); srcL.className='filelink'; srcL.textContent='原始'; srcL.href='#';
+    srcL.onclick=(e)=>{ e.preventDefault(); openFile(r.path); }; tSrc.appendChild(srcL); tr.appendChild(tSrc);
+    const tRnm=document.createElement('td');
+    if(r.renamed_path){
+      const rl=document.createElement('a'); rl.className='filelink'; rl.textContent='改名'; rl.href='#';
+      rl.onclick=(e)=>{ e.preventDefault(); openFile(r.renamed_path); }; tRnm.appendChild(rl);
+    } else { tRnm.textContent='—'; }
+    tr.appendChild(tRnm);
+    const tdR=document.createElement('td');
+    const trn=document.createElement('span'); trn.className='tag '+(r.renamed_path?'renamed':'unrenamed'); trn.textContent=r.renamed_path?'已改名':'未改名'; tdR.appendChild(trn); tr.appendChild(tdR);
     const tdM=document.createElement('td');
     const tm=document.createElement('span'); tm.className='tag '+(r.matched?'mat':'new'); tm.textContent=r.matched?'已挂靠':'待挂靠'; tdM.appendChild(tm); tr.appendChild(tdM);
     const tdG=document.createElement('td');
     const tg=document.createElement('span'); tg.className='tag '+(r.done?'done':'todo'); tg.textContent=r.done?'已批':(r.graded?'部分':'待批'); tdG.appendChild(tg); tr.appendChild(tdG);
     const tdO=document.createElement('td');
     const vb=document.createElement('button'); vb.className='opbtn view'; vb.textContent='查看';
-    vb.onclick=()=>{ openAttachOrView(r,false); }; tdO.appendChild(vb);
+    vb.onclick=()=>{ openFile(r.path); }; tdO.appendChild(vb);
     if(r.matched){
       const ab=document.createElement('button'); ab.className='opbtn attached'; ab.textContent='已挂靠'; tdO.appendChild(ab);
     } else {
       const ab=document.createElement('button'); ab.className='opbtn attach'; ab.textContent='挂靠';
-      ab.onclick=()=>{ openAttachOrView(r,true); }; tdO.appendChild(ab);
+      ab.onclick=()=>{ openAttachBatch(); }; tdO.appendChild(ab);
     }
     tr.appendChild(tdO);
     tbody.appendChild(tr);
@@ -351,6 +370,93 @@ async function doAttach(){
 }
 el.btnAttachOk.onclick=doAttach;
 el.btnAttachCancel.onclick=()=>{ el.attachMask.style.display='none'; };
+
+// —— 批量挂靠弹窗
+let S_ATTACH = { list: [], idx: 0 };
+async function openAttachBatch(){
+  const rows = ((S.prepOv && S.prepOv.rows) || []).filter(r=>!r.matched);
+  if(!rows.length){ setErr('没有待挂靠的报告'); return; }
+  S_ATTACH.list = rows; S_ATTACH.idx = 0;
+  el.attachBatchMask.style.display='flex';
+  el.abErr.textContent='';
+  await refreshAttachBatch();
+}
+async function refreshAttachBatch(){
+  const L=S_ATTACH.list, i=S_ATTACH.idx;
+  if(!L.length){ el.attachBatchMask.style.display='none'; return; }
+  const r = L[i];
+  el.abProgress.textContent = (i+1)+' / '+L.length;
+  // 左侧待挂靠文件清单
+  el.abFileList.innerHTML='';
+  L.forEach((x,k)=>{
+    const row=document.createElement('div');
+    row.className='ab-file'+(k===i?' active':'');
+    const nm=document.createElement('span'); nm.textContent=(x.fname||x.path||''); nm.style.cursor='pointer';
+    nm.onclick=()=>{ openFile(x.path); };
+    const st=document.createElement('span'); st.className='tag '+(x.matched?'mat':'new'); st.textContent=x.matched?'已挂靠':'待挂靠';
+    row.appendChild(nm); row.appendChild(st);
+    el.abFileList.appendChild(row);
+  });
+  // 右侧名单候选（学号或姓名一致高亮）
+  let roster=[];
+  if(window.__bridge && window.__bridge.getRoster){ try{ roster=await window.__bridge.getRoster(S.folder); }catch(e){} }
+  el.abCand.innerHTML='';
+  roster.forEach(s=>{
+    const hl = (s.no && s.no===r.ocr_no) || (s.name && s.name===r.ocr_name);
+    const label=[s.no,s.name,s.cls,s.report_name].filter(Boolean).join('_');
+    const lab=document.createElement('label'); if(hl) lab.className='hl';
+    const inp=document.createElement('input'); inp.type='radio'; inp.name='abSel'; inp.value=s.no; if(hl) inp.checked=true;
+    lab.appendChild(inp); lab.appendChild(document.createTextNode(label));
+    el.abCand.appendChild(lab);
+  });
+  const errLab=document.createElement('label'); errLab.className='err';
+  const errInp=document.createElement('input'); errInp.type='radio'; errInp.name='abSel'; errInp.value='__err';
+  errLab.appendChild(errInp); errLab.appendChild(document.createTextNode('错误报告（交错了，不挂靠）'));
+  el.abCand.appendChild(errLab);
+  // 报告预览
+  renderAttachPreview(r.path);
+  el.abPrevBtn.disabled = (i===0);
+  el.abNextBtn.disabled = (i>=L.length-1);
+}
+async function renderAttachPreview(path){
+  const pre=el.abPreview; pre.innerHTML='';
+  if(!path || !S.folder || !window.__bridge){ pre.innerHTML='<div style="color:#888;padding:12px">无文件预览</div>'; return; }
+  if(!S.pdfjsOk){ pre.innerHTML='<div style="color:#888;padding:12px">pdf.js 未就绪</div>'; return; }
+  try{
+    const bytes=await window.__bridge.readPdf(S.folder, path);
+    const pdf=await pdfjsLib.getDocument({data: bytes.slice(0)}).promise;
+    for(let pi=1; pi<=pdf.numPages; pi++){
+      const page=await pdf.getPage(pi);
+      const vp=page.getViewport({scale:1});
+      const availW=Math.max(220, pre.clientWidth-12);
+      const scale=availW/vp.width;
+      const vp2=page.getViewport({scale});
+      const canvas=document.createElement('canvas');
+      canvas.width=Math.floor(vp2.width); canvas.height=Math.floor(vp2.height);
+      canvas.style.width='100%'; canvas.style.marginBottom='6px'; canvas.style.boxShadow='0 1px 3px rgba(0,0,0,.2)';
+      pre.appendChild(canvas);
+      await page.render({canvasContext: canvas.getContext('2d'), viewport: vp2}).promise;
+    }
+  }catch(e){ pre.innerHTML='<div style="color:#c62828;padding:12px">预览失败: '+e+'</div>'; }
+}
+async function commitAttachBatch(){
+  const sel=document.querySelector('input[name="abSel"]:checked');
+  if(!sel){ el.abErr.textContent='请选择一个候选或「错误报告」'; return; }
+  const v=sel.value;
+  const r=S_ATTACH.list[S_ATTACH.idx];
+  const action = v==='__err' ? '__skip' : v;
+  el.abErr.textContent='';
+  try{
+    await window.__bridge.resolveUnmatched(S.folder, {path:r.path}, action);
+    r.matched = (v!=='__err');
+    refreshPrepOverview();
+    refreshAttachBatch();
+  }catch(e){ el.abErr.textContent='挂靠失败: '+e; }
+}
+el.abCommitBtn.onclick = commitAttachBatch;
+el.abPrevBtn.onclick = ()=>{ if(S_ATTACH.idx>0){ S_ATTACH.idx--; refreshAttachBatch(); } };
+el.abNextBtn.onclick = ()=>{ if(S_ATTACH.idx<S_ATTACH.list.length-1){ S_ATTACH.idx++; refreshAttachBatch(); } };
+el.abBackBtn.onclick = ()=>{ el.attachBatchMask.style.display='none'; refreshPrepOverview(); };
 el.btnPrepFolder.onclick=()=>{ if(el.btnLoadFolder.onclick) el.btnLoadFolder.onclick(); };
 el.btnPrepBack.onclick=()=>{ hidePrep(); S.teacher=''; localStorage.removeItem('loginUser'); el.loginMask.style.display='flex'; showLogin(); };
 el.btnPrepStart.onclick=()=>{
@@ -1248,9 +1354,10 @@ function downloadRosterTemplate(){
     { header: '学号', key: 'no', width: 16 },
     { header: '姓名', key: 'name', width: 12 },
     { header: '班级', key: 'cls', width: 18 },
+    { header: '报告名称', key: 'report_name', width: 26 },
   ];
-  ws.addRow({ no: '2024010101', name: '张三', cls: '2024级临床1班' });
-  ws.addRow({ no: '2024010102', name: '李四', cls: '2024级临床1班' });
+  ws.addRow({ no: '2024010101', name: '张三', cls: '2024级临床1班', report_name: '实验报告' });
+  ws.addRow({ no: '2024010102', name: '李四', cls: '2024级临床1班', report_name: '实验报告' });
   wb.xlsx.writeBuffer().then(buf=>{
     downloadBlob(new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), '学生名单模板.xlsx');
     setDetect('✅ 已下载名单模板');
@@ -1266,7 +1373,7 @@ async function parseRoster(file){
     const rows = text.split(/\r?\n/).filter(Boolean);
     return rows.slice(1).map(line=>{
       const c = line.split(/[,，]/).map(x=>x.trim());
-      return { no: c[0]||'', name: c[1]||'', cls: c[2]||'' };
+      return { no: c[0]||'', name: c[1]||'', cls: c[2]||'', report_name: c[3]||'' };
     }).filter(r=>r.no || r.name);
   }
   if(!window.ExcelJS){ setErr('exceljs 未加载，无法解析 Excel'); return []; }
@@ -1280,7 +1387,8 @@ async function parseRoster(file){
     const no   = String(row.getCell(1).value || '').trim();
     const name = String(row.getCell(2).value || '').trim();
     const cls  = String(row.getCell(3).value || '').trim();
-    if(no || name) out.push({ no, name, cls });
+    const report_name = String(row.getCell(4).value || '').trim();
+    if(no || name) out.push({ no, name, cls, report_name });
   });
   return out;
 }
