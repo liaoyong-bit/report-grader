@@ -2167,6 +2167,18 @@ async function runPrepScan(){
   setDetect('✅ 扫描识别完成'+(ok?('，自动挂靠 '+ok+' 份'):''));
   refreshPrepOverview();
 }
+async function textLayerMatchReport(pobj, vp, px, py, pw, ph){
+  try{
+    const tc = await pobj.getTextContent();
+    const parts=[];
+    for(const it of (tc.items||[])){
+      if(!it || !it.str || !it.transform || it.transform.length<6) continue;
+      const p = vp.convertToViewportPoint(it.transform[4], it.transform[5]);
+      if(p[0]>=px-6 && p[0]<=px+pw+6 && p[1]>=py-6 && p[1]<=py+ph+6) parts.push(it.str);
+    }
+    return parts.join(' ').trim();
+  }catch(e){ return ''; }
+}
 async function ocrReportBasic(path, basicFields){
   const fields=(basicFields||[]).filter(f=>f[0] && f[0]!=='__total__');
   if(!fields.length || !path) return null;
@@ -2182,33 +2194,38 @@ async function ocrReportBasic(path, basicFields){
       try{
         const pobj=await pdf.getPage(Math.max(1,page));
         const vp=await pobj.getViewport({scale:2});
-        const canvas=document.createElement('canvas'); canvas.width=Math.floor(vp.width); canvas.height=Math.floor(vp.height);
-        await pobj.render({canvasContext:canvas.getContext('2d'), viewport:vp}).promise;
         let px,py,pw,ph;
         if(rect.left!=null && rect.top!=null && rect.right!=null && rect.bottom!=null){
           px=Math.max(0, Math.floor(rect.left*vp.width));
           py=Math.max(0, Math.floor(rect.top*vp.height));
-          pw=Math.max(4, Math.min(canvas.width-px, Math.ceil((rect.right-rect.left)*vp.width)));
-          ph=Math.max(4, Math.min(canvas.height-py, Math.ceil((rect.bottom-rect.top)*vp.height)));
+          pw=Math.max(4, Math.min(Math.floor(vp.width)-px, Math.ceil((rect.right-rect.left)*vp.width)));
+          ph=Math.max(4, Math.min(Math.floor(vp.height)-py, Math.ceil((rect.bottom-rect.top)*vp.height)));
         } else {
           px=Math.max(0, Math.floor(rect.x/tplScale*2));
           py=Math.max(0, Math.floor(rect.y/tplScale*2));
-          pw=Math.max(4, Math.min(canvas.width-px, Math.ceil(rect.w/tplScale*2)));
-          ph=Math.max(4, Math.min(canvas.height-py, Math.ceil(rect.h/tplScale*2)));
+          pw=Math.max(4, Math.min(Math.floor(vp.width)-px, Math.ceil(rect.w/tplScale*2)));
+          ph=Math.max(4, Math.min(Math.floor(vp.height)-py, Math.ceil(rect.h/tplScale*2)));
         }
-        const ctx=canvas.getContext('2d');
-        const img=ctx.getImageData(px,py,pw,ph);
-        const c2=document.createElement('canvas'); c2.width=pw; c2.height=ph;
-        c2.getContext('2d').putImageData(img,0,0);
-        const b64=c2.toDataURL('image/png').split(',')[1];
-        let txt='';
-        try{ txt=await window.__bridge.ocrImageB64(b64); }catch(e){ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[ocrERR] type='+type+' err='+e); }
-        txt=(txt||'').trim();
-        if(window.__bridge && window.__bridge.log) window.__bridge.log('[ocrtpl] type='+type+' page='+page+' rect='+JSON.stringify(rect)+' px='+px+' py='+py+' w='+pw+' h='+ph+' ocr="'+txt+'"');
-        try{ if(window.__bridge && window.__bridge.saveToOutput){
-          const raw=atob(b64); const arr=new Uint8Array(raw.length); for(let i=0;i<raw.length;i++) arr[i]=raw.charCodeAt(i);
-          await window.__bridge.saveToOutput('ocr_debug/'+type+'_'+Date.now()+'.png', arr).catch(()=>{});
-        }}catch(e){}
+        // 优先文本层识别（文本型报告最准，不依赖图像OCR引擎）
+        let txt = await textLayerMatchReport(pobj, vp, px, py, pw, ph);
+        let source = txt ? 'text' : 'image';
+        // 图像OCR备用（扫描版无文本层）
+        if(!txt){
+          const canvas=document.createElement('canvas'); canvas.width=Math.floor(vp.width); canvas.height=Math.floor(vp.height);
+          await pobj.render({canvasContext:canvas.getContext('2d'), viewport:vp}).promise;
+          const ctx=canvas.getContext('2d');
+          const img=ctx.getImageData(px,py,pw,ph);
+          const c2=document.createElement('canvas'); c2.width=pw; c2.height=ph;
+          c2.getContext('2d').putImageData(img,0,0);
+          const b64=c2.toDataURL('image/png').split(',')[1];
+          try{ txt=await window.__bridge.ocrImageB64(b64); }catch(e){ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[ocrERR] type='+type+' err='+e); }
+          txt=(txt||'').trim();
+          try{ if(window.__bridge && window.__bridge.saveToOutput){
+            const raw=atob(b64); const arr=new Uint8Array(raw.length); for(let i=0;i<raw.length;i++) arr[i]=raw.charCodeAt(i);
+            await window.__bridge.saveToOutput('ocr_debug/'+type+'_'+Date.now()+'.png', arr).catch(()=>{});
+          }}catch(e){}
+        }
+        if(window.__bridge && window.__bridge.log) window.__bridge.log('[ocrtpl] type='+type+' page='+page+' rect='+JSON.stringify(rect)+' px='+px+' py='+py+' w='+pw+' h='+ph+' ocr="'+txt+'" src='+source);
         if(type==='no') res.no=txt; else if(type==='name') res.name=txt; else if(type==='class') res.cls=txt; else if(type==='exp') res.exp=txt;
       }catch(e){}
     }
