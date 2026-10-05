@@ -2220,6 +2220,9 @@ async function ocrReportBasic(path, basicFields){
           const b64=c2.toDataURL('image/png').split(',')[1];
           try{ txt=await window.__bridge.ocrImageB64(b64); }catch(e){ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[ocrERR] type='+type+' err='+e); }
           txt=(txt||'').trim();
+          if(!txt && window.Tesseract){
+            try{ const t=await recognizeOcr(c2); txt=(t||'').trim(); if(txt) source='tesseract'; }catch(e){ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[tessERR] type='+type+' '+String(e&&e.message||e)); }
+          }
           try{ if(window.__bridge && window.__bridge.saveToOutput){
             const raw=atob(b64); const arr=new Uint8Array(raw.length); for(let i=0;i<raw.length;i++) arr[i]=raw.charCodeAt(i);
             await window.__bridge.saveToOutput('ocr_debug/'+type+'_'+Date.now()+'.png', arr).catch(()=>{});
@@ -2256,8 +2259,10 @@ async function runSourceVerify(){
       const ocr = await ocrReportBasic(r.path, basicFields);
       if(!ocr){ L('ocr none '+r.path); continue; }
       L('ocr '+JSON.stringify(ocr));
-      await window.__bridge.saveReportOcr(S.folder, r.key, (ocr.no||'').trim(), (ocr.name||'').trim(), (ocr.cls||'').trim(), (ocr.exp||'').trim());
-      const hit = roster.find(s=> (ocr.no&&ocr.no.trim()&&s.no===ocr.no.trim()) || (ocr.name&&ocr.name.trim()&&s.name===ocr.name.trim()));
+      await window.__bridge.saveReportOcr(S.folder, r.key, (ocr.no||'').replace(/\s+/g,''), (ocr.name||'').trim(), (ocr.cls||'').trim(), (ocr.exp||'').trim());
+      const noClean=(ocr.no||'').replace(/\s+/g,'');
+      const nameClean=(ocr.name||'').replace(/\s+/g,'');
+      const hit = roster.find(s=> (noClean && s.no && s.no.replace(/\s+/g,'')===noClean) || (nameClean && s.name && s.name.replace(/\s+/g,'')===nameClean));
       if(hit){ await window.__bridge.resolveUnmatched(S.folder, {path:r.path}, hit.no); ok++; L('挂靠 '+hit.no); }
     }catch(e){ L('单份失败 '+e); }
   }
