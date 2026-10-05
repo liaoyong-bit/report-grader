@@ -1626,6 +1626,13 @@ async function loadSavedBoxes(){
     const BASIC_LABELS={no:'学号',name:'姓名',class:'班级',exp:'报告名称'};
     S_BASIC_FIELDS = (bf||[]).filter(f=>f&&f[0]).map(f=>{
       let r={}; try{ r=JSON.parse(f[2]||'{}'); }catch(e){}
+      const pvp = S.tplPages[(f[1]||0)] ? S.tplPages[(f[1]||0)].vp : null;
+      const pw = (pvp && pvp.width) ? pvp.width : 1;
+      const ph = (pvp && pvp.height) ? pvp.height : 1;
+      if(r.left!=null && r.top!=null && r.right!=null && r.bottom!=null){
+        return { type:f[0], label:(BASIC_LABELS[f[0]]||f[0]), pageIndex:f[1]||0,
+          x:r.left*pw, y:r.top*ph, w:(r.right-r.left)*pw, h:(r.bottom-r.top)*ph, text:'' };
+      }
       return { type:f[0], label:(BASIC_LABELS[f[0]]||f[0]), pageIndex:f[1]||0, x:r.x||0, y:r.y||0, w:r.w||0, h:r.h||0, text:'' };
     });
     S_TPL_RECTS=[]; S_ITEMS=[]; S_TOTAL_RECT=null;
@@ -2177,10 +2184,18 @@ async function ocrReportBasic(path, basicFields){
         const vp=await pobj.getViewport({scale:2});
         const canvas=document.createElement('canvas'); canvas.width=Math.floor(vp.width); canvas.height=Math.floor(vp.height);
         await pobj.render({canvasContext:canvas.getContext('2d'), viewport:vp}).promise;
-        const px=Math.max(0, Math.floor(rect.x/tplScale*2));
-        const py=Math.max(0, Math.floor(rect.y/tplScale*2));
-        const pw=Math.max(4, Math.min(canvas.width-px, Math.ceil(rect.w/tplScale*2)));
-        const ph=Math.max(4, Math.min(canvas.height-py, Math.ceil(rect.h/tplScale*2)));
+        let px,py,pw,ph;
+        if(rect.left!=null && rect.top!=null && rect.right!=null && rect.bottom!=null){
+          px=Math.max(0, Math.floor(rect.left*vp.width));
+          py=Math.max(0, Math.floor(rect.top*vp.height));
+          pw=Math.max(4, Math.min(canvas.width-px, Math.ceil((rect.right-rect.left)*vp.width)));
+          ph=Math.max(4, Math.min(canvas.height-py, Math.ceil((rect.bottom-rect.top)*vp.height)));
+        } else {
+          px=Math.max(0, Math.floor(rect.x/tplScale*2));
+          py=Math.max(0, Math.floor(rect.y/tplScale*2));
+          pw=Math.max(4, Math.min(canvas.width-px, Math.ceil(rect.w/tplScale*2)));
+          ph=Math.max(4, Math.min(canvas.height-py, Math.ceil(rect.h/tplScale*2)));
+        }
         const ctx=canvas.getContext('2d');
         const img=ctx.getImageData(px,py,pw,ph);
         const c2=document.createElement('canvas'); c2.width=pw; c2.height=ph;
@@ -2248,7 +2263,12 @@ el.btnItemSave.onclick=async ()=>{
     await window.__bridge.saveBatchItems(S.folder, items).catch(e=>{ setErr('⚠ '+e); return; });
   }
   if(S_BASIC_FIELDS.length && window.__bridge && window.__bridge.saveBasicFields){
-    const fields = S_BASIC_FIELDS.map(rt=>[rt.type, rt.pageIndex||0, JSON.stringify({x:rt.x,y:rt.y,w:rt.w,h:rt.h})]);
+    const fields = S_BASIC_FIELDS.map(rt=>{
+      const pvp = (S.tplPages[rt.pageIndex]||{}).vp;
+      const pw = (pvp && pvp.width) ? pvp.width : 1;
+      const ph = (pvp && pvp.height) ? pvp.height : 1;
+      return [rt.type, rt.pageIndex||0, JSON.stringify({left:(rt.x/pw), top:(rt.y/ph), right:((rt.x+rt.w)/pw), bottom:((rt.y+rt.h)/ph)})];
+    });
     await window.__bridge.saveBasicFields(S.folder, fields).catch(e=>{ setErr('⚠ 基本信息保存失败: '+e); });
   }
   S.itemsTemplate=items.filter(x=>x.item_index>=0).map(it=>({item_name:it.item_name, max_score:it.max_score, score_x:it.score_x||0}));
