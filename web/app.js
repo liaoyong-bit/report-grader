@@ -76,7 +76,7 @@ const el = {
   overviewMask: $('overviewMask'), overviewBody: $('overviewBody'), btnOverviewClose: $('btnOverviewClose'),
   itemMask: $('itemMask'), tplPreview: $('tplPreview'), itemList: $('itemList'), btnItems: $('btnItems'),
   btnItemAdd: $('btnItemAdd'), btnItemSave: $('btnItemSave'), btnItemCancel: $('btnItemCancel'),
-  btnTotalMode: $('btnTotalMode'), btnTitleMode: $('btnTitleMode'), totalInfo: $('totalInfo'),
+  btnTotalMode: $('btnTotalMode'), btnTitleMode: $('btnTitleMode'), btnBasicMode: $('btnBasicMode'), totalInfo: $('totalInfo'), irState: $('irState'),
 };
 
 /* ==================== 批阅进度持久化（P0-1） ====================
@@ -323,8 +323,7 @@ function renderPrepSelbar(){
     const fieldTag=(txt,ok)=>'<span class="pv-sel '+(ok?'ok':'miss')+'">'+txt+(ok?'✓':'✗')+'</span>';
     el2.innerHTML = fieldTag('学号',have.no)+fieldTag('姓名',have.name)+fieldTag('班级',have.cls)+
       fieldTag('报告名称',have.exp)+fieldTag('题目与分值',have.items)+
-      '<button onclick="window.__app.openItemSetup()">设置评分项</button>'+
-      '<button onclick="window.__app.prepBasicField()">框选基本信息</button>';
+      '<button onclick="window.__app.openItemSetup()">设置模板（框选）</button>';
   }).catch(()=>{ el2.innerHTML=''; });
 }
 async function openAttachOrView(r, doAttach){
@@ -371,7 +370,15 @@ el.btnPrepStart.onclick=()=>{
   if(S.reports && S.reports.length){ selectReport(0); setDetect('已进入批改'); }
   else setDetect('已进入批改界面，请载入报告');
 };
-window.prepBasicField = function(){ alert('基本信息框选（学号/姓名/班级/报告名称）将在下一步实现'); };
+window.prepBasicField = async function(){
+  if(!S.folder){ setErr('请先选报告文件夹'); return; }
+  if(!window.__bridge || !window.__bridge.readPdf){ setErr('仅 Tauri 模式支持'); return; }
+  const tplPath = await window.__bridge.getTemplatePath(S.folder).catch(()=>null);
+  if(!tplPath){ setErr('请先把空白模板 PDF 放到所选文件夹的 template/ 子目录'); return; }
+  S.tplPath = tplPath;
+  await openItemSetup();
+  setItemMode('basic');
+};
 window.openPrepImport = function(){ openWizard(); };
 
 initLibs();
@@ -1290,18 +1297,13 @@ el.rosterInput.onchange = async (e)=>{
 };
 
 // —— 初始化向导
-function openWizard(){
-  el.wizardMask.style.display = 'flex';
-  el.wizReportName.focus();
-}
+function openWizard(){ el.wizardMask.style.display = 'flex'; }
 function closeWizard(){ el.wizardMask.style.display = 'none'; }
 el.btnWizardCancel.onclick = closeWizard;
 el.btnWizardStart.onclick = async ()=>{
-  const reportName = el.wizReportName.value.trim();
-  if(!reportName){ el.wizReportName.focus(); return; }
   if(!S.students.length){ setErr('请先导入学生名单'); return; }
   if(window.__bridge && window.__bridge.initBatch){
-    await window.__bridge.initBatch(S.folder, reportName, S.students);
+    await window.__bridge.initBatch(S.folder, '', S.students);   // 报告名称在挂靠/OCR 后补，向导中不再设置
     closeWizard();
   } else {
     setErr('当前为浏览器模式，请用「载入报告文件夹」');
@@ -1349,6 +1351,8 @@ window.__app = { S, el, reportLabel, reportState, renderReportList, updateStats,
 /* ==================== 评分项模板设置（步骤一） ==================== */
 let S_ITEMS = [];        // 手动添加的项
 let S_TPL_RECTS = [];    // 模板框选矩形 {x,y,w,h,pageIndex,text,item_name,max_score}
+let S_BASIC_MODE = false;   // 框选基本信息模式
+let S_BASIC_FIELDS = [];    // 基本信息框 {type,label,pageIndex,x,y,w,h,text}（no/name/class/exp）
 let S_ocrWorker = null;  // OCR worker（懒加载，复用）
 let S_tplScale = 1;      // 模板预览缩放（冗余引用，避免误删）
 
@@ -1407,9 +1411,8 @@ let S_TOTAL_MODE = false;
 function renderTemplatePreview(){
   const pre = el.tplPreview;
   pre.innerHTML='';
-  S_ITEMS=[]; S_TPL_RECTS=[]; S_TOTAL_RECT=null; S_TOTAL_MODE=false; S.selBox=null;
-  if(el.btnTitleMode){ el.btnTitleMode.style.background='#1a73e8'; el.btnTitleMode.style.color='#fff'; }
-  if(el.btnTotalMode){ el.btnTotalMode.style.background='#eef1f5'; el.btnTotalMode.style.color='#555'; }
+  S_ITEMS=[]; S_TPL_RECTS=[]; S_TOTAL_RECT=null; S_TOTAL_MODE=false; S_BASIC_MODE=false; S_BASIC_FIELDS=[]; S.selBox=null;
+  setItemMode('title');
   if(el.totalInfo) el.totalInfo.style.display='none';
   const inner=document.createElement('div');
   inner.style.position='relative'; inner.style.width='100%';
@@ -1473,6 +1476,16 @@ function bindTemplateDrag(){
         drag={mode:'resize', idx:parseInt(t.dataset.idx,10), x0:e.clientX, y0:e.clientY};
         return;
       }
+      if(t.classList.contains('tpl-basic-del')){   // 基本信息框删除
+        const i=parseInt(t.dataset.bidx,10);
+        S_BASIC_FIELDS.splice(i,1);
+        renderBasicBoxes(); renderItemList();
+        e.preventDefault(); e.stopPropagation(); return;
+      }
+      if(t.classList.contains('tpl-basic')){   // 基本信息框移动
+        drag={mode:'bmove', bidx:parseInt(t.dataset.bidx,10), x0:e.clientX, y0:e.clientY};
+        return;
+      }
       const boxEl = t.classList.contains('tpl-box') ? t : (t.closest ? t.closest('.tpl-box') : null);
       const scoreEl = t.classList.contains('tpl-score') ? t : (t.closest ? t.closest('.tpl-score') : null);
       const hitEl = boxEl || scoreEl;
@@ -1500,6 +1513,12 @@ function bindTemplateDrag(){
       d.className='tpl-box active';
       d.style.left=box+'px'; d.style.top=bbox+'px'; d.style.width=w+'px'; d.style.height=h+'px';
       (S.tplInner||pre).appendChild(d);
+    } else if(drag.mode==='bmove'){
+      const br=S_BASIC_FIELDS[drag.bidx]; if(!br) return;
+      const dx=e.clientX-drag.x0, dy=e.clientY-drag.y0;
+      drag.x0=e.clientX; drag.y0=e.clientY;
+      br.x=Math.max(0, Math.round(br.x+dx)); br.y=Math.max(0, Math.round(br.y+dy));
+      renderBasicBoxes();
     } else {
       const rt=S_TPL_RECTS[drag.idx];
       if(!rt) return;
@@ -1528,9 +1547,10 @@ function bindTemplateDrag(){
       const box=Math.min(x0,x),bbox=Math.min(y0,y),w=Math.abs(x-x0),h=Math.abs(y-y0);
       if(w>=8 && h>=8){
         pre.querySelectorAll('.tpl-box.active').forEach(n=>n.remove());
-        if(S_TOTAL_MODE){
-          S_TOTAL_MODE=false;
-          if(el.btnTotalMode) el.btnTotalMode.style.background='#1a73e8';
+        if(S_BASIC_MODE){
+          addBasicBox(box,bbox,w,h);
+        } else if(S_TOTAL_MODE){
+          setItemMode('title');
           S_TOTAL_RECT={x:box,y:bbox,w:w,h:h,count:Math.max(1,S_TPL_RECTS.length+1)};
           renderTotalBox();
         } else {
@@ -1571,6 +1591,47 @@ function addTemplateBox(box,bbox,w,h){
       renderItemList();
     }
   }).catch(()=>{});
+}
+
+// 基本信息框选：依次框选 学号→姓名→班级→报告名称
+function addBasicBox(box,bbox,w,h){
+  const pi = pageByAbsY(bbox);
+  const off = S.tplPages[pi].offset;
+  const types=[['no','学号'],['name','姓名'],['class','班级'],['exp','报告名称']];
+  const idx = S_BASIC_FIELDS.length;
+  const type = types[idx] || ['ext','字段'+(idx+1)];
+  const rt={type:type[0], label:type[1], pageIndex:pi, x:box, y:bbox-off, w:w, h:h, text:''};
+  el.tplPreview.querySelectorAll('.tpl-box.active').forEach(n=>n.remove());
+  S_BASIC_FIELDS.push(rt);
+  renderBasicBoxes(); renderItemList();
+  runOcr(rt).then(t=>{
+    if(rt && t && t.trim()){
+      rt.text = parseBasicValue(t.trim(), type[0]);
+      renderBasicBoxes(); renderItemList();
+    }
+  }).catch(()=>{});
+}
+function parseBasicValue(txt, type){
+  if(type==='no'){ const m=(txt||'').match(/\d{4,}/); return m ? m[0] : txt; }   // 学号取数字串
+  return txt.replace(/\s+/g,' ').trim();
+}
+function renderBasicBoxes(){
+  const pre = el.tplPreview;
+  const host = S.tplInner||pre;
+  pre.querySelectorAll('.tpl-basic').forEach(n=>n.remove());
+  S_BASIC_FIELDS.forEach((rt,i)=>{
+    const off=S.tplPages[rt.pageIndex].offset;
+    const d=document.createElement('div'); d.className='tpl-basic'; d.dataset.bidx=i;
+    d.style.left=rt.x+'px'; d.style.top=(off+rt.y)+'px'; d.style.width=rt.w+'px'; d.style.height=rt.h+'px';
+    d.style.pointerEvents='auto'; d.style.cursor='move';
+    d.title='基本信息框：'+rt.label+'（拖动移动）';
+    const lab=document.createElement('div'); lab.className='tpl-basic-label';
+    lab.textContent=rt.label+(rt.text?('：'+rt.text):'');
+    d.appendChild(lab);
+    const dl=document.createElement('div'); dl.className='tpl-basic-del'; dl.textContent='×'; dl.dataset.bidx=i;
+    d.appendChild(dl);
+    host.appendChild(d);
+  });
 }
 
 function renderTitleBoxes(){
@@ -1706,6 +1767,17 @@ async function pickTemplateAndSetup(){
 // ==================== 评分项列表渲染 & 按钮绑定（恢复） ====================
 function renderItemList(){
   const out=[];
+  S_BASIC_FIELDS.forEach((rt,i)=>{
+    const div=document.createElement('div'); div.className='irow';
+    const no=document.createElement('span'); no.className='ino'; no.textContent=rt.label;
+    const val=document.createElement('input'); val.type='text'; val.value=rt.text||''; val.placeholder=rt.label;
+    val.style.flex='1'; val.style.color='#6a1b9a';
+    val.oninput=()=>{ rt.text=val.value; };
+    const del=document.createElement('button'); del.textContent='删';
+    del.onclick=()=>{ S_BASIC_FIELDS.splice(i,1); renderBasicBoxes(); renderItemList(); };
+    div.appendChild(no); div.appendChild(val); div.appendChild(del);
+    out.push(div);
+  });
   S_TPL_RECTS.forEach((rt,i)=>{
     const div=document.createElement('div'); div.className='irow';
     const no=document.createElement('span'); no.className='ino'; no.textContent=(i+1)+'.';
@@ -1752,6 +1824,17 @@ function renderItemList(){
     return;
   }
   out.forEach(n=>el.itemList.appendChild(n));
+  renderIrState();
+}
+
+function renderIrState(){
+  const st=el.irState; if(!st) return;
+  const types=S_BASIC_FIELDS.map(b=>b.type);
+  const tag=(txt,ok)=>'<span class="ir-tag '+(ok?'ok':'miss')+'">'+txt+(ok?'✓':'✗')+'</span>';
+  st.innerHTML = '基本信息：'+tag('学号',types.includes('no'))+tag('姓名',types.includes('name'))+
+    tag('班级',types.includes('class'))+tag('报告名称',types.includes('exp'))+
+    '<br>题目与分值：'+(S_TPL_RECTS.length ? '<span class="ir-tag ok">已框选 '+S_TPL_RECTS.length+' 题</span>' : '<span class="ir-tag miss">未框选</span>')+
+    (S_TOTAL_RECT ? '，统分区✓' : '');
 }
 
 function renderTotalBox(){
@@ -1778,19 +1861,21 @@ function renderTotalBox(){
   el.totalInfo.appendChild(document.createTextNode(' 个（改后点任意处应用）'));
 }
 
-function setItemMode(isTitle){
-  S_TOTAL_MODE = !isTitle;
-  if(el.btnTitleMode){ el.btnTitleMode.style.background = isTitle ? '#1a73e8' : '#eef1f5'; el.btnTitleMode.style.color = isTitle ? '#fff' : '#555'; }
-  if(el.btnTotalMode){ el.btnTotalMode.style.background = isTitle ? '#eef1f5' : '#1a73e8'; el.btnTotalMode.style.color = isTitle ? '#555' : '#fff'; }
+function setItemMode(mode){
+  S_BASIC_MODE = (mode==='basic');
+  S_TOTAL_MODE = (mode==='total');
+  const t = !S_BASIC_MODE && !S_TOTAL_MODE;
+  if(el.btnBasicMode){ el.btnBasicMode.style.background = S_BASIC_MODE ? '#1a73e8' : '#eef1f5'; el.btnBasicMode.style.color = S_BASIC_MODE ? '#fff' : '#555'; }
+  if(el.btnTitleMode){ el.btnTitleMode.style.background = t ? '#1a73e8' : '#eef1f5'; el.btnTitleMode.style.color = t ? '#fff' : '#555'; }
+  if(el.btnTotalMode){ el.btnTotalMode.style.background = S_TOTAL_MODE ? '#1a73e8' : '#eef1f5'; el.btnTotalMode.style.color = S_TOTAL_MODE ? '#fff' : '#555'; }
   if(el.totalInfo){
-    if(S_TOTAL_MODE){
-      el.totalInfo.style.display='block';
-      el.totalInfo.textContent='正在框选统分区：在预览上拖选统分表整行区域（一条线框出所有分数所在处）。';
-    } else { el.totalInfo.style.display='none'; }
+    if(S_TOTAL_MODE){ el.totalInfo.style.display='block'; el.totalInfo.textContent='正在框选统分区：在预览上拖选统分表整行区域（一条线框出所有分数所在处）。'; }
+    else { el.totalInfo.style.display='none'; }
   }
 }
-el.btnTitleMode.onclick=()=>{ setItemMode(true); };
-el.btnTotalMode.onclick=()=>{ setItemMode(false); };
+el.btnBasicMode.onclick=()=>{ setItemMode('basic'); if(window.__bridge&&window.__bridge.log) window.__bridge.log('进入框选基本信息模式'); };
+el.btnTitleMode.onclick=()=>{ setItemMode('title'); };
+el.btnTotalMode.onclick=()=>{ setItemMode('total'); };
 el.btnItemAdd.onclick=()=>{ S_ITEMS.push({item_name:'', max_score:20}); renderItemList(); };
 el.btnItemCancel.onclick=()=>{ el.itemMask.style.display='none'; };
 // Delete/Backspace 删除选中框
@@ -1821,6 +1906,10 @@ el.btnItemSave.onclick=async ()=>{
   }
   if(window.__bridge && window.__bridge.saveBatchItems){
     await window.__bridge.saveBatchItems(S.folder, items).catch(e=>{ setErr('⚠ '+e); return; });
+  }
+  if(S_BASIC_FIELDS.length && window.__bridge && window.__bridge.saveBasicFields){
+    const fields = S_BASIC_FIELDS.map(rt=>[rt.type, rt.pageIndex||0, JSON.stringify({x:rt.x,y:rt.y,w:rt.w,h:rt.h})]);
+    await window.__bridge.saveBasicFields(S.folder, fields).catch(e=>{ setErr('⚠ 基本信息保存失败: '+e); });
   }
   S.itemsTemplate=items.filter(x=>x.item_index>=0).map(it=>({item_name:it.item_name, max_score:it.max_score, score_x:it.score_x||0}));
   el.itemMask.style.display='none';

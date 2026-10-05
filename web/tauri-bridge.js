@@ -86,7 +86,7 @@
       buildReports(sync);
       app.setDetect('✅ 批次已初始化并扫描报告');
       if(sync.unmatched && sync.unmatched.length){
-        app.showUnmatched(sync.unmatched); app.S.pendingItemsSetup = true;
+        app.S.pendingItemsSetup = true;   // 有待挂靠：评分项等挂靠后再设，避免弹窗叠加
       } else { await app.ensureItemsSetup(); }
       if(app.S.inPrep){ app.refreshPrepOverview(); }
       else if(app.S.reports.length && !app.S.pendingItemsSetup){ app.selectReport(0); }
@@ -103,7 +103,7 @@
       buildReports(sync);
       app.setDetect('已同步批次' + (sync.added ? '，新增 ' + sync.added + ' 份' : ''));
       if(sync.unmatched && sync.unmatched.length){
-        app.showUnmatched(sync.unmatched); app.S.pendingItemsSetup = true;
+        app.S.pendingItemsSetup = true;   // 有待挂靠：总表行内挂载
       } else { await app.ensureItemsSetup(); }
       if(app.S.inPrep){ app.refreshPrepOverview(); }
       else if(app.S.reports.length && !app.S.pendingItemsSetup){ app.selectReport(0); }
