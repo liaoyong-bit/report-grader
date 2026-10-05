@@ -702,10 +702,10 @@ async function selectReport(idx){
     el.pdfHost.innerHTML = '<div id="pdfEmpty"><div class="big">📭</div>该学生尚未提交报告</div>';
     setFile(reportLabel(r) + '（未提交）');
     setDetect('状态: 待提交');
-    el.inpId.value   = (r.student && r.student.no)  || '';
-    el.inpName.value = (r.student && r.student.name)|| '';
-    el.inpClass.value= (r.student && r.student.cls) || '';
-    el.inpExp.value  = '';
+    el.inpId.textContent   = (r.student && r.student.no)  || '';
+    el.inpName.textContent = (r.student && r.student.name)|| '';
+    el.inpClass.textContent= (r.student && r.student.cls) || '';
+    el.inpExp.textContent  = '';
     return;
   }
   // 有报告但 pdf 未就绪：加载失败（真实原因见红字），不要误报"未提交"
@@ -713,10 +713,10 @@ async function selectReport(idx){
     el.pdfHost.innerHTML = '<div id="pdfEmpty"><div class="big">⚠</div>报告加载失败：' + (r.pdfError || '请重试') + '</div>';
     setFile(reportLabel(r) + '（加载失败）');
     setDetect('状态: 加载失败');
-    el.inpId.value   = (r.student && r.student.no)  || '';
-    el.inpName.value = (r.student && r.student.name)|| '';
-    el.inpClass.value= (r.student && r.student.cls) || '';
-    el.inpExp.value  = '';
+    el.inpId.textContent   = (r.student && r.student.no)  || '';
+    el.inpName.textContent = (r.student && r.student.name)|| '';
+    el.inpClass.textContent= (r.student && r.student.cls) || '';
+    el.inpExp.textContent  = '';
     return;
   }
 
@@ -741,11 +741,11 @@ async function selectReport(idx){
     }
     if(!r.basic) r.basic = analysis.basic;
 
-    // 基本信息回填（优先用持久化的值，含老师手动修正过的）
-    el.inpName.value = r.basic.name || '';
-    el.inpId.value   = r.basic.id   || '';
-    el.inpClass.value= r.basic.cls  || '';
-    el.inpExp.value  = r.basic.exp  || '';
+    // 基本信息回填（来自准备阶段核心表，纯文本展示）
+    el.inpName.textContent = r.basic.name || '';
+    el.inpId.textContent   = r.basic.id   || '';
+    el.inpClass.textContent= r.basic.cls  || '';
+    el.inpExp.textContent  = r.basic.exp  || '';
 
     renderPages(r);
     buildScoreRows(r);
@@ -1020,20 +1020,22 @@ async function renderPages(r){
 
 function px2(x,y,vp){ return vp.convertToViewportPoint(x,y); }
 
-// —— 叠加层"得分:N / 总分:N"：位置来自准备阶段模板框选的 title_rect / total_region（百分比映射），
-//    不再依赖预览自动识别（扫描版也能精准定位）。旧 analyze 定位逻辑已整体移除。
+// —— 叠加层"得分:N / 总分:N"：位置来自模板框选的 title_rect / total_region。
+//    新格式为百分比(0-1)，直接映射；旧格式为像素(>1)，用报告页 scale1 宽高归一化（重框保存后即精确）。
 function addOverlays(r, wrap, pageIndex, vp, page){
   const vp1 = page.getViewport({scale:1});
   const pw1 = vp1.width||1, ph1 = vp1.height||1;
-  const ts = (S.tplScale||1);   // 模板预览缩放：title_rect 存的 raw 像素除以它还原为模板页原始像素
   const items=(S.itemsFull||[]).filter(x=>x.item_index>=0);
 
   // 每题标题框旁显示"得分：N"
   items.forEach((t,i)=>{
     let tr={}; try{ tr=JSON.parse(t.title_rect||'{}'); }catch(e){}
     if(tr.w && tr.h && (t.score_page||0)===pageIndex){
-      const ox=(tr.x||0)/ts, oy=(tr.y||0)/ts, ow=(tr.w||0)/ts;
-      const left=ox/pw1*vp.width, top=oy/ph1*vp.height, w=ow/pw1*vp.width;
+      const isPct = tr.w<=1 && tr.h<=1;
+      const px = isPct? (tr.x||0) : (tr.x||0)/pw1;
+      const py = isPct? (tr.y||0) : (tr.y||0)/ph1;
+      const pw = isPct? tr.w : tr.w/pw1;
+      const left=px*vp.width, top=py*vp.height, w=pw*vp.width;
       const ov=document.createElement('div');
       ov.className = 'ov-score ov-title-score';
       ov.style.left = (left + w - 100) + 'px';
@@ -1050,8 +1052,11 @@ function addOverlays(r, wrap, pageIndex, vp, page){
   if(total && pageIndex===0){
     let ttr={}; try{ ttr=JSON.parse(total.total_region||'{}'); }catch(e){}
     if(ttr.w && ttr.h){
-      const ox=(ttr.x||0)/ts, oy=(ttr.y||0)/ts, ow=(ttr.w||0)/ts;
-      const left=ox/pw1*vp.width, top=oy/ph1*vp.height, w=ow/pw1*vp.width;
+      const isPct = ttr.w<=1 && ttr.h<=1;
+      const px = isPct? (ttr.x||0) : (ttr.x||0)/pw1;
+      const py = isPct? (ttr.y||0) : (ttr.y||0)/ph1;
+      const pw = isPct? ttr.w : ttr.w/pw1;
+      const left=px*vp.width, top=py*vp.height, w=pw*vp.width;
       const ov=document.createElement('div');
       ov.className = 'ov-score ov-total-score';
       ov.style.left = (left + w - 100) + 'px';
@@ -1101,7 +1106,7 @@ function buildScoreRows(r){
     const max = it.max;
     const row = document.createElement('div');
     row.className = 'score-row';
-    const nm = document.createElement('span'); nm.className='name'; nm.textContent = (i+1)+'. '+it.name;
+    const nm = document.createElement('span'); nm.className='name'; nm.textContent = it.name;   // 只显示题名，不带序号
     const mx = document.createElement('span'); mx.className='max'; mx.textContent = '满分'+max;
     const inp = document.createElement('input');
     inp.type='number'; inp.min=0; inp.max=max; inp.inputMode='numeric';
@@ -1136,14 +1141,7 @@ function updateTotal(r){
   // P0-3：已批只由"提交"决定，满不满分都不自动标记已批
 }
 
-// 学生信息手动修改 → 更新 r.basic 并保存（P0-1）
-['inpId','inpName','inpClass','inpExp'].forEach(id=>{
-  el[id].addEventListener('change', ()=>{
-    const r = S.current; if(!r) return;
-    r.basic = { name:el.inpName.value, id:el.inpId.value, cls:el.inpClass.value, exp:el.inpExp.value };
-    saveState(r);
-  });
-});
+// 学生信息为纯文本（来自准备阶段核心表），不做编辑监听
 
 /* ==================== 定位：跳转到指定标题所在位置 ==================== */
 function jumpToItem(i){
@@ -1214,7 +1212,7 @@ function gotoNextByItem(i){
   if(i+1 < totalItems){ S.itemCursor=i+1; selectReport(0); focusItem(i+1); setDetect('进入第 '+(i+2)+' 题'); }
   else { setDetect('🎉 当前范围所有题目已批改完成'); }
 }
-function focusItem(i){ setTimeout(()=>{ if(S.scoreInputs && S.scoreInputs[i]){ S.scoreInputs[i].focus(); } }, 80); }
+function focusItem(i){ setTimeout(()=>{ const arr=S.scoreInputs||[]; const idx=(S.gradeMode==='byItem')?0:i; if(arr[idx]) arr[idx].focus(); }, 80); }
 
 el.btnSubmitNext.onclick = submitAndNext;
 
@@ -1403,7 +1401,7 @@ function buildRecord(){
   const maxAll = a.items.reduce((x,y)=>x+y.max,0);
   return {
     teacher: S.teacher,
-    studentId: el.inpId.value, name: el.inpName.value, cls: el.inpClass.value, exp: el.inpExp.value,
+    studentId: (r.basic && r.basic.id)||'', name: (r.basic && r.basic.name)||'', cls: (r.basic && r.basic.cls)||'', exp: (r.basic && r.basic.exp)||'',
     fileName: r.name,
     items: a.items.map((it,i)=>({ name: it.name, max: it.max, score: r.scores[i], pageIndex: it.pageIndex })),
     total, maxTotal: maxAll, status: r.done ? '已批' : '待批',
@@ -2462,10 +2460,14 @@ async function runSourceVerify(){
 }
 el.btnItemSave.onclick=async ()=>{
   const items=[];
+  const ts=(S.tplScale||1);
+  // 归一化为相对模板页的百分比(0-1)：title_rect/total_region 不再存显示像素，批改渲染不依赖 S.tplScale
+  const rectPct=(pageIndex,x,y,w,h)=>{ const pvp=(S.tplPages[pageIndex]||{}).vp; const pw=(pvp&&pvp.width)?pvp.width:1, ph=(pvp&&pvp.height)?pvp.height:1; return {x:x/ts/pw, y:y/ts/ph, w:w/ts/pw, h:h/ts/ph}; };
   S_TPL_RECTS.forEach((rt,i)=>{
+    const rp=rectPct(rt.pageIndex, rt.x, rt.y, rt.w, rt.h);
     items.push({ item_index:i, item_name:rt.item_name||('第'+(i+1)+'项'),
       max_score:rt.max_score||0, score_page:rt.pageIndex||0, score_x:Math.round((rt.scoreX||0)/(S.tplScale||1)),
-      title_rect:JSON.stringify({x:rt.x,y:rt.y,w:rt.w,h:rt.h}), total_region:'{}', title_img:rt.title_img||'' });
+      title_rect:JSON.stringify(rp), total_region:'{}', title_img:rt.title_img||'' });
   });
   S_ITEMS.forEach((it,ix)=>{
     items.push({ item_index:S_TPL_RECTS.length+ix,
@@ -2475,8 +2477,11 @@ el.btnItemSave.onclick=async ()=>{
   if(!items.length && !S_BASIC_FIELDS.length){ setErr('请先框选基本信息或至少一个评分项'); return; }
   const hasTotal = !!(S_TOTAL_RECT && S_TOTAL_RECT.w>0);
   if(hasTotal){
+    const ts=(S.tplScale||1);
+    const pvp=(S.tplPages[0]||{}).vp;
+    const pw=(pvp&&pvp.width)?pvp.width:1, ph=(pvp&&pvp.height)?pvp.height:1;
     items.push({ item_index:-1, item_name:'__total__', max_score:0, score_page:0, score_x:0,
-      title_rect:'{}', total_region:JSON.stringify({x:S_TOTAL_RECT.x,y:S_TOTAL_RECT.y,w:S_TOTAL_RECT.w,h:S_TOTAL_RECT.h,count:S_TOTAL_RECT.count}) });
+      title_rect:'{}', total_region:JSON.stringify({x:S_TOTAL_RECT.x/ts/pw, y:S_TOTAL_RECT.y/ts/ph, w:S_TOTAL_RECT.w/ts/pw, h:S_TOTAL_RECT.h/ts/ph, count:S_TOTAL_RECT.count}) });
   }
   if(items.length && window.__bridge && window.__bridge.saveBatchItems){
     await window.__bridge.saveBatchItems(S.folder, items).catch(e=>{ setErr('⚠ '+e); return; });
