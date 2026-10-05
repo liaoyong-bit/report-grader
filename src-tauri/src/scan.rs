@@ -55,7 +55,7 @@ fn collect_pdfs(dir: &Path, out: &mut Vec<PathBuf>) {
         let p = e.path();
         if p.is_dir() {
             let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            if name == db::DATA_DIR || name == db::OUTPUT_DIR || name == db::RENAME_DIR || name.starts_with('.') {
+            if name == db::DATA_DIR || name == db::OUTPUT_DIR || name == db::RENAME_DIR || name == db::TEMPLATE_DIR || name.starts_with('.') {
                 continue;
             }
             collect_pdfs(&p, out);
