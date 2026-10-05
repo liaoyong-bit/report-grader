@@ -1815,9 +1815,7 @@ function renderTitleBoxes(){
     const idx=document.createElement('span'); idx.className='tpl-idx'; idx.textContent=(i+1)+'.';
     d.appendChild(idx);
     const lab=document.createElement('div'); lab.className='tpl-label';
-    const shown=rt.item_name||('题目'+(i+1));
-    const hasSc=/[（(]\s*\d+(?:\.\d+)?\s*分?\s*[）)]/.test(shown);
-    lab.textContent=shown+(rt.max_score&&!hasSc?('　'+rt.max_score+'分'):'');
+    lab.textContent = rt.item_name || ('题目'+(i+1));
     d.appendChild(lab);
     const rzlt=document.createElement('div'); rzlt.className='tpl-resize-lt'; rzlt.dataset.idx=i; d.appendChild(rzlt);
     const rz=document.createElement('div'); rz.className='tpl-resize'; rz.dataset.idx=i; d.appendChild(rz);
@@ -2061,6 +2059,65 @@ document.addEventListener('keydown',(e)=>{
     renderTitleBoxes(); renderItemList(); renderScoreBoxes();
   }
 });
+// —— 保存评分项后自动扫描原始报告并 OCR 基本信息，对比名单生成核心表
+async function runPrepScan(){
+  if(!window.__bridge || !window.__bridge.syncFolder || !S.folder) return;
+  setDetect('正在扫描并识别报告基本信息...');
+  try{
+    await window.__bridge.syncFolder(S.folder);
+    refreshPrepOverview();
+    const ov = S.prepOv;
+    if(!ov || !ov.rows || !ov.rows.length) return;
+    const roster = await window.__bridge.getRoster(S.folder).catch(()=>[]);
+    const basicFields = await window.__bridge.getBasicFields(S.folder).catch(()=>[]);
+    const need = ov.rows.filter(r=>!r.matched);
+    let ok=0;
+    for(const r of need){
+      try{
+        const ocr = await ocrReportBasic(r.path, basicFields);
+        if(!ocr) continue;
+        await window.__bridge.saveReportOcr(S.folder, r.key, (ocr.no||'').trim(), (ocr.name||'').trim(), (ocr.cls||'').trim(), (ocr.exp||'').trim());
+        const hit = roster.find(s=> (ocr.no && s.no===ocr.no.trim()) || (ocr.name && s.name===ocr.name.trim()));
+        if(hit){ await window.__bridge.resolveUnmatched(S.folder, {path:r.path}, hit.no); ok++; }
+      }catch(e){ /* 单份失败不影响整体 */ }
+    }
+    setDetect('✅ 扫描识别完成'+(ok?('，自动挂靠 '+ok+' 份'):''));
+  }catch(e){ setErr('扫描识别失败: '+e); }
+  refreshPrepOverview();
+}
+async function ocrReportBasic(path, basicFields){
+  const fields=(basicFields||[]).filter(f=>f[0] && f[0]!=='__total__');
+  if(!fields.length || !path) return null;
+  if(!S.pdfjsOk) return null;
+  try{
+    const bytes=await window.__bridge.readPdf(S.folder, path);
+    const pdf=await pdfjsLib.getDocument({data:bytes.slice(0)}).promise;
+    const res={}; const tplScale = S.tplScale || 1;
+    for(const f of fields){
+      const type=f[0]; let page=f[1]||0; let rect={};
+      try{ rect=JSON.parse(f[2]||'{}'); }catch(e){}
+      if(!rect.w || !rect.h) continue;
+      try{
+        const pobj=await pdf.getPage(page+1);
+        const vp=await pobj.getViewport({scale:2});
+        const canvas=document.createElement('canvas'); canvas.width=Math.floor(vp.width); canvas.height=Math.floor(vp.height);
+        await pobj.render({canvasContext:canvas.getContext('2d'), viewport:vp}).promise;
+        const px=Math.max(0, Math.floor(rect.x/tplScale*2));
+        const py=Math.max(0, Math.floor(rect.y/tplScale*2));
+        const pw=Math.max(4, Math.min(canvas.width-px, Math.ceil(rect.w/tplScale*2)));
+        const ph=Math.max(4, Math.min(canvas.height-py, Math.ceil(rect.h/tplScale*2)));
+        const ctx=canvas.getContext('2d');
+        const img=ctx.getImageData(px,py,pw,ph);
+        const c2=document.createElement('canvas'); c2.width=pw; c2.height=ph;
+        c2.getContext('2d').putImageData(img,0,0);
+        const b64=c2.toDataURL('image/png').split(',')[1];
+        const txt=(await window.__bridge.ocrImageB64(b64).catch(()=>''))||'';
+        if(type==='no') res.no=txt; else if(type==='name') res.name=txt; else if(type==='class') res.cls=txt; else if(type==='exp') res.exp=txt;
+      }catch(e){}
+    }
+    return Object.keys(res).length ? res : null;
+  }catch(e){ return null; }
+}
 el.btnItemSave.onclick=async ()=>{
   const items=[];
   S_TPL_RECTS.forEach((rt,i)=>{
@@ -2090,5 +2147,5 @@ el.btnItemSave.onclick=async ()=>{
   el.itemMask.style.display='none';
   setDetect('✅ 评分项已固化：'+S.itemsTemplate.length+' 项'+(hasTotal?'，含统分区':''));
   if(S.reports.length){ selectReport(0); }
-  refreshPrepOverview();
+  runPrepScan();
 };

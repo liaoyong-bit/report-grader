@@ -563,7 +563,7 @@ pub fn prep_overview(conn: &Connection, batch_id: i64) -> Result<PrepOverview, S
                 "SELECT r.id, r.orig_name, r.source_path, r.student_id, r.ocr_no, r.ocr_name, r.ocr_class, r.ocr_exp,
                         r.report_name, r.renamed_path, r.submit_status,
                         EXISTS(SELECT 1 FROM report_items ri WHERE ri.report_id=r.id AND ri.score>0 AND ri.activated=1)
-                 FROM reports r WHERE r.batch_id=?1 AND r.match_status='matched'
+                 FROM reports r WHERE r.batch_id=?1 AND r.match_status IN ('matched','unmatched')
                  ORDER BY r.orig_name",
             )
             .map_err(|e| format!("准备盘点查询失败: {e}"))?;
