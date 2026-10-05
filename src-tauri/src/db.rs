@@ -97,12 +97,32 @@ pub fn open(folder: &str) -> Result<Connection, String> {
              max_score INTEGER DEFAULT 0,
              score INTEGER DEFAULT 0,
              activated INTEGER DEFAULT 0
+         );
+         CREATE TABLE IF NOT EXISTS users(
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             username TEXT UNIQUE NOT NULL,
+             name TEXT NOT NULL,
+             pwd_hash TEXT NOT NULL,
+             created_at TEXT DEFAULT (datetime('now','localtime'))
+         );
+         CREATE TABLE IF NOT EXISTS batch_basic_fields(
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             batch_id INTEGER NOT NULL,
+             field_type TEXT NOT NULL,
+             page INTEGER DEFAULT 0,
+             rect TEXT DEFAULT '{}',
+             UNIQUE(batch_id, field_type)
          );",
     )
     .map_err(|e| format!("建表失败: {e}"))?;
     // 迁移：老库补新增列（新库已含）
     ensure_column(&conn, "reports", "locate_json", "locate_json TEXT DEFAULT '{}'")?;
     ensure_column(&conn, "batch_items", "title_img", "title_img TEXT DEFAULT ''")?;
+    ensure_column(&conn, "reports", "ocr_no", "ocr_no TEXT DEFAULT ''")?;
+    ensure_column(&conn, "reports", "ocr_name", "ocr_name TEXT DEFAULT ''")?;
+    ensure_column(&conn, "reports", "ocr_class", "ocr_class TEXT DEFAULT ''")?;
+    ensure_column(&conn, "reports", "ocr_exp", "ocr_exp TEXT DEFAULT ''")?;
+    ensure_column(&conn, "reports", "report_name", "report_name TEXT DEFAULT ''")?;
     Ok(conn)
 }
 
@@ -155,8 +175,117 @@ pub fn find_batch_by_folder(conn: &Connection) -> Result<Option<(i64, String)>, 
 }
 
 /* ---------------- 学生 ---------------- */
-pub fn insert_students(conn: &Connection, batch_id: i64, list: &[StudentIn]) -> Result<(), String> {
+// ==================== 登录账号（users） ====================
+pub fn create_user(conn: &Connection, username: &str, name: &str, pwd_hash: &str) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR REPLACE INTO users(username, name, pwd_hash) VALUES(?1,?2,?3)",
+        params![username, name, pwd_hash],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("创建账号失败: {e}"))
+}
+
+/// 返回 (name, pwd_hash)
+pub fn find_user(conn: &Connection, username: &str) -> Result<Option<(String, String)>, String> {
+    conn.query_row(
+        "SELECT name, pwd_hash FROM users WHERE username=?1",
+        params![username],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .optional()
+    .map_err(|e| format!("查询账号失败: {e}"))
+}
+
+pub fn update_password(conn: &Connection, username: &str, pwd_hash: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE users SET pwd_hash=?2 WHERE username=?1",
+        params![username, pwd_hash],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("修改密码失败: {e}"))
+}
+
+pub fn list_users(conn: &Connection) -> Result<Vec<String>, String> {
     let mut st = conn
+        .prepare("SELECT username FROM users ORDER BY id")
+        .map_err(|e| format!("查询账号失败: {e}"))?;
+    let rows = st
+        .query_map([], |r| r.get(0))
+        .map_err(|e| format!("读取账号失败: {e}"))?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| format!("解析账号失败: {e}"))?);
+    }
+    Ok(out)
+}
+
+/// 全局用户库：位于应用数据目录下的 users.db（与报告文件夹无关，登录账号全局有效）
+pub fn open_users_dir(dir: &std::path::Path) -> Result<Connection, String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("创建数据目录失败: {e}"))?;
+    let conn = Connection::open(dir.join("users.db")).map_err(|e| format!("打开用户库失败: {e}"))?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS users(
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             username TEXT UNIQUE NOT NULL,
+             name TEXT NOT NULL,
+             pwd_hash TEXT NOT NULL,
+             created_at TEXT DEFAULT (datetime('now','localtime'))
+         );",
+    )
+    .map_err(|e| format!("建用户表失败: {e}"))?;
+    Ok(conn)
+}
+
+// ==================== 基本信息框选设置（batch_basic_fields） ====================
+pub fn save_basic_fields(
+    conn: &Connection,
+    batch_id: i64,
+    fields: &[(String, i64, String)],
+) -> Result<(), String> {
+    conn.execute("DELETE FROM batch_basic_fields WHERE batch_id=?1", params![batch_id])
+        .map_err(|e| format!("清空框选设置失败: {e}"))?;
+    for (ft, page, rect) in fields {
+        conn.execute(
+            "INSERT INTO batch_basic_fields(batch_id, field_type, page, rect) VALUES(?1,?2,?3,?4)",
+            params![batch_id, ft, page, rect],
+        )
+        .map_err(|e| format!("保存框选设置失败: {e}"))?;
+    }
+    Ok(())
+}
+
+pub fn get_basic_fields(conn: &Connection, batch_id: i64) -> Result<Vec<(String, i64, String)>, String> {
+    let mut st = conn
+        .prepare("SELECT field_type, page, rect FROM batch_basic_fields WHERE batch_id=?1 ORDER BY id")
+        .map_err(|e| format!("查询框选设置失败: {e}"))?;
+    let rows = st
+        .query_map(params![batch_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .map_err(|e| format!("读取框选设置失败: {e}"))?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| format!("解析框选设置失败: {e}"))?);
+    }
+    Ok(out)
+}
+
+// ==================== 报告 OCR 识别结果 ====================
+pub fn save_report_ocr(
+    conn: &Connection,
+    report_id: i64,
+    no: &str,
+    name: &str,
+    class: &str,
+    exp: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE reports SET ocr_no=?1, ocr_name=?2, ocr_class=?3, ocr_exp=?4, updated_at=datetime('now','localtime') WHERE id=?5",
+        params![no, name, class, exp, report_id],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("保存识别结果失败: {e}"))
+}
+
+pub fn insert_students(conn: &Connection, batch_id: i64, list: &[StudentIn]) -> Result<(), String> {    let mut st = conn
         .prepare("INSERT OR REPLACE INTO students(batch_id, student_no, name, class) VALUES(?1,?2,?3,?4)")
         .map_err(|e| format!("准备名单插入失败: {e}"))?;
     for s in list {

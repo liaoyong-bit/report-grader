@@ -42,8 +42,10 @@ const ITEM_NAMES = [
 /* ==================== DOM 引用 ==================== */
 const $ = id => document.getElementById(id);
 const el = {
-  loginMask: $('loginMask'), loginName: $('loginName'),
-  btnLoginConfirm: $('btnLoginConfirm'), btnLoginCancel: $('btnLoginCancel'),
+  loginMask: $('loginMask'),
+  cuUser: $('cuUser'), cuName: $('cuName'), cuPwd: $('cuPwd'), btnCreate: $('btnCreate'), cuErr: $('cuErr'),
+  liUser: $('liUser'), liPwd: $('liPwd'), btnLogin2: $('btnLogin2'), liErr: $('liErr'),
+  gotoLogin: $('gotoLogin'), gotoCreate: $('gotoCreate'), createPanel: $('createPanel'), loginPanel: $('loginPanel'),
   teacherLabel: $('teacherLabel'), btnLogin: $('btnLogin'),
   btnOpen: $('btnOpen'), btnLoadFolder: $('btnLoadFolder'),
   reportList: $('reportList'),
@@ -99,28 +101,82 @@ function initReportState(r){
   r.submittedAt = (s && s.submittedAt) || null;
 }
 
-/* ==================== 登录 ==================== */
+/* ==================== 登录 / 创建账号 ==================== */
 function applyLogin(){
-  el.teacherLabel.textContent = S.teacher ? ('批阅教师：' + S.teacher) : '游客(未登录)';
+  el.teacherLabel.textContent = S.teacher ? ('批阅教师：' + S.teacher) : '未登录';
 }
-function confirmLogin(){
-  const v = el.loginName.value.trim();
-  if(!v){ el.loginName.focus(); return; }
-  S.teacher = v; localStorage.setItem('teacher', v); applyLogin();
-  el.loginMask.style.display = 'none';
-}
-el.btnLoginConfirm.onclick = confirmLogin;
-// 登录框内输入姓名后按回车，等价点击"确认登录"直接进入
-el.loginName.addEventListener('keydown', (e)=>{
-  if(e.key === 'Enter'){ e.preventDefault(); confirmLogin(); }
-});
-el.btnLoginCancel.onclick = () => {
-  S.teacher = ''; localStorage.removeItem('teacher'); applyLogin();
-  el.loginMask.style.display = 'none';
+function showCreate(){ el.createPanel.style.display='block'; el.loginPanel.style.display='none'; el.cuUser.focus(); }
+function showLogin(){ el.createPanel.style.display='none'; el.loginPanel.style.display='block'; el.liUser.focus(); }
+
+// 姓名 → 拼音首字母（初始密码）。覆盖常见姓氏/名字用字，识别不出的字跳过。
+const PY_INIT = {
+  李:'l',王:'w',张:'z',刘:'l',陈:'c',杨:'y',赵:'z',黄:'h',周:'z',吴:'w',徐:'x',孙:'s',胡:'h',朱:'z',高:'g',
+  林:'l',何:'h',郭:'g',马:'m',罗:'l',梁:'l',宋:'s',郑:'z',谢:'x',韩:'h',唐:'t',冯:'f',于:'y',董:'d',萧:'x',
+  程:'c',曹:'c',袁:'y',邓:'d',许:'x',傅:'f',沈:'s',曾:'z',彭:'p',吕:'l',苏:'s',卢:'l',蒋:'j',蔡:'c',贾:'j',
+  丁:'d',魏:'w',薛:'x',叶:'y',余:'y',潘:'p',杜:'d',戴:'d',夏:'x',钟:'z',汪:'w',田:'t',任:'r',姜:'j',范:'f',
+  方:'f',石:'s',姚:'y',谭:'t',廖:'l',邹:'z',熊:'x',金:'j',陆:'l',郝:'h',孔:'k',白:'b',崔:'c',康:'k',毛:'m',
+  邱:'q',秦:'q',江:'j',史:'s',顾:'g',侯:'h',邵:'s',孟:'m',龙:'l',万:'w',段:'d',雷:'l',钱:'q',汤:'t',尹:'y',
+  黎:'l',易:'y',常:'c',武:'w',乔:'q',贺:'h',赖:'l',龚:'g',文:'w',欧:'o',詹:'z',关:'g',焦:'j',柳:'l',
+  永:'y',久:'j',伟:'w',芳:'f',娜:'n',敏:'m',静:'j',丽:'l',强:'q',磊:'l',军:'j',洋:'y',勇:'y',艳:'y',杰:'j',
+  涛:'t',明:'m',超:'c',秀:'x',霞:'x',平:'p',刚:'g',桂:'g',英:'y',华:'h',玉:'y',梅:'m',红:'h',金:'j',鑫:'x',
+  浩:'h',宇:'y',博:'b',瑞:'r',欣:'x',晨:'c',帆:'f',智:'z',慧:'h',凡:'f',凯:'k',文:'w',鹏:'p',飞:'f',翔:'x',
+  峰:'f',光:'g',彬:'b',兰:'l',凤:'f',云:'y',洁:'j',琳:'l',琴:'q',萍:'p',雪:'x',春:'c',夏:'x',秋:'q',冬:'d',
+  海:'h',波:'b',水:'s',山:'s',东:'d',南:'n',西:'x',北:'b',中:'z',国:'g',梦:'m',思:'s',心:'x',甜:'t',语:'y'
 };
-el.btnLogin.onclick = () => { el.loginName.value = S.teacher; el.loginMask.style.display='flex'; el.loginName.focus(); };
+function namePinyinInitial(name){
+  let s='';
+  for(const ch of (name||'')){
+    const c = PY_INIT[ch];
+    if(c) s+=c;
+  }
+  return s;
+}
+el.cuName.addEventListener('input', ()=>{
+  const p = namePinyinInitial(el.cuName.value.trim());
+  if(p) el.cuPwd.value = p;
+});
+el.gotoLogin.onclick = showLogin;
+el.gotoCreate.onclick = showCreate;
+
+async function doLogin(){
+  const u=el.liUser.value.trim(), p=el.liPwd.value;
+  if(!u||!p){ el.liErr.textContent='请输入用户名和密码'; return; }
+  el.liErr.textContent='';
+  if(!window.__bridge || !window.__bridge.login){ el.liErr.textContent='当前环境不支持登录'; return; }
+  try{
+    const name = await window.__bridge.login(u, p);
+    if(name){ S.teacher=name; S.loginUser=u; localStorage.setItem('loginUser',u); applyLogin(); el.loginMask.style.display='none'; }
+    else el.liErr.textContent='用户名或密码错误';
+  }catch(e){ el.liErr.textContent='登录失败: '+e; }
+}
+async function doCreate(){
+  const u=el.cuUser.value.trim(), n=el.cuName.value.trim(), p=el.cuPwd.value.trim();
+  if(!u||!n||!p){ el.cuErr.textContent='用户名 / 姓名 / 初始密码 都要填写'; return; }
+  el.cuErr.textContent='';
+  if(!window.__bridge){ el.cuErr.textContent='当前环境不支持'; return; }
+  try{
+    await window.__bridge.createUser(u, n, p);
+    const name = await window.__bridge.login(u, p);
+    if(name){ S.teacher=name; S.loginUser=u; localStorage.setItem('loginUser',u); applyLogin(); el.loginMask.style.display='none'; }
+    else el.cuErr.textContent='创建成功但自动登录失败，请手动登录';
+  }catch(e){ el.cuErr.textContent='创建失败: '+e; }
+}
+el.btnLogin2.onclick = doLogin;
+el.liPwd.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doLogin(); } });
+el.btnCreate.onclick = doCreate;
+el.cuPwd.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doCreate(); } });
+el.btnLogin.onclick = ()=>{ el.loginMask.style.display='flex'; showLogin(); el.liUser.focus(); };
 applyLogin();
-el.loginName.focus();   // 进入登录框即自动聚焦到姓名输入框，方便直接输入
+
+// 启动：检查全局用户库 → 无用户显示"创建账号"，有则显示"登录"（bridge 未就绪则轮询等待）
+function initLoginGate(){
+  if(!window.__bridge){ setTimeout(initLoginGate, 400); return; }
+  if(!window.__bridge.listUsers){ el.loginMask.style.display='none'; return; }
+  window.__bridge.listUsers().then(us=>{
+    if(us && us.length) showLogin(); else showCreate();
+    el.loginMask.style.display='flex';
+  }).catch(()=>{ el.loginMask.style.display='none'; });
+}
 
 /* ==================== 库加载与初始化 ==================== */
 function initLibs(){
@@ -136,6 +192,7 @@ function initLibs(){
   });
 }
 initLibs();
+initLoginGate();
 
 /* ==================== 文件选择 ==================== */
 el.btnOpen.onclick = () => el.fileInput.click();

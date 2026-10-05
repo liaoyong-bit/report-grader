@@ -269,6 +269,82 @@ pub fn get_report_locate(folder: String, report_key: String) -> Result<Option<St
     db::get_report_locate(&conn, rid)
 }
 
+// ==================== 登录账号 ====================
+fn hash_pwd(pwd: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(pwd.as_bytes());
+    let d = h.finalize();
+    d.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+fn open_users(app: &tauri::AppHandle) -> Result<rusqlite::Connection, String> {
+    use tauri::Manager;
+    let dir = app.path().app_data_dir().map_err(|e| format!("获取数据目录失败: {e}"))?;
+    db::open_users_dir(&dir)
+}
+
+#[tauri::command]
+pub fn create_user(app: tauri::AppHandle, username: String, name: String, password: String) -> Result<(), String> {
+    let conn = open_users(&app)?;
+    dbglog(&format!("create_user username={username} name={name}"));
+    db::create_user(&conn, &username, &name, &hash_pwd(&password))
+}
+
+#[tauri::command]
+pub fn login(app: tauri::AppHandle, username: String, password: String) -> Result<Option<String>, String> {
+    let conn = open_users(&app)?;
+    match db::find_user(&conn, &username)? {
+        Some((name, h)) => {
+            if h == hash_pwd(&password) { Ok(Some(name)) } else { Ok(None) }
+        }
+        None => Ok(None),
+    }
+}
+
+#[tauri::command]
+pub fn change_password(app: tauri::AppHandle, username: String, old_password: String, new_password: String) -> Result<(), String> {
+    let conn = open_users(&app)?;
+    match db::find_user(&conn, &username)? {
+        Some((_, h)) => {
+            if h != hash_pwd(&old_password) { return Err("原密码不正确".into()); }
+            db::update_password(&conn, &username, &hash_pwd(&new_password))
+        }
+        None => Err("账号不存在".into()),
+    }
+}
+
+#[tauri::command]
+pub fn list_users(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let conn = open_users(&app)?;
+    db::list_users(&conn)
+}
+
+// ==================== 基本信息框选设置 ====================
+#[tauri::command]
+pub fn save_basic_fields(folder: String, fields: Vec<(String, i64, String)>) -> Result<(), String> {
+    let conn = db::open(&folder)?;
+    let bid = db::find_batch_by_folder(&conn)?.map(|b| b.0).ok_or("当前文件夹尚未初始化批次")?;
+    db::save_basic_fields(&conn, bid, &fields)
+}
+
+#[tauri::command]
+pub fn get_basic_fields(folder: String) -> Result<Vec<(String, i64, String)>, String> {
+    let conn = db::open(&folder)?;
+    let bid = db::find_batch_by_folder(&conn)?.map(|b| b.0).ok_or("当前文件夹尚未初始化批次")?;
+    db::get_basic_fields(&conn, bid)
+}
+
+// ==================== 报告 OCR 识别结果 ====================
+#[tauri::command]
+pub fn save_report_ocr(folder: String, report_key: String, no: String, name: String, class: String, exp: String) -> Result<(), String> {
+    let conn = db::open(&folder)?;
+    let bid = db::find_batch_by_folder(&conn)?.map(|b| b.0).ok_or("未找到批次")?;
+    let rid = db::report_id_by_key(&conn, bid, &report_key)?.ok_or("未找到报告")?;
+    dbglog(&format!("save_report_ocr key={report_key} no={no} name={name} class={class} exp={exp}"));
+    db::save_report_ocr(&conn, rid, &no, &name, &class, &exp)
+}
+
 /// 检测 template/ 目录下第一个 PDF 模板文件（相对路径或 null）
 #[tauri::command]
 pub fn get_template_path(folder: String) -> Result<Option<String>, String> {

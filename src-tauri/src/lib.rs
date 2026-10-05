@@ -26,6 +26,13 @@ pub fn run() {
             commands::ocr_image_b64,
             commands::save_report_locate,
             commands::get_report_locate,
+            commands::create_user,
+            commands::login,
+            commands::change_password,
+            commands::list_users,
+            commands::save_basic_fields,
+            commands::get_basic_fields,
+            commands::save_report_ocr,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

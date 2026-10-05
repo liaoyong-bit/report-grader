@@ -131,6 +131,13 @@
   window.__bridge.ocrImageB64 = async (b64) => { return await invoke('ocr_image_b64', { b64 }); };
   window.__bridge.saveReportLocate = async (folder, reportKey, locateJson) => { await invoke('save_report_locate', { folder, reportKey, locateJson }); };
   window.__bridge.getReportLocate = async (folder, reportKey) => { return await invoke('get_report_locate', { folder, reportKey }); };
+  window.__bridge.createUser = async (username, name, password) => { return await invoke('create_user', { username, name, password }); };
+  window.__bridge.login = async (username, password) => { return await invoke('login', { username, password }); };
+  window.__bridge.listUsers = async () => { return await invoke('list_users', {}); };
+  window.__bridge.changePassword = async (username, oldPassword, newPassword) => { return await invoke('change_password', { username, oldPassword, newPassword }); };
+  window.__bridge.saveBasicFields = async (folder, fields) => { await invoke('save_basic_fields', { folder, fields }); };
+  window.__bridge.getBasicFields = async (folder) => { return await invoke('get_basic_fields', { folder }); };
+  window.__bridge.saveReportOcr = async (folder, reportKey, no, name, cls, exp) => { await invoke('save_report_ocr', { folder, reportKey, no, name, class: cls, exp }); };
 
   // —— 首次打开某份报告时从磁盘读入 PDF
   // 关键：app.js 里列表点击 li.onclick 与"下一份"逻辑调用的都是【全局 selectReport】，

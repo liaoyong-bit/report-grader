@@ -69,6 +69,20 @@
     background: #fff; border-radius: 10px; padding: 24px 28px; width: 420px; box-shadow: 0 8px 30px rgba(0,0,0,.3);
   }
 
+  /* 登录/创建账号 */
+  #loginBox { background:#fff; border-radius:12px; padding:26px 30px; width:400px; box-shadow:0 10px 36px rgba(0,0,0,.35); }
+  #loginBox h2 { font-size:19px; text-align:center; color:#2b3a55; margin-bottom:14px; }
+  #loginBox .tt { font-size:13px; color:#64748b; margin-bottom:8px; }
+  #loginBox input { width:100%; box-sizing:border-box; padding:9px 11px; margin-bottom:10px; border:1px solid #cbd5e1; border-radius:7px; font-size:14px; }
+  #loginBox input:focus { outline:none; border-color:#3b82f6; }
+  #loginBox button { width:100%; box-sizing:border-box; padding:10px; border:none; border-radius:7px; font-size:14px; cursor:pointer; font-weight:600; }
+  #loginBox button.primary { background:#3b82f6; color:#fff; }
+  #loginBox button.primary:hover { background:#2563eb; }
+  #loginBox .err { min-height:16px; font-size:12.5px; color:#dc2626; margin-bottom:4px; }
+  #loginBox .hint { text-align:center; font-size:12.5px; color:#94a3b8; margin-top:10px; }
+  #loginBox .hint a { color:#3b82f6; cursor:pointer; }
+
+
   /* 批阅概览弹窗 */
   #overviewMask {
     position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 97;
@@ -229,14 +243,26 @@
 </head>
 <body>
 
-  <!-- 登录弹窗 -->
+  <!-- 登录/创建账号 -->
   <div id="loginMask">
     <div id="loginBox">
-      <h2>教师登录</h2>
-      <input id="loginName" placeholder="请输入批阅教师姓名" autocomplete="off">
-      <div class="row">
-        <button id="btnLoginConfirm">确认登录</button>
-        <button id="btnLoginCancel">进入(游客)</button>
+      <h2>实验报告批阅系统</h2>
+      <div id="createPanel" style="display:none">
+        <div class="tt">首次使用 · 创建教师账号</div>
+        <input id="cuUser" placeholder="用户名（自己定）" autocomplete="off">
+        <input id="cuName" placeholder="姓名（用于生成初始密码）" autocomplete="off">
+        <input id="cuPwd" placeholder="初始密码（姓名拼音首字母）" autocomplete="off">
+        <div class="err" id="cuErr"></div>
+        <button id="btnCreate" class="primary">创建账号并登录</button>
+        <div class="hint">已有账号？<a id="gotoLogin">去登录</a></div>
+      </div>
+      <div id="loginPanel" style="display:none">
+        <div class="tt">教师登录</div>
+        <input id="liUser" placeholder="用户名" autocomplete="off">
+        <input id="liPwd" type="password" placeholder="密码">
+        <div class="err" id="liErr"></div>
+        <button id="btnLogin2" class="primary">登录</button>
+        <div class="hint">没有账号？<a id="gotoCreate">创建账号</a></div>
       </div>
     </div>
   </div>
@@ -328,7 +354,7 @@
   <!-- 帮助下拉面板 -->
   <div id="helpPanel" style="display:none">
     <h3>帮助</h3>
-    <p><b>版本：</b>0.1.5</p>
+    <p><b>版本：</b>0.1.6</p>
     <p><b>作者：</b>利奥</p>
     <hr>
     <div class="help-steps">
