@@ -151,6 +151,10 @@ fn ensure_column(conn: &Connection, table: &str, col: &str, ddl: &str) -> Result
 
 /* ---------------- 批次 ---------------- */
 pub fn get_or_create_batch(conn: &Connection, name: &str, teacher: &str) -> Result<i64, String> {
+    // 同一文件夹只应有一个批次：若已存在则复用，避免重复导入名单时新建批次导致框选/评分项跟丢
+    if let Some((id, _)) = find_batch_by_folder(conn)? {
+        return Ok(id);
+    }
     conn.execute(
         "INSERT INTO batches(name, teacher) VALUES(?1, ?2)",
         params![name, teacher],
