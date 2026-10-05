@@ -57,13 +57,19 @@
       app.S.mode = 'tauri';
 
       if(hasDb){
-        // 已有批次 → 读取批次信息，弹提示让教师选择继续使用/重新设置
-        const info = await invoke('get_batch_info', { folder: picked.folder });
-        document.getElementById('batchInfoText').textContent = '报告名称：' + (info ? info.report_name : '') + '　已导入 ' + (info ? info.count : 0) + ' 名同学';
-        document.getElementById('batchMask').style.display = 'flex';
+        // 已有库 → 直接增量同步，停在准备面板（不弹提示；挂靠/处理都在面板内解决）
+        try{
+          const sync = await invoke('sync_folder', { folder: picked.folder });
+          buildReports(sync);
+          if(sync.unmatched && sync.unmatched.length){ /* 待挂靠在状态总表显示，不弹窗 */ }
+          app.refreshPrepOverview();
+          app.setDetect('已同步批次' + (sync.added ? '，新增 ' + sync.added + ' 份' : ''));
+        } catch(e){ app.setErr('⚠ 同步失败: ' + e); }
       } else {
-        // 无数据库 → 初始化向导（报告名称 + 名单 + 模板）
-        app.openWizard();
+        // 无库 → 停在准备面板，右侧名单管理区引导初始化（不弹向导）
+        app.S.needsInit = true;
+        app.refreshPrepOverview();
+        app.setDetect('该文件夹尚未初始化，请在右侧「导入学生名单」');
       }
     } catch(e) { app.setErr('⚠ ' + e); }
   };

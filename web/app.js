@@ -76,7 +76,7 @@ const el = {
   overviewMask: $('overviewMask'), overviewBody: $('overviewBody'), btnOverviewClose: $('btnOverviewClose'),
   itemMask: $('itemMask'), tplPreview: $('tplPreview'), itemList: $('itemList'), btnItems: $('btnItems'),
   btnItemAdd: $('btnItemAdd'), btnItemSave: $('btnItemSave'), btnItemCancel: $('btnItemCancel'),
-  btnTotalMode: $('btnTotalMode'), totalInfo: $('totalInfo'),
+  btnTotalMode: $('btnTotalMode'), btnTitleMode: $('btnTitleMode'), totalInfo: $('totalInfo'),
 };
 
 /* ==================== 批阅进度持久化（P0-1） ====================
@@ -232,10 +232,24 @@ async function refreshPrepOverview(){
   if(!window.__bridge || !window.__bridge.prepOverview || !S.folder) return;
   try{
     const ov = await window.__bridge.prepOverview(S.folder);
+    S.needsInit=false;
     S.prepOv = ov;
     el.prepFolder.textContent = S.folder;
     renderPrepTable(ov); renderPrepStats(ov); renderPrepRoster(); renderPrepSelbar();
-  }catch(e){ setErr('准备盘点失败: ' + e); }
+  }catch(e){
+    const msg = String(e);
+    if(S.needsInit || /初始化|未找到批次/.test(msg)){
+      S.needsInit=true;
+      el.prepFolder.textContent = S.folder;
+      el.prepTbody.innerHTML = '<tr><td colspan="9" style="color:#c62828;padding:24px;text-align:center">该文件夹尚未初始化。<br>请在右侧「名单管理」中导入学生名单完成初始化。</td></tr>';
+      el.prepStats.innerHTML = '未初始化';
+      el.prepRoster.innerHTML = '<div style="color:#c62828;font-size:13px;margin-bottom:6px">尚未导入学生名单</div>'+
+        '<button onclick="window.__app.openPrepImport()">📋 导入学生名单（初始化）</button>';
+      el.pvSelbar.innerHTML='';
+    } else {
+      setErr('准备盘点失败: ' + e);
+    }
+  }
 }
 function renderPrepTable(ov){
   const tbody = el.prepTbody; tbody.innerHTML='';
@@ -1393,8 +1407,9 @@ let S_TOTAL_MODE = false;
 function renderTemplatePreview(){
   const pre = el.tplPreview;
   pre.innerHTML='';
-  S_ITEMS=[]; S_TPL_RECTS=[]; S_TOTAL_RECT=null; S_TOTAL_MODE=false;
-  if(el.btnTotalMode) el.btnTotalMode.style.background='#1a73e8';
+  S_ITEMS=[]; S_TPL_RECTS=[]; S_TOTAL_RECT=null; S_TOTAL_MODE=false; S.selBox=null;
+  if(el.btnTitleMode){ el.btnTitleMode.style.background='#1a73e8'; el.btnTitleMode.style.color='#fff'; }
+  if(el.btnTotalMode){ el.btnTotalMode.style.background='#eef1f5'; el.btnTotalMode.style.color='#555'; }
   if(el.totalInfo) el.totalInfo.style.display='none';
   const inner=document.createElement('div');
   inner.style.position='relative'; inner.style.width='100%';
@@ -1447,11 +1462,29 @@ function bindTemplateDrag(){
   const yAbs=(e,r)=> e.clientY - r.top + pre.scrollTop;
   pre.onmousedown=(e)=>{
     const t=e.target;
-    if(t && t.classList && (t.classList.contains('tpl-box')||t.classList.contains('tpl-score')) && !t.classList.contains('active') && t.dataset.idx!=null){
-      const isScore = t.classList.contains('tpl-score');
-      drag={mode:isScore?'score':'move', idx:parseInt(t.dataset.idx,10), x0:e.clientX, y0:e.clientY};
-      return;
+    if(t && t.classList){
+      if(t.classList.contains('tpl-del')){      // 右上角删除按钮
+        const i=parseInt(t.dataset.idx,10);
+        S_TPL_RECTS.splice(i,1); S.selBox=null;
+        renderTitleBoxes(); renderItemList(); renderScoreBoxes();
+        e.preventDefault(); e.stopPropagation(); return;
+      }
+      if(t.classList.contains('tpl-resize')){   // 右下角缩放手柄
+        drag={mode:'resize', idx:parseInt(t.dataset.idx,10), x0:e.clientX, y0:e.clientY};
+        return;
+      }
+      const boxEl = t.classList.contains('tpl-box') ? t : (t.closest ? t.closest('.tpl-box') : null);
+      const scoreEl = t.classList.contains('tpl-score') ? t : (t.closest ? t.closest('.tpl-score') : null);
+      const hitEl = boxEl || scoreEl;
+      if(hitEl && !hitEl.classList.contains('active') && hitEl.dataset.idx!=null){
+        S.selBox = parseInt(hitEl.dataset.idx,10);
+        renderTitleBoxes();
+        const isScore = !!scoreEl;
+        drag={mode:isScore?'score':'move', idx:S.selBox, x0:e.clientX, y0:e.clientY};
+        return;
+      }
     }
+    S.selBox=null; renderTitleBoxes();
     const r=pre.getBoundingClientRect();
     drag={mode:'new', x0:xAbs(e,r), y0:yAbs(e,r)};
   };
@@ -1473,8 +1506,13 @@ function bindTemplateDrag(){
       const dx=e.clientX-drag.x0, dy=e.clientY-drag.y0;
       drag.x0=e.clientX; drag.y0=e.clientY;
       if(drag.mode==='score'){
-        rt.scoreX = Math.max(0, Math.round(rt.scoreX + dx));
+        const ndx = Math.max(0, Math.round(rt.scoreX + dx));
+        S_TPL_RECTS.forEach(rt2=>{ rt2.scoreX = ndx; });   // 打分区统一对齐同一竖列，调一个全联动
         renderScoreBoxes();
+      } else if(drag.mode==='resize'){
+        rt.w=Math.max(14, Math.round(rt.w+dx));
+        rt.h=Math.max(12, Math.round(rt.h+dy));
+        renderTitleBoxes(); renderScoreBoxes();
       } else {
         rt.x=Math.max(0, Math.round(rt.x+dx));
         rt.y=Math.max(0, Math.round(rt.y+dy));
@@ -1541,12 +1579,17 @@ function renderTitleBoxes(){
   pre.querySelectorAll('.tpl-box:not(.active)').forEach(n=>n.remove());
   S_TPL_RECTS.forEach((rt,i)=>{
     const off=S.tplPages[rt.pageIndex].offset;
-    const d=document.createElement('div'); d.className='tpl-box'; d.dataset.idx=i;
+    const d=document.createElement('div'); d.className='tpl-box'+(S.selBox===i?' sel':''); d.dataset.idx=i;
     d.style.left=rt.x+'px'; d.style.top=(off+rt.y)+'px'; d.style.width=rt.w+'px'; d.style.height=rt.h+'px';
     d.style.pointerEvents='auto'; d.style.cursor='move';
-    d.title='拖动可微调标题框位置';
+    d.title='拖动移动；右下角拉大/缩小；右上角删除';
     const idx=document.createElement('span'); idx.className='tpl-idx'; idx.textContent=(i+1)+'.';
     d.appendChild(idx);
+    const lab=document.createElement('div'); lab.className='tpl-label';
+    lab.textContent=(rt.item_name||('题目'+(i+1)))+(rt.max_score?('　'+rt.max_score+'分'):'');
+    d.appendChild(lab);
+    const rz=document.createElement('div'); rz.className='tpl-resize'; rz.dataset.idx=i; d.appendChild(rz);
+    const dl=document.createElement('div'); dl.className='tpl-del'; dl.textContent='×'; dl.dataset.idx=i; d.appendChild(dl);
     host.appendChild(d);
   });
 }
@@ -1691,6 +1734,16 @@ function renderItemList(){
     div.appendChild(no); div.appendChild(name); div.appendChild(max); div.appendChild(del);
     out.push(div);
   });
+  if(S_TOTAL_RECT){
+    const div=document.createElement('div'); div.className='irow';
+    const no=document.createElement('span'); no.className='ino'; no.textContent='Σ';
+    const name=document.createElement('span'); name.textContent='统分区'; name.style.flex='1'; name.style.color='#2e7d32';
+    const info=document.createElement('span'); info.textContent='分数 '+(S_TOTAL_RECT.count||1)+' 个'; info.style.color='#888'; info.style.fontSize='12px';
+    const del=document.createElement('button'); del.textContent='删';
+    del.onclick=()=>{ S_TOTAL_RECT=null; if(typeof renderTotalBox==='function') renderTotalBox(); renderItemList(); };
+    div.appendChild(no); div.appendChild(name); div.appendChild(info); div.appendChild(del);
+    out.push(div);
+  }
   el.itemList.innerHTML='';
   if(!out.length){
     const p=document.createElement('div'); p.className='empty';
@@ -1725,18 +1778,29 @@ function renderTotalBox(){
   el.totalInfo.appendChild(document.createTextNode(' 个（改后点任意处应用）'));
 }
 
-el.btnTotalMode.onclick=()=>{
-  S_TOTAL_MODE=!S_TOTAL_MODE;
-  el.btnTotalMode.style.background = S_TOTAL_MODE ? '#e07b39' : '#1a73e8';
-  if(S_TOTAL_MODE){
-    el.totalInfo.style.display='block';
-    el.totalInfo.textContent='正在框选统分区：在预览上拖选统分表整行区域（一条线框出所有分数所在处）。';
-  } else {
-    el.totalInfo.style.display='none';
+function setItemMode(isTitle){
+  S_TOTAL_MODE = !isTitle;
+  if(el.btnTitleMode){ el.btnTitleMode.style.background = isTitle ? '#1a73e8' : '#eef1f5'; el.btnTitleMode.style.color = isTitle ? '#fff' : '#555'; }
+  if(el.btnTotalMode){ el.btnTotalMode.style.background = isTitle ? '#eef1f5' : '#1a73e8'; el.btnTotalMode.style.color = isTitle ? '#555' : '#fff'; }
+  if(el.totalInfo){
+    if(S_TOTAL_MODE){
+      el.totalInfo.style.display='block';
+      el.totalInfo.textContent='正在框选统分区：在预览上拖选统分表整行区域（一条线框出所有分数所在处）。';
+    } else { el.totalInfo.style.display='none'; }
   }
-};
+}
+el.btnTitleMode.onclick=()=>{ setItemMode(true); };
+el.btnTotalMode.onclick=()=>{ setItemMode(false); };
 el.btnItemAdd.onclick=()=>{ S_ITEMS.push({item_name:'', max_score:20}); renderItemList(); };
 el.btnItemCancel.onclick=()=>{ el.itemMask.style.display='none'; };
+// Delete/Backspace 删除选中框
+document.addEventListener('keydown',(e)=>{
+  if((e.key==='Delete' || e.key==='Backspace') && el.itemMask && el.itemMask.style.display==='flex' && S.selBox!=null){
+    e.preventDefault();
+    S_TPL_RECTS.splice(S.selBox,1); S.selBox=null;
+    renderTitleBoxes(); renderItemList(); renderScoreBoxes();
+  }
+});
 el.btnItemSave.onclick=async ()=>{
   const items=[];
   S_TPL_RECTS.forEach((rt,i)=>{
