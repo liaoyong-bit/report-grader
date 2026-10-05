@@ -2173,7 +2173,7 @@ async function ocrReportBasic(path, basicFields){
       try{ rect=JSON.parse(f[2]||'{}'); }catch(e){}
       if(!rect.w || !rect.h) continue;
       try{
-        const pobj=await pdf.getPage(page+1);
+        const pobj=await pdf.getPage(Math.max(1,page));
         const vp=await pobj.getViewport({scale:2});
         const canvas=document.createElement('canvas'); canvas.width=Math.floor(vp.width); canvas.height=Math.floor(vp.height);
         await pobj.render({canvasContext:canvas.getContext('2d'), viewport:vp}).promise;
@@ -2187,6 +2187,7 @@ async function ocrReportBasic(path, basicFields){
         c2.getContext('2d').putImageData(img,0,0);
         const b64=c2.toDataURL('image/png').split(',')[1];
         const txt=(await window.__bridge.ocrImageB64(b64).catch(()=>''))||'';
+        if(window.__bridge && window.__bridge.log) window.__bridge.log('[ocrtpl] type='+type+' page='+page+' rect='+JSON.stringify(rect)+' px='+px+' py='+py+' w='+pw+' h='+ph+' ocr="'+txt+'"');
         if(type==='no') res.no=txt; else if(type==='name') res.name=txt; else if(type==='class') res.cls=txt; else if(type==='exp') res.exp=txt;
       }catch(e){}
     }
