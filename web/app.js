@@ -1965,7 +1965,7 @@ async function ensureOcrWorker(){
     worker = await Promise.race([
       Tesseract.createWorker({
         workerPath, corePath, langPath,
-        workerBlobURL: true,
+        workerBlobURL: false,
         logger: m=>{ if(m && m.status) log(m.status); },
         errorHandler: e=>{ log('worker 错误: '+String(e&&e.message||e)); }
       }),
