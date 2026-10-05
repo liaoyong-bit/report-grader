@@ -2192,32 +2192,33 @@ async function ocrReportBasic(path, basicFields){
   }catch(e){ return null; }
 }
 async function runSourceVerify(){
-  if(!S.folder || !window.__bridge || !window.__bridge.syncFolder){ setErr('请先选报告文件夹'); return; }
-  const bf = await window.__bridge.getBasicFields(S.folder).catch(()=>[]);
-  if(!(bf&&bf.length)){ setErr('请先点「设置模板（框选）」框选基本信息，再核对原始报告'); return; }
+  const L=(m)=>{ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[核对] '+m); };
+  L('入口 folder='+(S.folder||'<空>'));
+  if(!S.folder){ setErr('请先选报告文件夹'); return; }
+  if(!window.__bridge || !window.__bridge.syncFolder){ L('缺少同步接口'); setErr('环境异常：缺少同步接口'); return; }
+  let bf=[]; try{ bf = await window.__bridge.getBasicFields(S.folder); }catch(e){ L('getBasicFields err '+e); }
+  if(!(bf&&bf.length)){ L('基本信息为空，中止'); setErr('请先点「设置模板（框选）」框选基本信息并保存，再核对原始报告'); return; }
   setDetect('正在核对原始报告：扫描并 OCR 匹配...');
-  if(window.__bridge && window.__bridge.log) window.__bridge.log('[核对] 开始');
-  try{
-    const sync = await window.__bridge.syncFolder(S.folder);
-    if(window.__bridge && window.__bridge.log) window.__bridge.log('[核对] sync added='+(sync&&sync.added)+' unmatched='+(sync&&sync.unmatched&&sync.unmatched.length));
-  }catch(e){ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[核对] sync FAIL '+e); setErr('同步失败: '+e); }
+  L('开始，基本信息字段='+bf.length);
+  try{ const sync=await window.__bridge.syncFolder(S.folder); L('sync added='+(sync&&sync.added)+' unmatched='+(sync&&sync.unmatched&&sync.unmatched.length)); }
+  catch(e){ L('sync FAIL '+e); setErr('同步失败: '+e); }
   refreshPrepOverview();
   const rows=(S.prepOv&&S.prepOv.rows)||[];
-  if(!rows.length){ setDetect('没有扫描到原始报告，请确认报告 PDF 在所选文件夹内'); return; }
+  if(!rows.length){ L('无原始报告'); setDetect('没有扫描到原始报告，请确认报告 PDF 在所选文件夹内'); return; }
   const roster = await window.__bridge.getRoster(S.folder).catch(()=>[]);
   const basicFields = await window.__bridge.getBasicFields(S.folder).catch(()=>[]);
-  const need = rows.filter(r=>!r.matched && !r.ocr_no);
-  if(window.__bridge && window.__bridge.log) window.__bridge.log('[核对] 需OCR '+need.length+' 份');
+  const need = rows.filter(r=>!r.matched);
+  L('需OCR '+need.length+' 份');
   let ok=0;
   for(const r of need){
     try{
       const ocr = await ocrReportBasic(r.path, basicFields);
-      if(!ocr){ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[核对] ocr none '+r.path); continue; }
-      if(window.__bridge && window.__bridge.log) window.__bridge.log('[核对] ocr '+JSON.stringify(ocr));
+      if(!ocr){ L('ocr none '+r.path); continue; }
+      L('ocr '+JSON.stringify(ocr));
       await window.__bridge.saveReportOcr(S.folder, r.key, (ocr.no||'').trim(), (ocr.name||'').trim(), (ocr.cls||'').trim(), (ocr.exp||'').trim());
       const hit = roster.find(s=> (ocr.no&&ocr.no.trim()&&s.no===ocr.no.trim()) || (ocr.name&&ocr.name.trim()&&s.name===ocr.name.trim()));
-      if(hit){ await window.__bridge.resolveUnmatched(S.folder, {path:r.path}, hit.no); ok++; if(window.__bridge&&window.__bridge.log) window.__bridge.log('[核对] 挂靠 '+hit.no); }
-    }catch(e){ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[核对] 单份失败 '+e); }
+      if(hit){ await window.__bridge.resolveUnmatched(S.folder, {path:r.path}, hit.no); ok++; L('挂靠 '+hit.no); }
+    }catch(e){ L('单份失败 '+e); }
   }
   refreshPrepOverview();
   setDetect('✅ 核对完成'+(ok?('，自动挂靠 '+ok+' 份'):''));
