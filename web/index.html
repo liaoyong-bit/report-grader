@@ -268,6 +268,20 @@
   </div>
 
   <!-- 初始化向导弹窗（Tauri 模式下无数据库时弹出） -->
+  <!-- 修改密码 -->
+  <div id="pwdMask" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);align-items:center;justify-content:center;z-index:99">
+    <div id="pwdBox" style="background:#fff;border-radius:12px;padding:26px 30px;width:380px;box-shadow:0 10px 36px rgba(0,0,0,.35)">
+      <h2 style="font-size:18px;text-align:center;color:#2b3a55;margin-bottom:14px">修改密码</h2>
+      <div style="font-size:13px;color:#64748b;margin-bottom:10px;text-align:center">当前账号：<b id="pwdUser"></b></div>
+      <input id="pwdOld" type="password" placeholder="原密码" style="width:100%;box-sizing:border-box;padding:9px 11px;margin-bottom:10px;border:1px solid #cbd5e1;border-radius:7px;font-size:14px">
+      <input id="pwdNew" type="password" placeholder="新密码" style="width:100%;box-sizing:border-box;padding:9px 11px;margin-bottom:10px;border:1px solid #cbd5e1;border-radius:7px;font-size:14px">
+      <input id="pwdNew2" type="password" placeholder="确认新密码" style="width:100%;box-sizing:border-box;padding:9px 11px;margin-bottom:10px;border:1px solid #cbd5e1;border-radius:7px;font-size:14px">
+      <div id="pwdErr" style="min-height:16px;font-size:12.5px;color:#dc2626"></div>
+      <button id="btnPwdSave" style="width:100%;box-sizing:border-box;padding:10px;background:#3b82f6;color:#fff;border:none;border-radius:7px;cursor:pointer;font-weight:600">保存</button>
+      <button id="btnPwdCancel" style="width:100%;box-sizing:border-box;padding:9px;margin-top:8px;background:#eef1f5;color:#555;border:none;border-radius:7px;cursor:pointer">取消</button>
+    </div>
+  </div>
+
   <div id="wizardMask" style="display:none">
     <div id="wizardBox">
       <h2>初始化报告批次</h2>
@@ -354,7 +368,7 @@
   <!-- 帮助下拉面板 -->
   <div id="helpPanel" style="display:none">
     <h3>帮助</h3>
-    <p><b>版本：</b>0.1.6</p>
+    <p><b>版本：</b>0.1.7</p>
     <p><b>作者：</b>利奥</p>
     <hr>
     <div class="help-steps">
@@ -373,6 +387,7 @@
     <h1>实验报告批阅系统</h1>
     <span class="teacher" id="teacherLabel">未登录</span>
     <button id="btnLogin">切换教师</button>
+    <button id="btnChangePwd">🔑 修改密码</button>
     <button id="btnOpen">📂 打开PDF报告</button>
     <button id="btnLoadFolder">📁 载入报告文件夹</button>
     <button id="btnItems">✏️ 设置评分项</button>

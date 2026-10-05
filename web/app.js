@@ -47,6 +47,9 @@ const el = {
   liUser: $('liUser'), liPwd: $('liPwd'), btnLogin2: $('btnLogin2'), liErr: $('liErr'),
   gotoLogin: $('gotoLogin'), gotoCreate: $('gotoCreate'), createPanel: $('createPanel'), loginPanel: $('loginPanel'),
   teacherLabel: $('teacherLabel'), btnLogin: $('btnLogin'),
+  btnChangePwd: $('btnChangePwd'), pwdMask: $('pwdMask'), pwdUser: $('pwdUser'),
+  pwdOld: $('pwdOld'), pwdNew: $('pwdNew'), pwdNew2: $('pwdNew2'), pwdErr: $('pwdErr'),
+  btnPwdSave: $('btnPwdSave'), btnPwdCancel: $('btnPwdCancel'),
   btnOpen: $('btnOpen'), btnLoadFolder: $('btnLoadFolder'),
   reportList: $('reportList'),
   statTotal: $('statTotal'), statDone: $('statDone'), statPending: $('statPending'),
@@ -177,6 +180,31 @@ function initLoginGate(){
     el.loginMask.style.display='flex';
   }).catch(()=>{ el.loginMask.style.display='none'; });
 }
+
+/* ==================== 修改密码 ==================== */
+el.btnChangePwd.onclick = () => {
+  if(!S.loginUser){ alert('请先登录'); return; }
+  el.pwdUser.textContent = S.loginUser;
+  el.pwdOld.value=''; el.pwdNew.value=''; el.pwdNew2.value=''; el.pwdErr.textContent='';
+  el.pwdMask.style.display='flex';
+  el.pwdOld.focus();
+};
+function closePwd(){ el.pwdMask.style.display='none'; }
+el.btnPwdCancel.onclick = closePwd;
+async function doChangePwd(){
+  const oldv=el.pwdOld.value, nv=el.pwdNew.value, n2=el.pwdNew2.value;
+  if(!oldv || !nv){ el.pwdErr.textContent='请填写原密码和新密码'; return; }
+  if(nv !== n2){ el.pwdErr.textContent='两次输入的新密码不一致'; return; }
+  if(nv.length < 4){ el.pwdErr.textContent='新密码至少 4 位'; return; }
+  el.pwdErr.textContent='';
+  try{
+    await window.__bridge.changePassword(S.loginUser, oldv, nv);
+    alert('密码修改成功');
+    closePwd();
+  }catch(e){ el.pwdErr.textContent='修改失败：' + e; }
+}
+el.btnPwdSave.onclick = doChangePwd;
+el.pwdNew2.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doChangePwd(); } });
 
 /* ==================== 库加载与初始化 ==================== */
 function initLibs(){
