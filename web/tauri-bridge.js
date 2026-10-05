@@ -57,14 +57,9 @@
       app.S.mode = 'tauri';
 
       if(hasDb){
-        // 已有库 → 直接增量同步，停在准备面板（不弹提示；挂靠/处理都在面板内解决）
-        try{
-          const sync = await invoke('sync_folder', { folder: picked.folder });
-          buildReports(sync);
-          if(sync.unmatched && sync.unmatched.length){ /* 待挂靠在状态总表显示，不弹窗 */ }
-          app.refreshPrepOverview();
-          app.setDetect('已同步批次' + (sync.added ? '，新增 ' + sync.added + ' 份' : ''));
-        } catch(e){ app.setErr('⚠ 同步失败: ' + e); }
+        // 已有库 → 停在准备面板；有模板框选才同步，否则引导先设置模板
+        try{ await maybeSyncAfterRoster(); }
+        catch(e){ app.setErr('⚠ 同步失败: ' + e); }
       } else {
         // 无库 → 停在准备面板，右侧名单管理区引导初始化（不弹向导）
         app.S.needsInit = true;
@@ -82,32 +77,43 @@
     try {
       await invoke('init_batch', { folder, reportName, students, teacher: app.S.teacher });
       await invoke('save_roster', { folder, reportName, students });   // 名单+报告名存到 source_files
-      const sync = await invoke('sync_folder', { folder });
-      buildReports(sync);
-      app.setDetect('✅ 批次已初始化并扫描报告');
-      if(sync.unmatched && sync.unmatched.length){
-        app.S.pendingItemsSetup = true;   // 有待挂靠：评分项等挂靠后再设，避免弹窗叠加
-      } else { await app.ensureItemsSetup(); }
+      app.setDetect('✅ 批次已初始化，请先设置模板框选，保存后再扫描识别');
+      app.S.pendingItemsSetup = true;
       if(app.S.inPrep){ app.refreshPrepOverview(); }
-      else if(app.S.reports.length && !app.S.pendingItemsSetup){ app.selectReport(0); }
+      else { app.showPrep(); app.refreshPrepOverview(); }
     } catch(e) { app.setErr('⚠ ' + e); }
   };
+
+  // —— 模板框选已保存才同步扫描；未就绪则先引导设置模板
+  async function maybeSyncAfterRoster(){
+    let hasSetup = false;
+    try{
+      const bf = await invoke('get_basic_fields', { folder: app.S.folder });
+      const items = await invoke('get_batch_items', { folder: app.S.folder });
+      hasSetup = !!((bf && bf.length) || (items && items.length));
+    }catch(e){}
+    if(hasSetup){
+      const sync = await invoke('sync_folder', { folder: app.S.folder });
+      buildReports(sync);
+      app.setDetect('已同步批次' + (sync.added ? '，新增 ' + sync.added + ' 份' : ''));
+      if(sync.unmatched && sync.unmatched.length){ app.S.pendingItemsSetup = true; }
+      else { await app.ensureItemsSetup(); }
+      if(app.S.inPrep){ app.refreshPrepOverview(); }
+      else if(app.S.reports.length && !app.S.pendingItemsSetup){ app.selectReport(0); }
+    } else {
+      app.S.pendingItemsSetup = true;
+      app.setDetect('请先点「设置模板（框选）」框选基本信息与题目分值，保存后再扫描识别');
+      if(app.S.inPrep){ app.refreshPrepOverview(); }
+      else { app.showPrep(); app.refreshPrepOverview(); }
+    }
+  }
 
   // —— 处理未匹配：挂到某学生 / 不导入
   // —— 已有批次提示：继续使用 → 增量同步进界面
   document.getElementById('btnBatchKeep').onclick = async () => {
     document.getElementById('batchMask').style.display = 'none';
-    try {
-      const folder = app.S.folder;
-      const sync = await invoke('sync_folder', { folder });
-      buildReports(sync);
-      app.setDetect('已同步批次' + (sync.added ? '，新增 ' + sync.added + ' 份' : ''));
-      if(sync.unmatched && sync.unmatched.length){
-        app.S.pendingItemsSetup = true;   // 有待挂靠：总表行内挂载
-      } else { await app.ensureItemsSetup(); }
-      if(app.S.inPrep){ app.refreshPrepOverview(); }
-      else if(app.S.reports.length && !app.S.pendingItemsSetup){ app.selectReport(0); }
-    } catch(e) { app.setErr('⚠ ' + e); }
+    try { await maybeSyncAfterRoster(); }
+    catch(e) { app.setErr('⚠ ' + e); }
   };
   // —— 已有批次提示：重新设置 → 打开初始化向导
   document.getElementById('btnBatchReset').onclick = () => {

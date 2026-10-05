@@ -57,6 +57,7 @@ const el = {
   attachBatchMask: $('attachBatchMask'), abPreview: $('abPreview'), abFileList: $('abFileList'),
   abCand: $('abCand'), abProgress: $('abProgress'), abPrevBtn: $('abPrevBtn'), abNextBtn: $('abNextBtn'),
   abCommitBtn: $('abCommitBtn'), abBackBtn: $('abBackBtn'), abErr: $('abErr'),
+  pvMask: $('pvMask'), pvName: $('pvName'), pvInner: $('pvInner'), pvClose: $('pvClose'),
   attachSel: $('attachSel'), attachErr: $('attachErr'), btnAttachOk: $('btnAttachOk'), btnAttachCancel: $('btnAttachCancel'),
   btnOpen: $('btnOpen'), btnLoadFolder: $('btnLoadFolder'),
   reportList: $('reportList'),
@@ -254,12 +255,38 @@ async function refreshPrepOverview(){
     }
   }
 }
-async function openFile(path){
-  if(!path){ return; }
-  if(window.__bridge && window.__bridge.openExternal && S.folder){
-    try{ await window.__bridge.openExternal(S.folder, path); }catch(e){ setErr('打开文件失败: '+e); }
-  } else { alert('文件路径：'+path); }
+async function renderPdfPreview(container, path){
+  if(!path || !container) return;
+  container.innerHTML='';
+  if(!S.pdfjsOk){ container.innerHTML='<div style="color:#888;padding:12px">pdf.js 未就绪</div>'; return; }
+  if(!window.__bridge || !window.__bridge.readPdf || !S.folder){ container.innerHTML='<div style="color:#888;padding:12px">无法读取报告</div>'; return; }
+  try{
+    const bytes=await window.__bridge.readPdf(S.folder, path);
+    const pdf=await pdfjsLib.getDocument({data: bytes.slice(0)}).promise;
+    for(let pi=1; pi<=pdf.numPages; pi++){
+      const page=await pdf.getPage(pi);
+      const vp=page.getViewport({scale:1});
+      const availW=Math.max(220, container.clientWidth-12);
+      const scale=availW/vp.width;
+      const vp2=page.getViewport({scale});
+      const canvas=document.createElement('canvas');
+      canvas.width=Math.floor(vp2.width); canvas.height=Math.floor(vp2.height);
+      canvas.style.width='100%'; canvas.style.marginBottom='6px'; canvas.style.boxShadow='0 1px 3px rgba(0,0,0,.2)';
+      container.appendChild(canvas);
+      await page.render({canvasContext: canvas.getContext('2d'), viewport: vp2}).promise;
+    }
+  }catch(e){ container.innerHTML='<div style="color:#c62828;padding:12px">预览失败: '+e+'</div>'; }
 }
+async function openReportPreview(path){
+  if(!path) return;
+  el.pvName.textContent = String(path).split('/').pop() || path;
+  el.pvMask.style.display='flex';
+  await renderPdfPreview(el.pvInner, path);
+}
+function openFile(path){ openReportPreview(path); }
+el.pvClose.onclick=()=>{ el.pvMask.style.display='none'; };
+el.pvMask.onclick=(e)=>{ if(e.target===el.pvMask){ el.pvMask.style.display='none'; } };
+document.addEventListener('keydown',(e)=>{ if(e.key==='Escape'){ el.pvMask.style.display='none'; } });
 function renderPrepTable(ov){
   const tbody = el.prepTbody; tbody.innerHTML='';
   const addTd = (tr, txt)=>{ const td=document.createElement('td'); td.textContent=(txt==null?'':String(txt)); tr.appendChild(td); };
@@ -290,8 +317,6 @@ function renderPrepTable(ov){
     const tdG=document.createElement('td');
     const tg=document.createElement('span'); tg.className='tag '+(r.done?'done':'todo'); tg.textContent=r.done?'已批':(r.graded?'部分':'待批'); tdG.appendChild(tg); tr.appendChild(tdG);
     const tdO=document.createElement('td');
-    const vb=document.createElement('button'); vb.className='opbtn view'; vb.textContent='查看';
-    vb.onclick=()=>{ openFile(r.path); }; tdO.appendChild(vb);
     if(r.matched){
       const ab=document.createElement('button'); ab.className='opbtn attached'; ab.textContent='已挂靠'; tdO.appendChild(ab);
     } else {
@@ -392,7 +417,7 @@ async function refreshAttachBatch(){
     const row=document.createElement('div');
     row.className='ab-file'+(k===i?' active':'');
     const nm=document.createElement('span'); nm.textContent=(x.fname||x.path||''); nm.style.cursor='pointer';
-    nm.onclick=()=>{ openFile(x.path); };
+    nm.onclick=()=>{ if(k!==S_ATTACH.idx){ S_ATTACH.idx=k; refreshAttachBatch(); } };
     const st=document.createElement('span'); st.className='tag '+(x.matched?'mat':'new'); st.textContent=x.matched?'已挂靠':'待挂靠';
     row.appendChild(nm); row.appendChild(st);
     el.abFileList.appendChild(row);
@@ -419,25 +444,8 @@ async function refreshAttachBatch(){
   el.abNextBtn.disabled = (i>=L.length-1);
 }
 async function renderAttachPreview(path){
-  const pre=el.abPreview; pre.innerHTML='';
-  if(!path || !S.folder || !window.__bridge){ pre.innerHTML='<div style="color:#888;padding:12px">无文件预览</div>'; return; }
-  if(!S.pdfjsOk){ pre.innerHTML='<div style="color:#888;padding:12px">pdf.js 未就绪</div>'; return; }
-  try{
-    const bytes=await window.__bridge.readPdf(S.folder, path);
-    const pdf=await pdfjsLib.getDocument({data: bytes.slice(0)}).promise;
-    for(let pi=1; pi<=pdf.numPages; pi++){
-      const page=await pdf.getPage(pi);
-      const vp=page.getViewport({scale:1});
-      const availW=Math.max(220, pre.clientWidth-12);
-      const scale=availW/vp.width;
-      const vp2=page.getViewport({scale});
-      const canvas=document.createElement('canvas');
-      canvas.width=Math.floor(vp2.width); canvas.height=Math.floor(vp2.height);
-      canvas.style.width='100%'; canvas.style.marginBottom='6px'; canvas.style.boxShadow='0 1px 3px rgba(0,0,0,.2)';
-      pre.appendChild(canvas);
-      await page.render({canvasContext: canvas.getContext('2d'), viewport: vp2}).promise;
-    }
-  }catch(e){ pre.innerHTML='<div style="color:#c62828;padding:12px">预览失败: '+e+'</div>'; }
+  const pre=el.abPreview;
+  await renderPdfPreview(pre, path);
 }
 async function commitAttachBatch(){
   const sel=document.querySelector('input[name="abSel"]:checked');
@@ -450,7 +458,9 @@ async function commitAttachBatch(){
     await window.__bridge.resolveUnmatched(S.folder, {path:r.path}, action);
     r.matched = (v!=='__err');
     refreshPrepOverview();
-    refreshAttachBatch();
+    const nxt = S_ATTACH.list.findIndex((x,k)=> k>S_ATTACH.idx && !x.matched);
+    if(nxt>=0){ S_ATTACH.idx=nxt; refreshAttachBatch(); }
+    else { el.attachBatchMask.style.display='none'; setDetect('✅ 所有待挂靠报告已处理'); }
   }catch(e){ el.abErr.textContent='挂靠失败: '+e; }
 }
 el.abCommitBtn.onclick = commitAttachBatch;

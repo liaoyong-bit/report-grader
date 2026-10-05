@@ -172,6 +172,13 @@
   .ab-foot button.primary { background:#3b82f6; color:#fff; font-weight:600; }
   .ab-foot button:disabled { opacity:.45; cursor:default; }
   #abErr { color:#c62828; font-size:13px; margin-top:8px; min-height:16px; }
+  #pvMask { position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:130; }
+  #pvBox { background:#fff; border-radius:12px; width:900px; max-width:92vw; height:86vh; display:flex; flex-direction:column; box-shadow:0 10px 40px rgba(0,0,0,.4); padding:16px 20px; box-sizing:border-box; }
+  .pv2-head { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
+  .pv2-head h2 { font-size:17px; color:#2b3a55; margin:0; }
+  #pvName { flex:1; color:#64748b; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pv2-close { border:none; background:#eef1f5; color:#334155; font-size:18px; width:30px; height:30px; border-radius:6px; cursor:pointer; }
+  #pvInner { flex:1; overflow:auto; background:#f1f3f5; border:1px solid #e2e5ea; border-radius:8px; padding:8px; }
 
 
 
@@ -689,6 +696,14 @@
         <button id="abCommitBtn" class="primary">确定挂靠</button>
       </div>
       <div id="abErr" class="err"></div>
+    </div>
+  </div>
+
+  <!-- 报告预览弹窗 -->
+  <div id="pvMask" style="display:none">
+    <div id="pvBox">
+      <div class="pv2-head"><h2>报告预览</h2><span id="pvName"></span><button id="pvClose" class="pv2-close">×</button></div>
+      <div id="pvInner" class="pv2-inner"></div>
     </div>
   </div>
 
