@@ -283,6 +283,9 @@
   .ov-table td.stc-已批 { color: #2e7d32; font-weight: 600; }
   .ov-table td.stc-待批 { color: #e07b39; font-weight: 600; }
   .ov-table td.stc-待提交 { color: #c62828; font-weight: 600; }
+  .ov-detail { max-width: 520px; }
+  .ov-detail td:first-child { text-align: left; }
+  .ov-total-row td { font-weight: 600; background: #fff3e8 !important; }
 
   /* 帮助下拉面板 */
   #helpPanel {
@@ -312,6 +315,7 @@
   }
   .ov-title-score { font-size: 16px; color: #c62828; }
   .ov-table-score { color: #c62828; }
+  .ov-total-score { font-size: 16px; color: #1a73e8; }
   .ov-tag {
     position: absolute; color: #1a73e8; font-size: 12px; pointer-events: none;
     text-shadow: 0 0 2px #fff;
@@ -558,10 +562,11 @@
     <span class="teacher" id="teacherLabel">未登录</span>
     <button id="btnLogin">切换教师</button>
     <button id="btnChangePwd">🔑 修改密码</button>
-    <button id="btnSettings">⚙ 设置</button>
-    <button id="btnOverview">📊 批阅概览</button>
-    <button id="btnHelp">❓ 帮助</button>
     <div class="spacer"></div>
+    <button id="btnOverview">📊 批阅概览</button>
+    <button id="btnSettings">⚙ 设置</button>
+    <button id="btnHelp">❓ 帮助</button>
+    <button id="btnMarkBad" style="background:#fdf0f0;color:#c0392b">❌ 标记交错</button>
   </div>
 
   <!-- 主体三栏 -->
@@ -575,7 +580,6 @@
         <span class="stat stat-total">总计：<span id="statTotal">0</span></span>
         <span class="stat stat-done">已批：<span id="statDone">0</span></span>
         <span class="stat stat-pending">待批：<span id="statPending">0</span></span>
-        <span class="stat stat-missing">待提交：<span id="statMissing">0</span></span>
         <div id="statAvg" class="stat-avg"></div>
       </div>
     </aside>
@@ -590,7 +594,7 @@
     </section>
 
     <aside id="right">
-      <div class="side-title">学生信息（自动识别）</div>
+      <div class="side-title">学生信息</div>
       <div class="field"><label>学号</label><input id="inpId"></div>
       <div class="field"><label>姓名</label><input id="inpName"></div>
       <div class="field"><label>班级</label><input id="inpClass"></div>
@@ -599,10 +603,6 @@
       <div id="scoreRows"></div>
       <div id="totalRow"><span class="lbl">总分</span><span class="val" id="totalVal">0 / 100</span></div>
       <button class="btn-block primary" id="btnSubmitNext">提交并下一份 <span style="font-weight:400;opacity:.85">(Ctrl+Enter)</span></button>
-      <div class="row" style="gap:6px">
-        <button class="btn-block ghost" id="btnMarkBad" style="flex:1">❌ 标记交错</button>
-        <button class="btn-block ghost" id="btnDetail" style="flex:1">📋 成绩明细</button>
-      </div>
     </aside>
   </div>
 

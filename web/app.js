@@ -585,7 +585,7 @@ function openDetail(){
   el.detailTableWrap.innerHTML = done.length ? h : '<div style="padding:20px;color:#888">还没有已批卷的成绩明细</div>';
   el.detailMask.style.display='flex';
 }
-el.btnDetail.onclick=openDetail;
+/* 成绩明细已合并到顶部「批阅概览」，右下角不再独立绑定 */
 el.dtClose.onclick=()=>{ el.detailMask.style.display='none'; };
 el.dtOk.onclick=()=>{ el.detailMask.style.display='none'; };
 if(el.dtExport){ el.dtExport.style.display='none'; }   // 导出统一到导出阶段，明细弹窗只读
@@ -647,6 +647,7 @@ function renderReportList(){
   el.reportList.innerHTML = '';
   S.reports.forEach((r,i)=>{
     const li = document.createElement('li');
+    if(r===S.current) li.classList.add('active');
     li.textContent = reportLabel(r);
     const st = document.createElement('span');
     const s = reportState(r);
@@ -666,8 +667,13 @@ function updateStats(){
   el.statTotal.textContent = total;
   el.statDone.textContent = done;
   el.statPending.textContent = total - done - missing;
-  el.statMissing.textContent = missing;
   renderAvg();
+}
+// 只更新当前高亮，不重建列表（selectReport 切换时调用）
+function updateListHighlight(){
+  const lis = el.reportList ? el.reportList.children : null;
+  if(!lis) return;
+  S.reports.forEach((r,i)=>{ if(lis[i]) lis[i].classList.toggle('active', r===S.current); });
 }
 // 每次提交后刷新：每题平均分 + 总评平均分（仅已批卷）
 function renderAvg(){
@@ -686,6 +692,7 @@ function renderAvg(){
 async function selectReport(idx){
   const r = S.reports[idx];
   S.current = r;
+  updateListHighlight();
   el.pdfHost.innerHTML = '<div id="pdfEmpty"><div class="big">⏳</div>正在解析报告...</div>';
   el.scoreRows.innerHTML = '';
   setFile('解析中: ' + r.name);
@@ -716,12 +723,22 @@ async function selectReport(idx){
   try{
     const analysis = await analyze(r.pdf);
     r.analysis = analysis;
-    // 用批次评分项模板覆盖题名/满分（每题位置仍由 analyze 定位）
-    if(S.itemsTemplate && S.itemsTemplate.length){
-      S.itemsTemplate.forEach((tpl,i)=>{ if(analysis.items[i]){ analysis.items[i].name = tpl.item_name; analysis.items[i].max = tpl.max_score; analysis.items[i].score_x = tpl.score_x; } });
+    // —— 评分项以准备阶段模板(batch_items)为准：题名/满分直接挖模板 ——
+    if(!S.itemsFull){
+      try{ S.itemsFull = await window.__bridge.getBatchItems(S.folder); }
+      catch(e){ S.itemsFull=[]; }
     }
-    // 保留已保存/已恢复的状态，不重置（P0-1 / P0-4 已批可重开）
-    if(!r.maxs) r.maxs = analysis.items.map(it=>it.max);
+    const tpl=(S.itemsFull||[]).filter(x=>x.item_index>=0).sort((a,b)=>a.item_index-b.item_index);
+    if(tpl.length){
+      // 补齐 scores/activated 到模板项数（扫描版 analyze 可能检测不到项，但模板一定有）
+      if(!Array.isArray(r.scores)) r.scores=[];
+      if(!Array.isArray(r.activated)) r.activated=[];
+      while(r.scores.length < tpl.length) r.scores.push(0);
+      while(r.activated.length < tpl.length) r.activated.push(false);
+      if(!r.maxs || !r.maxs.length) r.maxs = tpl.map(t=>t.max_score!=null?t.max_score:0);
+    } else {
+      if(!r.maxs) r.maxs = analysis.items.map(it=>it.max);
+    }
     if(!r.basic) r.basic = analysis.basic;
 
     // 基本信息回填（优先用持久化的值，含老师手动修正过的）
@@ -974,7 +991,7 @@ async function renderPages(r){
   el.pdfHost.innerHTML = '';
   const centerEl = document.getElementById('center');
   const availW = Math.max(240, centerEl.clientWidth - 32); // 中间栏可用宽度(去掉padding)
-  r._rendered = { titleOv: [], tableOv: [] };   // 缓存叠加层节点，供打分时局部刷新
+  r._rendered = { titleOv: [], totalOv: null };   // 缓存叠加层节点，供打分时局部刷新
 
   for(let p=0; p<r.pdf.numPages; p++){
     const page = await r.pdf.getPage(p+1);
@@ -997,43 +1014,51 @@ async function renderPages(r){
     addOverlays(r, wrap, p, vp, page);
   }
   fillOverlays(r);   // 叠加层文本统一填充
-  await autoLocateTitles(r);   // 扫描版标题找图定位（渲染后有页面canvas）
+  // 叠加层已改用模板定位，不再依赖 autoLocateTitles 找图
+  // await autoLocateTitles(r);
 }
 
 function px2(x,y,vp){ return vp.convertToViewportPoint(x,y); }
 
+// —— 叠加层"得分:N / 总分:N"：位置来自准备阶段模板框选的 title_rect / total_region（百分比映射），
+//    不再依赖预览自动识别（扫描版也能精准定位）。旧 analyze 定位逻辑已整体移除。
 function addOverlays(r, wrap, pageIndex, vp, page){
-  const a = r.analysis;
-  const pageWidthPt = page.getViewport({scale:1}).width;
+  const vp1 = page.getViewport({scale:1});
+  const pw1 = vp1.width||1, ph1 = vp1.height||1;
+  const ts = (S.tplScale||1);   // 模板预览缩放：title_rect 存的 raw 像素除以它还原为模板页原始像素
+  const items=(S.itemsFull||[]).filter(x=>x.item_index>=0);
 
-  // 标题行得分：格式"得分：N"，放在PDF文字区最右端内侧(不溢出页面)。文本由 fillOverlays 统一填。
-  a.items.forEach((it, i)=>{
-    if(it.pageIndex===pageIndex && it.titleY!=null){
-      const rightX = (it.score_x!=null) ? it.score_x : (pageWidthPt - 52);
-      const pt = px2(rightX, it.titleY, vp);
-      const ov = document.createElement('div');
+  // 每题标题框旁显示"得分：N"
+  items.forEach((t,i)=>{
+    let tr={}; try{ tr=JSON.parse(t.title_rect||'{}'); }catch(e){}
+    if(tr.w && tr.h && (t.score_page||0)===pageIndex){
+      const ox=(tr.x||0)/ts, oy=(tr.y||0)/ts, ow=(tr.w||0)/ts;
+      const left=ox/pw1*vp.width, top=oy/ph1*vp.height, w=ow/pw1*vp.width;
+      const ov=document.createElement('div');
       ov.className = 'ov-score ov-title-score';
-      ov.style.left = (pt[0]-120) + 'px';
-      ov.style.top  = (pt[1]-22) + 'px';
-      ov.style.width = '120px'; ov.style.textAlign='right';
-      ov.dataset.jumpPage = pageIndex; ov.dataset.jumpY = it.titleY;
+      ov.style.left = (left + w - 100) + 'px';
+      ov.style.top  = (top - 14) + 'px';
+      ov.style.width = '100px'; ov.style.textAlign='right';
+      ov.dataset.itemIndex = i;
       wrap.appendChild(ov);
       r._rendered.titleOv.push({ node: ov, itemIndex: i });
     }
   });
 
-  // 统分区得分回填(第1页)
-  if(a.scoreCols && a.scoreCols.pageIndex===pageIndex){
-    const sc = a.scoreCols;
-    for(let i=0;i<sc.x.length;i++){
-      const pt = px2(sc.x[i], sc.y, vp);
-      const ov = document.createElement('div');
-      ov.className = 'ov-score ov-table-score';
-      ov.style.left = (pt[0]-6) + 'px';
-      ov.style.top  = (pt[1]-14) + 'px';
-      ov.style.width='24px'; ov.style.textAlign='center';
+  // 统分区总分（模板 item_index<0 的 total_region，第1页）
+  const total=(S.itemsFull||[]).find(x=>x.item_index<0);
+  if(total && pageIndex===0){
+    let ttr={}; try{ ttr=JSON.parse(total.total_region||'{}'); }catch(e){}
+    if(ttr.w && ttr.h){
+      const ox=(ttr.x||0)/ts, oy=(ttr.y||0)/ts, ow=(ttr.w||0)/ts;
+      const left=ox/pw1*vp.width, top=oy/ph1*vp.height, w=ow/pw1*vp.width;
+      const ov=document.createElement('div');
+      ov.className = 'ov-score ov-total-score';
+      ov.style.left = (left + w - 100) + 'px';
+      ov.style.top  = (top - 14) + 'px';
+      ov.style.width = '100px'; ov.style.textAlign='right';
       wrap.appendChild(ov);
-      r._rendered.tableOv.push(ov);
+      r._rendered.totalOv = ov;
     }
   }
 }
@@ -1045,8 +1070,7 @@ function fillOverlays(r){
   for(const t of r._rendered.titleOv){
     t.node.textContent = '得分：' + String(r.scores[t.itemIndex]||0);
   }
-  const vals = [...r.scores, total];
-  r._rendered.tableOv.forEach((node,i)=>{ node.textContent = String(vals[i]||0); });
+  if(r._rendered.totalOv) r._rendered.totalOv.textContent = '总分：' + String(total||0);
 }
 
 function refreshOverlays(r){
@@ -1066,13 +1090,15 @@ function markItemGraded(r, i){
 }
 function buildScoreRows(r){
   el.scoreRows.innerHTML = '';
-  const a = r.analysis;
+  const tpl=(S.itemsFull||[]).filter(x=>x.item_index>=0).sort((a,b)=>a.item_index-b.item_index);
   const inputs = [];
   const byItem = (S.gradeMode==='byItem');
   const target = byItem ? (S.itemCursor!=null?S.itemCursor:0) : -1;
-  a.items.forEach((it,i)=>{
+  // 若无模板则回退 analysis.items
+  const list = tpl.length ? tpl.map(t=>({name:t.item_name||('题'+(t.item_index+1)), max:(t.max_score!=null?t.max_score:0)})) : (r.analysis && r.analysis.items||[]).map((it,i)=>({name:it.name||('题'+(i+1)), max:(r.maxs&&r.maxs[i]!=null)?r.maxs[i]:it.max}));
+  list.forEach((it,i)=>{
     if(byItem && i!==target) return;   // 按题模式：只渲染当前题的打分框
-    const max = (r.maxs && r.maxs[i] != null) ? r.maxs[i] : it.max;
+    const max = it.max;
     const row = document.createElement('div');
     row.className = 'score-row';
     const nm = document.createElement('span'); nm.className='name'; nm.textContent = (i+1)+'. '+it.name;
@@ -1105,7 +1131,7 @@ function buildScoreRows(r){
 }
 function updateTotal(r){
   const total = r.scores.reduce((x,y)=>x+y,0);
-  const maxAll = r.analysis.items.reduce((x,y)=>x+y.max,0);
+  const maxAll = (r.maxs && r.maxs.length) ? r.maxs.reduce((x,y)=>x+(y||0),0) : 0;
   el.totalVal.textContent = total + ' / ' + maxAll;
   // P0-3：已批只由"提交"决定，满不满分都不自动标记已批
 }
@@ -1121,13 +1147,10 @@ function updateTotal(r){
 
 /* ==================== 定位：跳转到指定标题所在位置 ==================== */
 function jumpToItem(i){
-  const a = S.current && S.current.analysis;
-  if(!a) return;
-  const it = a.items[i];
-  if(!it || it.titleY==null){ setErr('第'+(i+1)+'项标题未能定位'); return; }
-  setErr('');
-  const el2 = document.querySelector(`.ov-title-score[data-jump-page="${it.pageIndex}"]`);
-  if(el2){ el2.scrollIntoView({behavior:'smooth', block:'center'}); }
+  const el2 = document.querySelector(`.ov-title-score[data-item-index="${i}"]`);
+  if(el2){ setErr(''); el2.scrollIntoView({behavior:'smooth', block:'center'}); return; }
+  // 该题模板定位未渲染（可能不在当前页）→ 尝试直接滚动到对应叠加层页
+  setErr('第'+(i+1)+'项标题未能定位（可手动翻页查看）');
 }
 
 /* ==================== 提交并切换到下一份报告 ==================== */
@@ -1449,11 +1472,26 @@ async function exportExcel(){
 /* —— 批阅概览（表格弹窗）与 帮助 —— */
 async function showOverview(){
   if(!S.reports.length){ setErr('还没有报告'); return; }
+  // 顶部：当前批阅报告的逐项明细（题名/满分/得分/总分）——原「成绩明细」合并至此
+  let prefix='';
+  const r=S.current;
+  if(r){
+    const tpl=(S.itemsFull||[]).filter(x=>x.item_index>=0).sort((a,b)=>a.item_index-b.item_index);
+    prefix += '<h3 style="margin:4px 0 8px">当前批阅：'+esc(r.name)+'</h3>';
+    prefix += '<table class="ov-table ov-detail"><thead><tr><th>题项</th><th>满分</th><th>得分</th></tr></thead><tbody>';
+    (tpl.length?tpl:[]).forEach((t,i)=>{
+      prefix += '<tr><td>'+(i+1)+'. '+esc(t.item_name||('题'+(i+1)))+'</td><td>'+(t.max_score!=null?t.max_score:0)+'</td><td>'+(r.scores&&r.scores[i]!=null?r.scores[i]:0)+'</td></tr>';
+    });
+    const total=r.scores?r.scores.reduce((a,b)=>a+(b||0),0):0;
+    const maxTotal=(r.maxs&&r.maxs.length)?r.maxs.reduce((a,b)=>a+(b||0),0):0;
+    prefix += '<tr class="ov-total-row"><td>总分</td><td>'+maxTotal+'</td><td>'+total+'</td></tr>';
+    prefix += '</tbody></table><hr style="margin:10px 0">';
+  }
   let rows;
   try { rows = await fetchAllGrades(); } catch(e){ setErr('读取成绩失败: '+e); return; }
   const items = gradesToTable(rows);
   const n = Math.max(0, ...items.map(it=>it.scores.length));
-  let h = '<table class="ov-table"><thead><tr><th>学号</th><th>姓名</th><th>班级</th>';
+  let h = prefix + '<table class="ov-table"><thead><tr><th>学号</th><th>姓名</th><th>班级</th>';
   for(let i=0;i<n;i++) h += '<th>第'+(i+1)+'项</th>';
   h += '<th>总分</th><th>满分</th><th>状态</th></tr></thead><tbody>';
   items.forEach(it=>{
