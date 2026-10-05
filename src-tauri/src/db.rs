@@ -436,13 +436,13 @@ pub fn list_reports(conn: &Connection, batch_id: i64) -> Result<Vec<ReportRec>, 
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| format!("解析报告失败: {e}"))
 }
 
-/// 保存批阅状态；snapshot.done=true 时视为提交固化
-pub fn save_state(conn: &Connection, report_id: i64, draft_json: &str, done: bool) -> Result<(), String> {
+/// 保存批阅状态；snapshot.done=true 时视为提交固化，并记录批阅教师
+pub fn save_state(conn: &Connection, report_id: i64, draft_json: &str, done: bool, teacher: &str) -> Result<(), String> {
     if done {
         conn.execute(
-            "UPDATE reports SET draft=?1, final_scores=?1, submit_status='submitted',
-             submitted_at=datetime('now','localtime'), updated_at=datetime('now','localtime') WHERE id=?2",
-            params![draft_json, report_id],
+            "UPDATE reports SET draft=?1, final_scores=?1, teacher=?2, submit_status='submitted',
+             submitted_at=datetime('now','localtime'), updated_at=datetime('now','localtime') WHERE id=?3",
+            params![draft_json, teacher, report_id],
         )
         .map(|_| ())
         .map_err(|e| format!("保存状态失败: {e}"))

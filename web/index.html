@@ -370,6 +370,36 @@
   #loginBox button { flex: 1; padding: 9px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
   #loginBox #btnLoginConfirm { background: #e07b39; color: #fff; }
   #loginBox #btnLoginCancel { background: #eef1f5; color: #555; }
+  /* —— 批改统计平均分 —— */
+  .stat-avg { margin-top: 8px; padding: 7px 9px; background: #f5f7fa; border-radius: 6px; font-size: 12px; color: #334155; line-height: 1.5; word-break: break-all; }
+  /* —— 设置面板 —— */
+  #settingsMask { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 102; }
+  #settingsBox { background: #fff; border-radius: 12px; width: 460px; max-height: 86vh; display: flex; flex-direction: column; box-shadow: 0 12px 40px rgba(0,0,0,.3); }
+  .st-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #eef1f5; }
+  .st-head h2 { font-size: 16px; color: #2b3a55; margin: 0; }
+  .st-close { background: none; border: none; font-size: 22px; color: #94a3b8; cursor: pointer; line-height: 1; }
+  .st-body { padding: 14px 20px; overflow: auto; }
+  .st-sec { margin-bottom: 16px; }
+  .st-sec-tt { font-size: 13px; font-weight: 600; color: #475569; margin-bottom: 8px; }
+  .st-radio { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: #334155; margin-bottom: 8px; cursor: pointer; }
+  .st-keys { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .st-keys td { padding: 4px 6px; border-bottom: 1px solid #f1f5f9; color: #475569; }
+  .st-keys kbd { background: #eef1f5; border: 1px solid #dbe1e8; border-radius: 4px; padding: 1px 6px; font-size: 11.5px; font-family: inherit; color: #334155; }
+  .st-hint { font-size: 12px; color: #64748b; background: #f5f7fa; padding: 8px 10px; border-radius: 6px; line-height: 1.5; }
+  .st-foot { padding: 12px 20px; border-top: 1px solid #eef1f5; display: flex; justify-content: flex-end; }
+  .st-foot button { padding: 8px 22px; border: none; border-radius: 6px; cursor: pointer; }
+  /* —— 成绩明细弹窗 —— */
+  #detailMask { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 102; }
+  #detailBox { background: #fff; border-radius: 12px; width: 640px; max-height: 84vh; display: flex; flex-direction: column; box-shadow: 0 12px 40px rgba(0,0,0,.3); }
+  .dt-head { display: flex; align-items: center; justify-content: space-between; padding: 15px 20px; border-bottom: 1px solid #eef1f5; }
+  .dt-head h2 { font-size: 16px; color: #2b3a55; margin: 0; }
+  .dt-close { background: none; border: none; font-size: 22px; color: #94a3b8; cursor: pointer; line-height: 1; }
+  .dt-wrap { padding: 14px 20px; overflow: auto; }
+  .dt-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .dt-table th { background: #f1f5f9; color: #475569; padding: 7px 8px; text-align: left; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+  .dt-table td { padding: 6px 8px; border-bottom: 1px solid #f1f5f9; color: #334155; }
+  .dt-foot { padding: 12px 20px; border-top: 1px solid #eef1f5; display: flex; justify-content: flex-end; gap: 8px; }
+  .dt-foot button { padding: 8px 18px; border: none; border-radius: 6px; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -528,13 +558,10 @@
     <span class="teacher" id="teacherLabel">未登录</span>
     <button id="btnLogin">切换教师</button>
     <button id="btnChangePwd">🔑 修改密码</button>
-    <button id="btnOpen">📂 打开PDF报告</button>
-    <button id="btnLoadFolder">📁 载入报告文件夹</button>
-    <button id="btnItems">✏️ 设置评分项</button>
+    <button id="btnSettings">⚙ 设置</button>
     <button id="btnOverview">📊 批阅概览</button>
     <button id="btnHelp">❓ 帮助</button>
     <div class="spacer"></div>
-    <select id="selStudent" style="display:none"></select>
   </div>
 
   <!-- 主体三栏 -->
@@ -549,6 +576,7 @@
         <span class="stat stat-done">已批：<span id="statDone">0</span></span>
         <span class="stat stat-pending">待批：<span id="statPending">0</span></span>
         <span class="stat stat-missing">待提交：<span id="statMissing">0</span></span>
+        <div id="statAvg" class="stat-avg"></div>
       </div>
     </aside>
 
@@ -571,9 +599,10 @@
       <div id="scoreRows"></div>
       <div id="totalRow"><span class="lbl">总分</span><span class="val" id="totalVal">0 / 100</span></div>
       <button class="btn-block primary" id="btnSubmitNext">提交并下一份 <span style="font-weight:400;opacity:.85">(Ctrl+Enter)</span></button>
-      <button class="btn-block primary" id="btnExport">导出带分PDF</button>
-      <button class="btn-block ghost" id="btnSaveRecord">导出成绩(Excel)</button>
-      <button class="btn-block ghost" id="btnExportJson">导出记录JSON</button>
+      <div class="row" style="gap:6px">
+        <button class="btn-block ghost" id="btnMarkBad" style="flex:1">❌ 标记交错</button>
+        <button class="btn-block ghost" id="btnDetail" style="flex:1">📋 成绩明细</button>
+      </div>
     </aside>
   </div>
 
@@ -585,6 +614,7 @@
 
   <input type="file" id="fileInput" accept="application/pdf,.pdf" style="display:none" multiple>
   <input type="file" id="dirInput" webkitdirectory style="display:none">
+  <button id="btnLoadFolder" style="display:none"></button>
 
   <!-- pdf.js 与 pdf-lib：本地优先，失败则回退CDN -->
   <script>
@@ -696,6 +726,48 @@
         <button id="abCommitBtn" class="primary">确定挂靠</button>
       </div>
       <div id="abErr" class="err"></div>
+    </div>
+  </div>
+
+  <!-- 设置面板 -->
+  <div id="settingsMask" style="display:none">
+    <div id="settingsBox">
+      <div class="st-head"><h2>⚙ 批阅设置</h2><button id="stClose" class="st-close">×</button></div>
+      <div class="st-body">
+        <div class="st-sec">
+          <div class="st-sec-tt">改分方式</div>
+          <label class="st-radio"><input type="radio" name="gradeMode" value="byPaper" checked> 按卷改（一份卷打完全部题再下一份）</label>
+          <label class="st-radio"><input type="radio" name="gradeMode" value="byItem"> 按题改（同一题改完全部卷再下一题）</label>
+        </div>
+        <div class="st-sec">
+          <div class="st-sec-tt">快捷键（单手，方向键区）</div>
+          <table class="st-keys">
+            <tr><td>报告下翻整页</td><td><kbd>PageDown</kbd></td></tr>
+            <tr><td>报告上翻整页</td><td><kbd>PageUp</kbd></td></tr>
+            <tr><td>报告向下五行</td><td><kbd>↓</kbd></td></tr>
+            <tr><td>报告向上五行</td><td><kbd>↑</kbd></td></tr>
+            <tr><td>上一题</td><td><kbd>←</kbd></td></tr>
+            <tr><td>下一题</td><td><kbd>→</kbd></td></tr>
+            <tr><td>确认当前题并进入下一项</td><td><kbd>Enter</kbd></td></tr>
+            <tr><td>提交当前卷并下一份</td><td><kbd>Ctrl+Enter</kbd></td></tr>
+            <tr><td>关闭预览/弹窗</td><td><kbd>Esc</kbd></td></tr>
+          </table>
+        </div>
+        <div class="st-hint">打分框定位：在预览区点选某个框 → 点预览新位置快速放置，或拖动框上下微调。只影响当前份报告。</div>
+      </div>
+      <div class="st-foot"><button id="stOk" class="primary">确定</button></div>
+    </div>
+  </div>
+
+  <!-- 成绩明细弹窗 -->
+  <div id="detailMask" style="display:none">
+    <div id="detailBox">
+      <div class="dt-head"><h2>📋 成绩明细（已批卷）</h2><button id="dtClose" class="dt-close">×</button></div>
+      <div id="dtTableWrap" class="dt-wrap"></div>
+      <div class="dt-foot">
+        <button id="dtExport" class="primary">导出CSV</button>
+        <button id="dtOk" class="ghost">关闭</button>
+      </div>
     </div>
   </div>
 

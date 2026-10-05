@@ -36,6 +36,7 @@ pub fn run() {
             commands::prep_overview,
             commands::open_external,
             commands::get_roster,
+            commands::mark_excluded,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -59,14 +59,13 @@ const el = {
   abCommitBtn: $('abCommitBtn'), abBackBtn: $('abBackBtn'), abErr: $('abErr'),
   pvMask: $('pvMask'), pvName: $('pvName'), pvInner: $('pvInner'), pvClose: $('pvClose'),
   attachSel: $('attachSel'), attachErr: $('attachErr'), btnAttachOk: $('btnAttachOk'), btnAttachCancel: $('btnAttachCancel'),
-  btnOpen: $('btnOpen'), btnLoadFolder: $('btnLoadFolder'),
+  btnLoadFolder: $('btnLoadFolder'),
   reportList: $('reportList'),
   statTotal: $('statTotal'), statDone: $('statDone'), statPending: $('statPending'),
   pdfHost: $('pdfHost'), pdfEmpty: $('pdfEmpty'),
   inpId: $('inpId'), inpName: $('inpName'), inpClass: $('inpClass'), inpExp: $('inpExp'),
   scoreRows: $('scoreRows'), totalVal: $('totalVal'),
   btnSubmitNext: $('btnSubmitNext'),
-  btnExport: $('btnExport'), btnSaveRecord: $('btnSaveRecord'), btnExportJson: $('btnExportJson'),
   stFile: $('stFile'), stDetect: $('stDetect'), stErr: $('stErr'),
   fileInput: $('fileInput'), dirInput: $('dirInput'),
   statMissing: $('statMissing'),
@@ -81,6 +80,10 @@ const el = {
   itemMask: $('itemMask'), tplPreview: $('tplPreview'), itemList: $('itemList'), btnItems: $('btnItems'),
   btnItemAdd: $('btnItemAdd'), btnItemSave: $('btnItemSave'), btnItemCancel: $('btnItemCancel'),
   btnTotalMode: $('btnTotalMode'), btnTitleMode: $('btnTitleMode'), btnBasicMode: $('btnBasicMode'), totalInfo: $('totalInfo'), irState: $('irState'), irTpl: $('irTpl'),
+  btnSettings: $('btnSettings'), btnMarkBad: $('btnMarkBad'), btnDetail: $('btnDetail'),
+  settingsMask: $('settingsMask'), stOk: $('stOk'), stClose: $('stClose'),
+  detailMask: $('detailMask'), detailTableWrap: $('detailTableWrap'), dtExport: $('dtExport'), dtOk: $('dtOk'), dtClose: $('dtClose'),
+  statAvg: $('statAvg'),
 };
 
 /* ==================== 批阅进度持久化（P0-1） ====================
@@ -488,7 +491,7 @@ el.abNextBtn.onclick = ()=>{ if(S_ATTACH.idx<S_ATTACH.list.length-1){ S_ATTACH.i
 el.abBackBtn.onclick = ()=>{ el.attachBatchMask.style.display='none'; refreshPrepOverview(); };
 el.btnPrepFolder.onclick=()=>{ if(el.btnLoadFolder.onclick) el.btnLoadFolder.onclick(); };
 el.btnPrepBack.onclick=()=>{ hidePrep(); S.teacher=''; localStorage.removeItem('loginUser'); el.loginMask.style.display='flex'; showLogin(); };
-el.btnPrepStart.onclick=()=>{
+el.btnPrepStart.onclick=async()=>{
   const range=document.querySelector('input[name="prepRange"]:checked');
   const rv = range ? range.value : 'increment';
   S.prepRange = rv;
@@ -503,9 +506,90 @@ el.btnPrepStart.onclick=()=>{
   } else { S.prepFilter=null; }
   setErr('');
   hidePrep();
-  if(S.reports && S.reports.length){ selectReport(0); setDetect('已进入批改'); }
-  else setDetect('已进入批改界面，请载入报告');
+  await loadReportsFromScope();
+  if(S.reports && S.reports.length){ selectReport(0); setDetect('已进入批改，共 '+S.reports.length+' 份'); }
+  else setDetect('批改范围内没有可批改的报告');
 };
+
+// —— 批改报告列表 = 准备阶段选定的批改范围（不多不少）
+async function loadReportsFromScope(){
+  const rows=(S.prepOv && S.prepOv.rows) || [];
+  let scoped = rows;
+  if(S.prepRange && S.prepRange!=='all' && S.prepFilter){ scoped = rows.filter(r=>S.prepFilter.has(r.key)); }
+  // 只保留有文件的（renamed 优先；无 renamed 用原始 source）；缺交的名单不进入批改
+  scoped = scoped.filter(r=> (r.renamed_path || r.path));
+  S.reports = scoped.map((row,i)=>{
+    const path = row.renamed_path || row.path;
+    const r={
+      id: 'scope_'+i+'_'+Date.now(),
+      name: path.split(/[\\/]/).pop() || (row.fname||('report'+i)),
+      path: path,
+      student: { no: row.stu_no||'', name: row.stu_name||'', cls: row.stu_cls||'', exp: row.report_name||'' },
+      missing: false,
+      done: !!(row.done),
+      _row: row,
+    };
+    initReportState(r);
+    if(!r.basic){ r.basic = { name:row.stu_name||'', id:row.stu_no||'', cls:row.stu_cls||'', exp:row.report_name||'' }; }
+    return r;
+  });
+  renderReportList();
+}
+/* ==================== 批改面板新增功能 ==================== */
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// —— 设置面板：改分方式 + 快捷键说明
+S.gradeMode = 'byPaper';
+el.btnSettings.onclick=()=>{ el.settingsMask.style.display='flex'; };
+const closeSettings=()=>{ el.settingsMask.style.display='none'; };
+el.stClose.onclick=closeSettings;
+el.stOk.onclick=()=>{
+  const m=document.querySelector('input[name="gradeMode"]:checked');
+  S.gradeMode = m ? m.value : 'byPaper';
+  closeSettings();
+  setDetect('改分方式：'+(S.gradeMode==='byItem'?'按题改':'按卷改'));
+};
+
+// —— 标记错误报告（交错）：两次点击确认，回退 excluded 并从列表移除
+el.btnMarkBad.onclick=async()=>{
+  const r=S.current; if(!r){ setErr('请先选择一份报告'); return; }
+  if(S.__confirmBad === r){ S.__confirmBad=null; }
+  else { S.__confirmBad=r; setErr('再点一次确认：将《'+r.name+'》标记为错误报告（交错）'); return; }
+  try{
+    if(window.__bridge && window.__bridge.markExcluded){ await window.__bridge.markExcluded(S.folder, r.name); }
+    const idx=S.reports.indexOf(r);
+    S.reports.splice(idx,1);
+    renderReportList();
+    if(S.reports.length){ selectReport(Math.min(idx, S.reports.length-1)); }
+    else { S.current=null; el.scoreRows.innerHTML=''; el.totalVal.textContent='0 / 0'; el.pdfHost.innerHTML='<div id="pdfEmpty"><div class="big">📭</div>批改范围内没有更多报告</div>'; }
+    setErr('');
+    setDetect('已标记《'+r.name+'》为错误报告（交错）');
+  }catch(e){ setErr('标记失败: '+(e&&e.message||e)); }
+};
+
+// —— 成绩明细弹窗（只读查看，导出统一到导出阶段）
+function openDetail(){
+  const done = S.reports.filter(r=>r.done && Array.isArray(r.scores));
+  const n = done.length ? done[0].scores.length : 0;
+  let h='<table class="dt-table"><thead><tr><th>姓名</th><th>学号</th><th>班级</th><th>报告名称</th>';
+  for(let i=0;i<n;i++) h+='<th>题'+(i+1)+'</th>';
+  h+='<th>总分</th></tr></thead><tbody>';
+  done.forEach(r=>{
+    const st=r.student||{};
+    h+='<tr><td>'+esc(st.name||'')+'</td><td>'+esc(st.no||'')+'</td><td>'+esc(st.cls||'')+'</td><td>'+esc((r._row&&r._row.report_name)||'')+'</td>';
+    const total=r.scores.reduce((a,b)=>a+b,0);
+    for(let i=0;i<n;i++) h+='<td>'+(r.scores[i]||0)+'</td>';
+    h+='<td><b>'+total+'</b></td></tr>';
+  });
+  h+='</tbody></table>';
+  el.detailTableWrap.innerHTML = done.length ? h : '<div style="padding:20px;color:#888">还没有已批卷的成绩明细</div>';
+  el.detailMask.style.display='flex';
+}
+el.btnDetail.onclick=openDetail;
+el.dtClose.onclick=()=>{ el.detailMask.style.display='none'; };
+el.dtOk.onclick=()=>{ el.detailMask.style.display='none'; };
+if(el.dtExport){ el.dtExport.style.display='none'; }   // 导出统一到导出阶段，明细弹窗只读
+
 window.prepBasicField = async function(){
   if(!S.folder){ setErr('请先选报告文件夹'); return; }
   if(!window.__bridge || !window.__bridge.readPdf){ setErr('仅 Tauri 模式支持'); return; }
@@ -520,8 +604,7 @@ window.openPrepImport = function(){ openWizard(); };
 initLibs();
 initLoginGate();
 
-/* ==================== 文件选择 ==================== */
-el.btnOpen.onclick = () => el.fileInput.click();
+/* ==================== 文件选择（报告由准备范围带出，此处仅保留隐藏的选文件夹入口） ==================== */
 el.btnLoadFolder.onclick = () => el.dirInput.click();
 
 el.fileInput.onchange = async (e) => {
@@ -584,6 +667,19 @@ function updateStats(){
   el.statDone.textContent = done;
   el.statPending.textContent = total - done - missing;
   el.statMissing.textContent = missing;
+  renderAvg();
+}
+// 每次提交后刷新：每题平均分 + 总评平均分（仅已批卷）
+function renderAvg(){
+  if(!el.statAvg) return;
+  const done = S.reports.filter(r=>r.done && Array.isArray(r.scores));
+  if(!done.length){ el.statAvg.textContent='提交后显示每题平均分与总评平均分'; return; }
+  const n = done[0].scores.length || 1;
+  const sums = new Array(n).fill(0);
+  done.forEach(r=>{ if(!r.scores) return; r.scores.forEach((v,i)=>{ if(i<n) sums[i]+= (v||0); }); });
+  const itemAvg = sums.map(s=> (s/done.length).toFixed(1));
+  const totalAvg = sums.reduce((a,b)=>a+b,0)/done.length;
+  el.statAvg.textContent = '每题均分 ' + itemAvg.join(' / ') + ' ｜ 总评均分 ' + totalAvg.toFixed(1);
 }
 
 /* ==================== 选中报告 & 检测 ==================== */
@@ -972,7 +1068,10 @@ function buildScoreRows(r){
   el.scoreRows.innerHTML = '';
   const a = r.analysis;
   const inputs = [];
+  const byItem = (S.gradeMode==='byItem');
+  const target = byItem ? (S.itemCursor!=null?S.itemCursor:0) : -1;
   a.items.forEach((it,i)=>{
+    if(byItem && i!==target) return;   // 按题模式：只渲染当前题的打分框
     const max = (r.maxs && r.maxs[i] != null) ? r.maxs[i] : it.max;
     const row = document.createElement('div');
     row.className = 'score-row';
@@ -1002,7 +1101,7 @@ function buildScoreRows(r){
     inputs.push(inp);
   });
   updateTotal(r);
-  S.scoreInputs = inputs;   // 供全局 ← → 键切换焦点
+  S.scoreInputs = inputs;   // 供全局 ← → 键切换焦点（按题模式仅当前题）
 }
 function updateTotal(r){
   const total = r.scores.reduce((x,y)=>x+y,0);
@@ -1037,6 +1136,7 @@ function allItemsGraded(r){
   return !!(r.activated && r.activated.length) && r.activated.every(a=>a===true);
 }
 function submitAndNext(){
+  if(S.gradeMode==='byItem'){ submitItemAndNext(); return; }
   const r = S.current;
   if(!r) return;
   if(!allItemsGraded(r)){
@@ -1067,7 +1167,50 @@ function submitAndNext(){
     setDetect('✅ 已提交《' + r.name + '》（共1份）');
   }
 }
+// —— 按题改：确认当前卷当前题 → 跳到当前题未完成的下一份卷；当前题全部完成 → 下一题
+function submitItemAndNext(){
+  const i = S.itemCursor!=null ? S.itemCursor : 0;
+  const r = S.current;
+  if(!r || !r.activated || r.activated[i]===true){ gotoNextByItem(i); return; }
+  r.activated[i] = true;
+  const inp = S.scoreInputs && S.scoreInputs[0];
+  if(inp){ inp.classList.remove('ungraded'); inp.classList.add('graded'); }
+  if(allItemsGraded(r)){ r.done=true; r.submitted=true; r.submittedAt=Date.now(); }   // 整卷全部题完成才算已批
+  saveState(r);
+  renderReportList();
+  gotoNextByItem(i);
+}
+function gotoNextByItem(i){
+  // 跳到当前题 i 未完成的第一份卷
+  for(let k=0;k<S.reports.length;k++){
+    const t=S.reports[k];
+    if(t.activated && !t.activated[i]){ selectReport(k); focusItem(i); setDetect('题'+(i+1)+'：已进入下一份'); return; }
+  }
+  // 当前题全部完成 → 下一题
+  const totalItems = (S.reports[0] && S.reports[0].activated) ? S.reports[0].activated.length : 0;
+  if(i+1 < totalItems){ S.itemCursor=i+1; selectReport(0); focusItem(i+1); setDetect('进入第 '+(i+2)+' 题'); }
+  else { setDetect('🎉 当前范围所有题目已批改完成'); }
+}
+function focusItem(i){ setTimeout(()=>{ if(S.scoreInputs && S.scoreInputs[i]){ S.scoreInputs[i].focus(); } }, 80); }
+
 el.btnSubmitNext.onclick = submitAndNext;
+
+/* ==================== 报告预览滚动（单手快捷键） ==================== */
+function pagePreview(dir){
+  const cs = Array.from(document.querySelectorAll('#pdfHost canvas, #pdfHost .page'));
+  if(!cs.length){ nudgePreview(dir>0?innerHeight*0.8:-(innerHeight*0.8)); return; }
+  const y = window.scrollY || document.documentElement.scrollTop || 0;
+  let target=null;
+  for(const c of cs){
+    const abs = c.getBoundingClientRect().top + y;
+    if(dir>0 && abs > y+10 && (target===null || abs<target)) target=abs;
+    if(dir<0 && abs < y-10) target=abs;   // 取最后一个在当前之上的
+  }
+  if(dir>0 && target===null) target = y + innerHeight*0.8;
+  if(dir<0 && target===null) target = Math.max(0, y - innerHeight*0.8);
+  window.scrollTo({ top: Math.max(0,target), behavior:'smooth' });
+}
+function nudgePreview(dy){ window.scrollBy(0, dy); }
 
 /* ==================== 全局键盘 ==================== */
 document.addEventListener('keydown', (e)=>{
@@ -1115,11 +1258,14 @@ document.addEventListener('keydown', (e)=>{
     return;
   }
 
-  // 上下方向键：焦点不在输入框时阻止预览区默认滚动
+  // 上下方向键：焦点不在输入框时微调滚动五行
   if(e.key === 'ArrowUp' || e.key === 'ArrowDown'){
-    if(!isInput){ e.preventDefault(); }
+    if(!isInput){ e.preventDefault(); nudgePreview(e.key==='ArrowDown'?75:-75); }
   }
-  // PgUp / PgDn：交给浏览器在 #center 滚动容器内自然翻页
+  // PgUp / PgDn：焦点不在输入框时翻整页
+  if((e.key==='PageUp'||e.key==='PageDown') && !isInput){
+    e.preventDefault(); pagePreview(e.key==='PageDown'?1:-1);
+  }
 });
 
 /* ==================== 导出 ==================== */
@@ -1225,7 +1371,7 @@ async function exportScoredPdf(){
     setErr('导出失败: ' + (e && e.message ? e.message : e));
   }
 }
-el.btnExport.onclick = exportScoredPdf;
+/* 导出已移至导出阶段（批改面板不再涉及导出） */
 
 function buildRecord(){
   const r = S.current;
@@ -1298,7 +1444,7 @@ async function exportExcel(){
     new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
   setErr(''); setDetect('已导出全部成绩Excel（'+items.length+'人）');
 }
-el.btnSaveRecord.onclick = exportExcel;
+/* 导出已移至导出阶段（批改面板不再涉及导出） */
 
 /* —— 批阅概览（表格弹窗）与 帮助 —— */
 async function showOverview(){
@@ -1342,7 +1488,7 @@ async function exportJson(){
     new Blob([JSON.stringify(buildRecord(),null,2)], {type:'application/json'}));
   setDetect('✅ 已导出JSON');
 }
-el.btnExportJson.onclick = exportJson;
+/* 导出已移至导出阶段（批改面板不再涉及导出） */
 
 function downloadBlob(blob, name){
   const url = URL.createObjectURL(blob);

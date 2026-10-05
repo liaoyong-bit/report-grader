@@ -151,6 +151,7 @@
   window.__bridge.getBasicFields = async (folder) => { return await invoke('get_basic_fields', { folder }); };
   window.__bridge.saveReportOcr = async (folder, reportKey, no, name, cls, exp) => { await invoke('save_report_ocr', { folder, reportKey, no, name, class: cls, exp }); };
   window.__bridge.syncFolder = async (folder) => { return await invoke('sync_folder', { folder }); };
+  window.__bridge.markExcluded = async (folder, reportKey) => { await invoke('mark_excluded', { folder, reportKey }); };
   window.__bridge.prepOverview = async (folder) => { return await invoke('prep_overview', { folder }); };
   window.__bridge.getRoster = async (folder) => { return await invoke('get_roster', { folder }); };
   window.__bridge.openExternal = async (folder, path) => { return await invoke('open_external', { folder, path }); };

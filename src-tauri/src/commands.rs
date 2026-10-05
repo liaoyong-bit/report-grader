@@ -123,6 +123,7 @@ pub fn save_grading_state(
     let bid = db::find_batch_by_folder(&conn)?.map(|b| b.0).ok_or("未找到批次")?;
     let rid = db::report_id_by_key(&conn, bid, &report_key)?.ok_or("未找到报告")?;
     let done = snapshot.get("done").and_then(|v| v.as_bool()).unwrap_or(false);
+    let teacher = snapshot.get("teacher").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let json = serde_json::to_string(&snapshot).map_err(|e| format!("序列化失败: {e}"))?;
     dbglog(&format!("save_grading_state key={report_key} done={done} json_len={}", json.len()));
     let conn = db::open(&folder)?;
@@ -132,9 +133,19 @@ pub fn save_grading_state(
         Ok(None) => { dbglog(&format!("  !save 未找到报告 key={report_key}")); return Err("未找到报告".into()); }
         Err(e) => { dbglog(&format!("  !report_id_by_key err={e}")); return Err(format!("定位报告失败: {e}")); }
     };
-    let r = db::save_state(&conn, rid, &json, done);
-    match &r { Ok(_) => dbglog(&format!("  saved rid={rid} done={done}")), Err(e) => dbglog(&format!("  !save_state err={e}")) }
+    let r = db::save_state(&conn, rid, &json, done, &teacher);
+    match &r { Ok(_) => dbglog(&format!("  saved rid={rid} done={done} teacher={teacher}")), Err(e) => dbglog(&format!("  !save_state err={e}")) }
     r
+}
+
+/// 批改中标记某份报告为错误报告（交错），回退为 excluded，不计入批改/统计/导出
+#[tauri::command]
+pub fn mark_excluded(folder: String, report_key: String) -> Result<(), String> {
+    let conn = db::open(&folder)?;
+    let bid = db::find_batch_by_folder(&conn)?.map(|b| b.0).ok_or("未找到批次")?;
+    let rid = db::report_id_by_key(&conn, bid, &report_key)?.ok_or("未找到报告")?;
+    dbglog(&format!("mark_excluded key={report_key} rid={rid}"));
+    db::mark_excluded(&conn, rid)
 }
 
 /// 导出产物写入 output/ 目录
