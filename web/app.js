@@ -1958,19 +1958,25 @@ async function ensureOcrWorker(){
   const langPath = abs('./lib/ocr/');
   if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR 启动 workerPath='+workerPath);
   if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR createWorker 开始(blob模式)');
-  S_ocrWorker = await Tesseract.createWorker({
-    workerPath, corePath, langPath,
-    workerBlobURL: true,
-    logger: m=>{ if(window.__bridge && window.__bridge.log && m && m.status) window.__bridge.log('OCR '+m.status); },
-    errorHandler: e=>{ if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR worker 错误: '+String(e&&e.message||e)); }
-  }).catch(err=>{
-    if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR createWorker 失败: '+String(err&&err.message||err));
-    throw err;
-  });
+  const log=(m)=>{ if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR '+m); };
+  const tout=(ms)=> new Promise((_,rej)=>setTimeout(()=>rej(new Error('OCR 超时('+ms+'ms)')), ms));
+  let worker;
+  try{
+    worker = await Promise.race([
+      Tesseract.createWorker({
+        workerPath, corePath, langPath,
+        workerBlobURL: true,
+        logger: m=>{ if(m && m.status) log(m.status); },
+        errorHandler: e=>{ log('worker 错误: '+String(e&&e.message||e)); }
+      }),
+      tout(25000)
+    ]);
+  }catch(e){ log('createWorker 失败/超时: '+String(e&&e.message||e)); throw e; }
+  S_ocrWorker = worker;
   if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR createWorker OK');
-  await S_ocrWorker.loadLanguage('chi_sim');
+  try{ await Promise.race([ S_ocrWorker.loadLanguage('chi_sim'), tout(30000) ]); }catch(e){ log('loadLanguage 失败/超时: '+String(e&&e.message||e)); throw e; }
   if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR chi_sim 语言已加载');
-  await S_ocrWorker.initialize('chi_sim');
+  try{ await Promise.race([ S_ocrWorker.initialize('chi_sim'), tout(15000) ]); }catch(e){ log('initialize 失败/超时: '+String(e&&e.message||e)); throw e; }
   if(window.__bridge && window.__bridge.log) window.__bridge.log('OCR worker 就绪 chi_sim');
   return S_ocrWorker;
 }
@@ -2252,6 +2258,7 @@ async function runSourceVerify(){
   const roster = await window.__bridge.getRoster(S.folder).catch(()=>[]);
   const basicFields = await window.__bridge.getBasicFields(S.folder).catch(()=>[]);
   const need = rows.filter(r=>!r.matched);
+  need.sort((a,b)=>{ const ka=a.path.includes('扫描')||a.path.includes('scan')?1:0; const kb=b.path.includes('扫描')||b.path.includes('scan')?1:0; return ka-kb; });
   L('需OCR '+need.length+' 份');
   let ok=0;
   for(const r of need){
