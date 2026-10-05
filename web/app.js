@@ -452,18 +452,22 @@ async function matchTitleInReport(r, titleImgSrc){
 }
 
 async function autoLocateTitles(r){
+  const log=(m)=>{ if(window.__bridge && window.__bridge.log) window.__bridge.log('[定位] '+m); };
   if(!window.__bridge || !r || !r.analysis || !r.analysis.items) return;
   if(!S.itemsFull){
-    try{ S.itemsFull = await window.__bridge.getBatchItems(S.folder); }catch(e){ S.itemsFull=[]; }
+    try{ S.itemsFull = await window.__bridge.getBatchItems(S.folder); }
+    catch(e){ S.itemsFull=[]; log('getBatchItems失败(可能未设置评分项): '+e); }
   }
   const full=(S.itemsFull||[]).filter(x=>x.item_index>=0 && x.title_img);
-  if(!full.length) return;
+  log('itemsFull='+((S.itemsFull||[]).length)+' 含标题图='+full.length);
+  if(!full.length){ log('无标题图，跳过找图'); return; }
   // 已存定位 → 直接复用
   if(window.__bridge.getReportLocate){
     try{
       const j=await window.__bridge.getReportLocate(S.folder, r.name);
-      if(j){ const loc=JSON.parse(j); (loc.items||[]).forEach(li=>{ const it=r.analysis.items[li.item_index]; if(it){ it.titleY=li.titleY; it.pageIndex=li.pageIndex; if(li.titleX!=null) it.titleX=li.titleX; } }); return; }
-    }catch(e){}
+      if(j){ log('复用已存定位 '+j.length+'B'); const loc=JSON.parse(j); (loc.items||[]).forEach(li=>{ const it=r.analysis.items[li.item_index]; if(it){ it.titleY=li.titleY; it.pageIndex=li.pageIndex; if(li.titleX!=null) it.titleX=li.titleX; } }); return; }
+      else log('无已存定位，开始找图');
+    }catch(e){ log('读定位失败: '+e); }
   }
   // 找图定位
   const locItems=[]; let changed=false;
@@ -471,14 +475,17 @@ async function autoLocateTitles(r){
     const it=r.analysis.items[tpl.item_index]; if(!it) continue;
     if(it.titleY!=null){ locItems.push({item_index:tpl.item_index, titleY:it.titleY, pageIndex:it.pageIndex, titleX:it.titleX}); continue; }
     const found=await matchTitleInReport(r, tpl.title_img);
+    log('题'+tpl.item_index+' 匹配avg='+(found?found.avg.toFixed(0):'null')+' 命中='+(!!(found&&found.avg<60)));
     if(found && found.avg<60){
       it.titleY=found.yUser; it.pageIndex=found.pageIndex; it.titleX=found.xUser;
       locItems.push({item_index:tpl.item_index, titleY:it.titleY, pageIndex:it.pageIndex, titleX:it.titleX});
       changed=true;
     }
   }
+  log('找图完成 命中='+locItems.length+' 变化='+changed);
   if(changed && window.__bridge.saveReportLocate){
-    try{ await window.__bridge.saveReportLocate(S.folder, r.name, JSON.stringify({items:locItems})); }catch(e){}
+    const json=JSON.stringify({items:locItems});
+    try{ await window.__bridge.saveReportLocate(S.folder, r.name, json); log('已保存定位 len='+json.length); }catch(e){ log('保存定位失败: '+e); }
     await renderPages(r);   // 重建，让打分区出现在定位后的标题行
   }
 }
