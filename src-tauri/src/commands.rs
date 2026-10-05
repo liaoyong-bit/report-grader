@@ -431,12 +431,23 @@ fn ocr_file(path: &str) -> Result<String, String> {
     use windows::Graphics::Imaging::BitmapDecoder;
     use windows::Globalization::Language;
     let hpath = HSTRING::from(path);
-    let engine = OcrEngine::TryCreateFromUserProfileLanguages()
-        .or_else(|_| {
-            let lang = Language::CreateLanguage(&HSTRING::from("zh-CN"))?;
-            OcrEngine::TryCreateFromLanguage(&lang)
-        })
-        .map_err(|e| format!("创建 OCR 引擎失败（请确认系统已安装中文 OCR 语言包）: {e}"))?;
+    let mut diag = String::new();
+    let engine = (|| -> Result<OcrEngine, String> {
+        match OcrEngine::TryCreateFromUserProfileLanguages() {
+            Ok(e) => return Ok(e),
+            Err(e) => diag.push_str(&format!("用户语言引擎失败:{e}; ")),
+        }
+        for tag in ["zh-CN", "zh-Hans-CN", "zh-SG", "en-US", "zh-HK"] {
+            match Language::CreateLanguage(&HSTRING::from(tag)) {
+                Ok(l) => match OcrEngine::TryCreateFromLanguage(&l) {
+                    Ok(e) => return Ok(e),
+                    Err(e) => diag.push_str(&format!("{tag}:{e}; ")),
+                },
+                Err(e) => diag.push_str(&format!("CreateLanguage({tag}):{e}; ")),
+            }
+        }
+        Err(format!("所有语言均无法创建 OCR 引擎。诊断:{diag}"))
+    })()?;
     let file = StorageFile::GetFileFromPathAsync(&hpath)
         .map_err(|e| format!("打开文件失败: {e}"))?
         .get()
