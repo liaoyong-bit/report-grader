@@ -55,6 +55,8 @@ const el = {
   pvSelbar: $('pvSelbar'), prepTable: $('prepTable'), prepTbody: $('prepTbody'), prepStats: $('prepStats'),
   prepRoster: $('prepRoster'), btnPrepBack: $('btnPrepBack'), btnPrepStart: $('btnPrepStart'),
   attachMask: $('attachMask'), attachBox: $('attachBox'), attachFile: $('attachFile'),
+  locateMask: $('locateMask'), locateBody: $('locateBody'), locateTitle: $('locateTitle'),
+  locateSave: $('locateSave'), locateCancel: $('locateCancel'),
   attachBatchMask: $('attachBatchMask'), abPreview: $('abPreview'), abFileList: $('abFileList'),
   abCand: $('abCand'), abProgress: $('abProgress'), abPrevBtn: $('abPrevBtn'), abNextBtn: $('abNextBtn'),
   abCommitBtn: $('abCommitBtn'), abBackBtn: $('abBackBtn'), abErr: $('abErr'),
@@ -329,6 +331,22 @@ function renderPrepTable(ov, roster){
     addNodes(tr, rnm);
     const anyRen = mine.some(r=>r.renamed_path);
     const tdR=document.createElement('td'); tdR.appendChild(tagSpan(anyRen?'renamed':'unrenamed', anyRen?'已改名':(mine.length?'未改名':'—'))); tr.appendChild(tdR);
+    // 「已定位」列：待定位/已定位(自动)/人工定位 + 定位按钮（只对有改名版的报告）
+    const locR = mine.find(x=>x.renamed_path);
+    const tdL=document.createElement('td');
+    if(locR){
+      const st=locR.locate_status||'pending';
+      const lcls = st==='auto'?'done':(st==='manual'?'manual':'todo');
+      const ltxt = st==='auto'?'已定位':(st==='manual'?'人工定位':'待定位');
+      tdL.appendChild(tagSpan(lcls,ltxt));
+      if(st==='pending'){
+        const lb=document.createElement('button'); lb.className='opbtn locate'; lb.textContent='定位';
+        lb.title='人工定位：拖动蓝框到每题标题行';
+        lb.onclick=()=>{ manualLocate(locR); };
+        tdL.appendChild(lb);
+      }
+    } else { tdL.appendChild(tagSpan('todo','—')); }
+    tr.appendChild(tdL);
     const tdM=document.createElement('td'); tdM.appendChild(tagSpan(mine.length?'mat':'new', mine.length?'已挂靠':'未交')); tr.appendChild(tdM);
     const anyDone=mine.some(r=>r.done); const anyGraded=mine.some(r=>r.graded);
     const tdG=document.createElement('td'); tdG.appendChild(tagSpan(anyDone?'done':'todo', anyDone?'已批':(mine.length?(anyGraded?'部分':'待批'):'—'))); tr.appendChild(tdG);
@@ -341,7 +359,7 @@ function renderPrepTable(ov, roster){
 
   const unmatch = rows.filter(r=>!r.matched);
   if(unmatch.length){
-    const hr=document.createElement('tr'); const htd=document.createElement('td'); htd.colSpan=11;
+    const hr=document.createElement('tr'); const htd=document.createElement('td'); htd.colSpan=12;
     htd.style.cssText='padding:8px 10px;background:#fff6e5;color:#b45309;font-weight:600';
     htd.textContent='▼ 未匹配原始报告（OCR 后仍对不上名单，请手动挂靠或标记错误）';
     hr.appendChild(htd); tbody.appendChild(hr);
@@ -352,6 +370,7 @@ function renderPrepTable(ov, roster){
       addNodes(tr, [mkSrc(r)]);
       addNodes(tr, []);
       const tdR=document.createElement('td'); tdR.appendChild(tagSpan('unrenamed','未改名')); tr.appendChild(tdR);
+      const tdL=document.createElement('td'); tdL.appendChild(tagSpan('todo','待定位')); tr.appendChild(tdL);
       const tdM=document.createElement('td'); tdM.appendChild(tagSpan('new','待挂靠')); tr.appendChild(tdM);
       const tdG=document.createElement('td'); tdG.appendChild(tagSpan('todo','待批')); tr.appendChild(tdG);
       const tdO=document.createElement('td');
@@ -402,7 +421,8 @@ function renderPrepSelbar(){
     el2.innerHTML = fieldTag('学号',have.no)+fieldTag('姓名',have.name)+fieldTag('班级',have.cls)+
       fieldTag('报告名称',have.exp)+fieldTag('题目与分值',have.items)+
       '<button onclick="window.__app.openItemSetup()">设置模板（框选）</button>'+
-      '<button onclick="window.__app.runSourceVerify()" style="margin-left:6px;background:#2563eb;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:13px">核对原始报告</button>';
+      '<button onclick="window.__app.runSourceVerify()" style="margin-left:6px;background:#2563eb;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:13px">核对原始报告</button>'+
+      '<button onclick="window.__app.runLocatePositions()" style="margin-left:6px;background:#0d9488;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:13px">定位批阅位置</button>';
   }).catch(()=>{ el2.innerHTML=''; });
 }
 async function openAttachOrView(r, doAttach){
@@ -1740,7 +1760,7 @@ window.__app = { S, el, reportLabel, reportState, renderReportList, updateStats,
   showUnmatched, setFile, setDetect, setErr, downloadBlob, buildRecord,
   openItemSetup, ensureItemsSetup,
   showPrep, hidePrep, refreshPrepOverview, openPrepImport, prepBasicField,
-  runSourceVerify };
+  runSourceVerify, runLocatePositions, manualLocate };
 
 //（注：内容由AI生成）
 /* ==================== 评分项模板设置（步骤一） ==================== */
@@ -2683,58 +2703,140 @@ async function runSourceVerify(){
   let renamedN=0;
   try{ renamedN = await window.__bridge.applyRenames(S.folder); L('改名 '+renamedN+' 份'); }catch(e){ L('改名失败 '+e); }
   refreshPrepOverview();
+  setDetect('✅ 核对完成'+(ok?('，自动挂靠 '+ok+' 份'):'')+(renamedN?('，改名 '+renamedN+' 份'):''));
+}
 
-  /* ---- 定位阶段：对已挂靠改名的报告，依次 文字版定位 → 扫描版定位，位置写库供批改直接复用 ---- */
+/* ---- 「定位批阅位置」按钮：只负责给已挂靠改名的报告定位打分框位置（纵向 titleY_pct），位置写库供批改直接复用 ----
+   第1步：文字版定位（完整标题串，只对有文字层的）；第2步：文字版定位不全的 + 无文字层(扫描版) */
+async function runLocatePositions(){
   const L2=(m)=>{ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[定位] '+m); };
+  if(!S.folder){ setErr('请先选报告文件夹'); return; }
   const rows2=(S.prepOv&&S.prepOv.rows)||[];
   const targets=rows2.filter(r=>r.matched && r.renamed_path);
   const tpl=(await window.__bridge.getBatchItems(S.folder).catch(()=>[]))||[];
   const itemTpl=tpl.filter(x=>x.item_index>=0).sort((a,b)=>a.item_index-b.item_index);
   L2('定位目标 '+targets.length+' 份, 模板题 '+itemTpl.length);
-  if(targets.length && itemTpl.length){
-    const saveLoc=async(key,items)=>{
-      const json=JSON.stringify({items});
-      try{ await window.__bridge.saveReportLocate(S.folder, key, json); L2('已保存 '+key+' len='+json.length); }
-      catch(e){ L2('保存定位失败 '+key+': '+e); }
-    };
-    // 进度条1：文字版定位（完整标题串，只对有文字层的）
-    const textNeed=[], scanNeed=[];
-    for(const t of targets){
-      if(await hasTextLayer(t.renamed_path)) textNeed.push(t); else scanNeed.push(t);
-    }
-    L2('文字层 '+textNeed.length+' 份, 扫描版 '+scanNeed.length+' 份');
-    const toScan=[];
-    if(textNeed.length){
-      showVerifyProgress(textNeed.length, '第1步：文字版定位');
-      for(const t of textNeed){
-        S._vpDone++; updateVerifyProgress();
-        const res=await locateReportTitlesText(t.renamed_path, itemTpl);
-        if(res.fully && res.items.length){ await saveLoc(t.renamed_path.split(/[\\/]/).pop(), res.items); }
-        else toScan.push(t);
-      }
-      hideVerifyProgress();
-    }
-    // 进度条2：扫描版定位（无文字层 + 文字层定位不全的）
-    const scanList=[...scanNeed, ...toScan];
-    if(scanList.length){
-      showVerifyProgress(scanList.length, '第2步：扫描版定位');
-      for(const t of scanList){
-        S._vpDone++; updateVerifyProgress();
-        const res=await locateReportTitlesScan(t.renamed_path, itemTpl);
-        const key=t.renamed_path.split(/[\\/]/).pop();
-        if(res.items.length){ await saveLoc(key, res.items); }
-        if(res.fullText && window.__bridge.saveScanText){
-          try{ await window.__bridge.saveScanText(S.folder, key, res.fullText); }catch(e){ L2('保存还原文本失败 '+key+': '+e); }
-        }
-      }
-      hideVerifyProgress();
-    }
-    refreshPrepOverview();
-    setDetect('✅ 核对完成：'+ok+' 份自动挂靠，定位 '+(textNeed.length+scanList.length)+' 份打分位置');
-  } else {
-    setDetect('✅ 核对完成'+(ok?('，自动挂靠 '+ok+' 份'):''));
+  if(!targets.length){ setDetect('没有待定位的报告，请先「核对原始报告」完成挂靠与改名'); return; }
+  if(!itemTpl.length){ setDetect('请先「设置模板（框选）」框选题目与分值并保存'); return; }
+  const saveLoc=async(key,items,source)=>{
+    const json=JSON.stringify({items, source:source||'auto'});
+    try{ await window.__bridge.saveReportLocate(S.folder, key, json); L2('已保存 '+key+' len='+json.length+' src='+(source||'auto')); }
+    catch(e){ L2('保存定位失败 '+key+': '+e); }
+  };
+  const textNeed=[], scanNeed=[];
+  for(const t of targets){
+    if(await hasTextLayer(t.renamed_path)) textNeed.push(t); else scanNeed.push(t);
   }
+  L2('文字层 '+textNeed.length+' 份, 扫描版 '+scanNeed.length+' 份');
+  const toScan=[];
+  let doneText=0, doneScan=0;
+  if(textNeed.length){
+    showVerifyProgress(textNeed.length, '第1步：文字版定位');
+    for(const t of textNeed){
+      S._vpDone++; updateVerifyProgress();
+      const res=await locateReportTitlesText(t.renamed_path, itemTpl);
+      if(res.fully && res.items.length){ await saveLoc(t.renamed_path.split(/[\\/]/).pop(), res.items, 'auto'); doneText++; }
+      else toScan.push(t);
+    }
+    hideVerifyProgress();
+  }
+  const scanList=[...scanNeed, ...toScan];
+  if(scanList.length){
+    showVerifyProgress(scanList.length, '第2步：扫描版定位');
+    for(const t of scanList){
+      S._vpDone++; updateVerifyProgress();
+      const res=await locateReportTitlesScan(t.renamed_path, itemTpl);
+      const key=t.renamed_path.split(/[\\/]/).pop();
+      if(res.items.length){ await saveLoc(key, res.items, 'auto'); doneScan++; }
+      if(res.fullText && window.__bridge.saveScanText){
+        try{ await window.__bridge.saveScanText(S.folder, key, res.fullText); }catch(e){ L2('保存还原文本失败 '+key+': '+e); }
+      }
+    }
+    hideVerifyProgress();
+  }
+  refreshPrepOverview();
+  setDetect('✅ 定位完成：自动定位 '+(doneText+doneScan)+' 份，未定位 '+(targets.length-doneText-doneScan)+' 份（可在核心表人工定位）');
 }
+
+/* ---- 人工定位兜底：对「待定位」的报告，拖动蓝框到每题标题行，只改纵向，横向沿用模板文字区右边缘(score_x) ---- */
+async function manualLocate(r){
+  if(!r || !r.renamed_path){ alert('该报告尚无改名版，无法人工定位'); return; }
+  if(!window.__bridge.readPdf){ alert('缺少渲染接口'); return; }
+  const L=(m)=>{ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[人工定位] '+m); };
+  try{
+    const arr = await window.__bridge.readPdf(S.folder, r.renamed_path);
+    const pdf = await pdfjsLib.getDocument({ data: arr }).promise;
+    const tpl = (await window.__bridge.getBatchItems(S.folder).catch(()=>[]))||[];
+    const itemTpl = tpl.filter(x=>x.item_index>=0).sort((a,b)=>a.item_index-b.item_index);
+    const body=el.locateBody; body.innerHTML='';
+    el.locateTitle.textContent='人工定位：'+(r.stu_no||'')+' '+(r.stu_name||'')+' '+(r.report_name||r.fname||'');
+    el.locateMask.style.display='flex';
+    const blocks=[];
+    for(let p=0;p<pdf.numPages;p++){
+      const page=await pdf.getPage(p+1);
+      const vp1=page.getViewport({scale:1});
+      const availW = Math.max(240, el.locateBody.clientWidth||600);
+      const scale=availW/vp1.width;
+      const vp=page.getViewport({scale});
+      const pg=document.createElement('div'); pg.className='loc-page'; pg.style.width=vp.width+'px';
+      const cv=document.createElement('canvas'); cv.width=vp.width; cv.height=vp.height; pg.appendChild(cv);
+      const ctx=cv.getContext('2d'); await page.render({canvasContext:ctx, viewport:vp}).promise;
+      itemTpl.forEach((t,i)=>{
+        let tr={}; try{ tr=JSON.parse(t.title_rect||'{}'); }catch(e){}
+        if(!tr.w || !tr.h || (t.score_page||0)!==p) return;
+        const isPct = tr.w<=1 && tr.h<=1;
+        const py = isPct? (tr.y||0) : (tr.y||0)/vp1.height;
+        // 横向固定：文字区右边缘 score_x（蓝框）；缺失回退红框右边缘
+        let xPct=null; const sx=t.score_x;
+        if(sx && sx>0 && sx<=1) xPct=sx; else if(sx && sx>1) xPct=sx/vp1.width;
+        if(xPct==null) xPct = isPct? (tr.x+tr.w) : (tr.x+tr.w)/vp1.width;
+        const blk=document.createElement('div'); blk.className='loc-block';
+        blk.style.left = (xPct*vp.width - 120) + 'px';
+        blk.style.width = '120px';
+        blk.style.top = (py*vp.height - 2) + 'px';
+        const tag=document.createElement('span'); tag.className='loc-tag'; tag.textContent='题'+(i+1);
+        blk.appendChild(tag); pg.appendChild(blk);
+        blocks.push({ blk, page, vp, item_index:i });
+      });
+      body.appendChild(pg);
+    }
+    // 拖动：只改纵向(top)，左右固定；用单一全局监听避免泄漏
+    let dragging=null, offY=0;
+    const onMove=(e)=>{
+      if(!dragging) return;
+      const pg=dragging.blk.parentElement;
+      const rect=pg.getBoundingClientRect();
+      const y=e.clientY-rect.top-offY;
+      const vp=dragging.vp;
+      dragging.blk.style.top=Math.max(0, Math.min(vp.height-4, y))+'px';
+    };
+    const onUp=()=>{ dragging=null; };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    blocks.forEach(b=>{
+      b.blk.addEventListener('mousedown',(e)=>{ dragging=b; offY=e.clientY-b.blk.getBoundingClientRect().top; e.preventDefault(); });
+    });
+    // 保存
+    el.locateSave.onclick=async ()=>{
+      const items=blocks.map(b=>{
+        const topPx=parseFloat(b.blk.style.top);
+        return { item_index:b.item_index, titleY_pct: Math.round((topPx/b.vp.height)*10000)/10000, pageIndex:b.page.pageIndex-0, titleX_pct:null, ocr_text:'' };
+      });
+      if(!items.length){ alert('没有可保存的题目位置'); return; }
+      const key=r.renamed_path.split(/[\\/]/).pop();
+      const json=JSON.stringify({ items, source:'manual', fully:true });
+      try{
+        await window.__bridge.saveReportLocate(S.folder, key, json);
+        L('已保存人工定位 '+key+' items='+items.length);
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        el.locateMask.style.display='none';
+        refreshPrepOverview();
+      }catch(e){ alert('保存失败: '+e); }
+    };
+  }catch(e){ alert('渲染失败: '+e); }
+}
+el.locateCancel.onclick=()=>{ el.locateMask.style.display='none'; };
 el.btnItemSave.onclick=async ()=>{
   const items=[];
   const ts=(S.tplScale||1);

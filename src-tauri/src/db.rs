@@ -1,8 +1,8 @@
 // 数据层：SQLite 四表（batches/students/reports/report_items）+ 目录常量
 use rusqlite::{params, Connection, OptionalExtension};
+use serde_json::Value as Json;
 use std::fs;
 use std::path::Path;
-
 pub const DATA_DIR: &str = "data";
 pub const SOURCE_DIR: &str = "source_files";
 pub const OUTPUT_DIR: &str = "output";
@@ -552,6 +552,7 @@ pub struct PrepRow {
     pub stu_no: String,
     pub stu_name: String,
     pub stu_cls: String,
+    pub locate_status: String, // pending(待定位) / auto(已自动定位) / manual(已人工定位)
     pub matched: bool, // 已挂靠到名单
     pub is_new: bool,  // 未挂靠 → 需挂靠/新增
     pub graded: bool,  // 已有打分
@@ -575,7 +576,7 @@ pub fn prep_overview(conn: &Connection, batch_id: i64) -> Result<PrepOverview, S
         let mut st = conn
             .prepare(
                 "SELECT r.id, r.orig_name, r.source_path, r.student_id, r.ocr_no, r.ocr_name, r.ocr_class, r.ocr_exp,
-                        r.report_name, r.renamed_path, r.submit_status,
+                        r.report_name, r.renamed_path, r.submit_status, r.locate_json,
                         EXISTS(SELECT 1 FROM report_items ri WHERE ri.report_id=r.id AND ri.score>0 AND ri.activated=1)
                  FROM reports r WHERE r.batch_id=?1 AND r.match_status IN ('matched','unmatched')
                  ORDER BY r.orig_name",
@@ -595,12 +596,13 @@ pub fn prep_overview(conn: &Connection, batch_id: i64) -> Result<PrepOverview, S
                     r.get::<_, String>(8)?,
                     r.get::<_, String>(9)?,
                     r.get::<_, String>(10)?,
-                    r.get::<_, bool>(11)?,
+                    r.get::<_, String>(11)?,
+                    r.get::<_, bool>(12)?,
                 ))
             })
             .map_err(|e| format!("读取准备盘点失败: {e}"))?;
         for row in rows {
-            let (rid, orig, src, sid, no, nm, cl, ex, rn, rnp, submit, graded) =
+            let (rid, orig, src, sid, no, nm, cl, ex, rn, rnp, submit, locj, graded) =
                 row.map_err(|e| format!("解析准备盘点失败: {e}"))?;
             let (sno, sname, scls) = match sid {
                 Some(sid) => match find_student_by_id(conn, sid)? {
@@ -608,6 +610,13 @@ pub fn prep_overview(conn: &Connection, batch_id: i64) -> Result<PrepOverview, S
                     None => (String::new(), String::new(), String::new()),
                 },
                 None => (String::new(), String::new(), String::new()),
+            };
+            let locate_status = {
+                let v: Json = serde_json::from_str(&locj).unwrap_or(Json::Null);
+                let n = v.get("items").and_then(|a| a.as_array()).map(|a| a.len()).unwrap_or(0);
+                if n == 0 { "pending".to_string() }
+                else if v.get("source").and_then(|s| s.as_str()) == Some("manual") { "manual".to_string() }
+                else { "auto".to_string() }
             };
             rows_out.push(PrepRow {
                 key: orig.clone(),
@@ -617,6 +626,7 @@ pub fn prep_overview(conn: &Connection, batch_id: i64) -> Result<PrepOverview, S
                 report_name: rn,
                 renamed_path: rnp,
                 stu_no: sno, stu_name: sname, stu_cls: scls,
+                locate_status,
                 matched: sid.is_some(),
                 is_new: sid.is_none(),
                 graded,
