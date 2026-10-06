@@ -1099,12 +1099,15 @@ function addOverlays(r, wrap, pageIndex, vp, page){
       let top;
       if(lc && lc.titleY_pct!=null && lc.pageIndex===pageIndex){ top = lc.titleY_pct*vp.height; }
       else { const py = isPct? (tr.y||0) : (tr.y||0)/ph1; top = py*vp.height; }
-      // 横向：优先 score_x（文字区右边缘/蓝框）；旧数据/缺失则回退红框右边缘
+      // 横向：优先已存定位的整页文字区右缘(titleX_pct)；其次 score_x（文字区右边缘/蓝框）；最后红框右边缘
       let xPct=null;
-      const sx = t.score_x;
-      if(sx && sx>0 && sx<=1){ xPct = sx; }
-      else if(sx && sx>1){ xPct = sx/pw1; }
-      if(xPct==null){ xPct = isPct ? (tr.x+tr.w) : (tr.x+tr.w)/pw1; }
+      if(lc && lc.titleX_pct!=null && lc.titleX_pct>0){ xPct = lc.titleX_pct; }
+      else {
+        const sx = t.score_x;
+        if(sx && sx>0 && sx<=1){ xPct = sx; }
+        else if(sx && sx>1){ xPct = sx/pw1; }
+        if(xPct==null){ xPct = isPct ? (tr.x+tr.w) : (tr.x+tr.w)/pw1; }
+      }
       const left = xPct*vp.width;
       const ov=document.createElement('div');
       ov.className = 'ov-score ov-title-score';
@@ -2553,7 +2556,7 @@ function locateTarget(it){
   if(!/分\)/.test(t) && it.max_score>0) t += '（'+it.max_score+'分）';
   return t.replace(/\s+/g,'');
 }
-// 在文字层找包含完整标题串的"标题行"（距顶比例存库）
+// 在文字层找包含完整标题串的"标题行"（距顶比例存库；横向统一为整页文字区右缘）
 async function findTitleInTextLayer(pdf, target, pageIdx){
   try{
     const page=await pdf.getPage(pageIdx+1);
@@ -2561,10 +2564,14 @@ async function findTitleInTextLayer(pdf, target, pageIdx){
     const lines=groupLines(items);
     const vp=page.getViewport({scale:1});
     const ph=vp.height||1, pw=vp.width||1;
+    // 整页文字区右缘：所有字(块) x+width 的最大值
+    let maxRight=0;
+    for(const l of lines){ for(const it of l.items){ const r=it.x+it.w; if(r>maxRight) maxRight=r; } }
+    const rightPct = pw>0 ? Math.round(maxRight/pw*10000)/10000 : null;
     for(const l of lines){
       const t=l.text.replace(/\s+/g,'');
       if(t.includes(target) && /^[一二三四五六七]、/.test(l.text.trim())){
-        return { pageIndex:pageIdx, titleY_pct: Math.round(l.y/ph*10000)/10000, titleX_pct: Math.round((l.items[0]?l.items[0].x:0)/pw*10000)/10000, ocr_text:'' };
+        return { pageIndex:pageIdx, titleY_pct: Math.round(l.y/ph*10000)/10000, titleX_pct: rightPct, ocr_text:'' };
       }
     }
   }catch(e){}
@@ -2593,14 +2600,31 @@ async function renderPageB64(pdf, pageIdx, scale){
   await page.render({canvasContext:canvas.getContext('2d'), viewport:vp}).promise;
   return canvas.toDataURL('image/png').split(',')[1];
 }
-// 扫描版定位：①框选位置OCR → ②全文OCR；返回命中位置(距顶/距左比例)与OCR文字
+// 扫描版定位：①整页OCR(scale3)逐行匹配标题 → 命中位置(标题行top, 整页文字区右缘right)；②框选区域OCR兜底；返回命中位置与OCR文字
 async function findTitleInScan(pdf, target, pageIdx, titleRectJson){
   const p=pageIdx||0;
+  const norm=(s)=>(s||'').replace(/\s+/g,'').replace(/[，。、；：（）()【】《》"'“”]/g,'');
+  const tn=norm(target);
+  let lines=[], maxRightPct=null;
+  // ① 整页 OCR（scale 3）：拿每行文本+坐标，并求整页文字区右缘
+  try{
+    const b64=await renderPageB64(pdf, p, 3);
+    lines=(await window.__bridge.ocrImageB64Words(b64).catch(()=>[]))||[];
+    let mr=0;
+    for(const l of lines){ const r=(l.right!=null?l.right:l.left)||0; if(r>mr) mr=r; }
+    maxRightPct = mr>0 ? mr : null;
+    for(const l of lines){
+      if(norm(l.text).includes(tn)){
+        return { pageIndex:p, titleY_pct: Math.round(l.top*10000)/10000, titleX_pct: (maxRightPct!=null?Math.round(maxRightPct*10000)/10000:null), ocr_text:l.text };
+      }
+    }
+  }catch(e){}
+  // ② 全文未命中 → 框选区域OCR（scale 3）精确兜底
   try{
     let rect={}; try{ rect=JSON.parse(titleRectJson||'{}'); }catch(e){}
     if(rect.x!=null && rect.y!=null && rect.w && rect.h){
       const page=await pdf.getPage(p+1);
-      const vp=page.getViewport({scale:2});
+      const vp=page.getViewport({scale:3});
       const px=Math.max(0,Math.floor(rect.x*vp.width)), py=Math.max(0,Math.floor(rect.y*vp.height));
       const pw=Math.max(4,Math.min(Math.floor(vp.width)-px,Math.ceil(rect.w*vp.width)));
       const ph=Math.max(4,Math.min(Math.floor(vp.height)-py,Math.ceil(rect.h*vp.height)));
@@ -2611,25 +2635,16 @@ async function findTitleInScan(pdf, target, pageIdx, titleRectJson){
       const c2=document.createElement('canvas'); c2.width=pw; c2.height=ph;
       c2.getContext('2d').putImageData(img,0,0);
       const b64=c2.toDataURL('image/png').split(',')[1];
-      const lines=(await window.__bridge.ocrImageB64Words(b64).catch(()=>[]))||[];
-      const hit=(lines||[]).find(x=>x.text.replace(/\s+/g,'').includes(target));
-      if(hit) return { pageIndex:p, titleY_pct: Math.round(hit.top*10000)/10000, titleX_pct: Math.round((hit.left!=null?hit.left:rect.x)*10000)/10000, ocr_text: hit.text };
-      // 框选区域未命中但识别出文字 → 用区域中心兜底
-      if((lines||[]).length){
-        return { pageIndex:p, titleY_pct: Math.round((rect.y+rect.h/2)*10000)/10000, titleX_pct: Math.round(rect.x*10000)/10000, ocr_text: (lines||[]).map(x=>x.text).join('') };
+      const rlines=(await window.__bridge.ocrImageB64Words(b64).catch(()=>[]))||[];
+      const hit=(rlines||[]).find(x=>norm(x.text).includes(tn));
+      if(hit) return { pageIndex:p, titleY_pct: Math.round(hit.top*10000)/10000, titleX_pct: (maxRightPct!=null?Math.round(maxRightPct*10000)/10000:null), ocr_text: hit.text };
+      if((rlines||[]).length){
+        return { pageIndex:p, titleY_pct: Math.round((rect.y+rect.h/2)*10000)/10000, titleX_pct: (maxRightPct!=null?Math.round(maxRightPct*10000)/10000:null), ocr_text: (rlines||[]).map(x=>x.text).join('') };
       }
     }
   }catch(e){}
-  // 全文 OCR
-  try{
-    const b64=await renderPageB64(pdf, p, 2);
-    const lines=(await window.__bridge.ocrImageB64Words(b64).catch(()=>[]))||[];
-    const hit=(lines||[]).find(x=>x.text.replace(/\s+/g,'').includes(target));
-    if(hit) return { pageIndex:p, titleY_pct: Math.round(hit.top*10000)/10000, titleX_pct: Math.round((hit.left!=null?hit.left:0.5)*10000)/10000, ocr_text: hit.text };
-    // 未命中标题，仍返回全文文字（还原文本资产用）
-    return { pageIndex:p, titleY_pct: null, titleX_pct: null, ocr_text: (lines||[]).map(x=>x.text).join('\n') };
-  }catch(e){}
-  return null;
+  // ③ 全部未命中 → 返回还原文本（位置空）
+  return { pageIndex:p, titleY_pct: null, titleX_pct: null, ocr_text: (lines||[]).map(x=>x.text).join('\n') };
 }
 // 扫描版定位整份报告
 async function locateReportTitlesScan(path, tpl){
@@ -2735,7 +2750,7 @@ async function runLocatePositions(){
     for(const t of textNeed){
       S._vpDone++; updateVerifyProgress();
       const res=await locateReportTitlesText(t.renamed_path, itemTpl);
-      if(res.fully && res.items.length){ await saveLoc(t.renamed_path.split(/[\\/]/).pop(), res.items, 'auto'); doneText++; }
+      if(res.fully && res.items.length){ await saveLoc(t.key, res.items, 'auto'); doneText++; }
       else toScan.push(t);
     }
     hideVerifyProgress();
@@ -2746,10 +2761,11 @@ async function runLocatePositions(){
     for(const t of scanList){
       S._vpDone++; updateVerifyProgress();
       const res=await locateReportTitlesScan(t.renamed_path, itemTpl);
-      const key=t.renamed_path.split(/[\\/]/).pop();
-      if(res.items.length){ await saveLoc(key, res.items, 'auto'); doneScan++; }
+      const locKey=t.key;                    // 数据库 report_key（原始文件名）
+      const assetKey=t.renamed_path.split(/[\\/]/).pop();   // 改名文件名（还原文本资产名）
+      if(res.items.length){ await saveLoc(locKey, res.items, 'auto'); doneScan++; }
       if(res.fullText && window.__bridge.saveScanText){
-        try{ await window.__bridge.saveScanText(S.folder, key, res.fullText); }catch(e){ L2('保存还原文本失败 '+key+': '+e); }
+        try{ await window.__bridge.saveScanText(S.folder, assetKey, res.fullText); }catch(e){ L2('保存还原文本失败 '+assetKey+': '+e); }
       }
     }
     hideVerifyProgress();
@@ -2823,7 +2839,7 @@ async function manualLocate(r){
         return { item_index:b.item_index, titleY_pct: Math.round((topPx/b.vp.height)*10000)/10000, pageIndex:b.page.pageIndex-0, titleX_pct:null, ocr_text:'' };
       });
       if(!items.length){ alert('没有可保存的题目位置'); return; }
-      const key=r.renamed_path.split(/[\\/]/).pop();
+      const key=r.key;                     // 数据库 report_key（原始文件名）
       const json=JSON.stringify({ items, source:'manual', fully:true });
       try{
         await window.__bridge.saveReportLocate(S.folder, key, json);
