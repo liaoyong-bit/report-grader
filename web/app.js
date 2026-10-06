@@ -2820,17 +2820,43 @@ async function locateReportTitlesScan(path, tpl){
   try{
     const bytes=await window.__bridge.readPdf(S.folder, path);
     const pdf=await pdfjsLib.getDocument({data:bytes.slice(0)}).promise;
-    const locItems=[]; let fully=true; const textParts=[];
-    for(const it of tpl){
-      const target=locateTarget(it);
-      const f=await findTitleInScan(pdf, target, it.score_page||0, it.title_rect);
-      if(f){
-        locItems.push({item_index:it.item_index, pageIndex:f.pageIndex, titleY_pct:f.titleY_pct, titleX_pct:f.titleX_pct, ocr_text:f.ocr_text||''});
-        if(f.titleY_pct==null) fully=false;
-        if(f.ocr_text) textParts.push(f.ocr_text);
-      } else fully=false;
+    const norm=(s)=>(s||'').replace(/\s+/g,'').replace(/[，。、；：（）()【】《》"'“”]/g,'');
+    const locItems=[]; let fully=true;
+    const allRows=[]; let pageRight=null;
+    // 全页逐行 OCR（从第一页起，完整还原文本 + 跨页定位）
+    for(let p=0;p<pdf.numPages;p++){
+      let ana=null; try{ ana=await analyzePage(pdf,p,2); }catch(e){}
+      const lines=(ana&&ana.textLines)||[];
+      let exp=0.004; try{ const vp0=await (await pdf.getPage(p+1)).getViewport({scale:4}); exp=Math.max(0.0005,3/vp0.height); }catch(e){}
+      for(const ln of lines){
+        const top=Math.max(0,ln.top-exp);
+        const h=Math.min(1-top,(ln.bottom-ln.top)+2*exp);
+        const ab64=await renderAreaB64(pdf,p,0.02,top,0.96,Math.max(h,0.01),4);
+        const l=(await window.__bridge.ocrImageB64Words(ab64).catch(()=>[]))||[];
+        const t=(l||[]).map(x=>x.text).join('');
+        let r=0; for(const w of l){ const rr=0.02+((w.right!=null?w.right:w.left)||0)*0.96; if(rr>r) r=rr; }
+        if(r>0 && (pageRight==null || r>pageRight)) pageRight=r;
+        allRows.push({pageIndex:p, top:ln.top, bottom:ln.bottom, text:t});
+      }
     }
-    return {items:locItems, fully, fullText:textParts.join('\n')};
+    // 每题标题匹配（跨页，含跨行拼接与80%容错）
+    for(const it of tpl){
+      const tn=norm(locateTarget(it));
+      let hit=null;
+      for(let i=0;i<allRows.length;i++){
+        const nt1=norm(allRows[i].text);
+        if(nt1 && (nt1.includes(tn)||(tn.length>0&&longestContMatch(tn,nt1)/tn.length>=0.8))){ hit=allRows[i]; break; }
+        if(i+1<allRows.length){
+          const nt2=norm(allRows[i].text+allRows[i+1].text);
+          if(nt2 && (nt2.includes(tn)||(tn.length>0&&longestContMatch(tn,nt2)/tn.length>=0.8))){ hit=allRows[i]; break; }
+        }
+      }
+      if(hit){
+        locItems.push({item_index:it.item_index, pageIndex:hit.pageIndex, titleY_pct:Math.round(hit.top*10000)/10000, titleX_pct:(pageRight!=null?Math.round(pageRight*10000)/10000:null), ocr_text:hit.text});
+      } else { locItems.push({item_index:it.item_index, pageIndex:null, titleY_pct:null, titleX_pct:null, ocr_text:''}); fully=false; }
+    }
+    const fullText=allRows.map(r=>r.text).join('\n');
+    return {items:locItems, fully, fullText};
   }catch(e){ return {items:[], fully:false, fullText:''}; }
 }
 // 探测 PDF 是否有文字层（首页文本量）
