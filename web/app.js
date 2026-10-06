@@ -2679,6 +2679,11 @@ async function runSourceVerify(){
   hideVerifyProgress();
   refreshPrepOverview();
 
+  // 第0步后：对已挂靠报告生成改名版（学号_姓名_班级_报告名称.pdf 复制到 renamed/），供定位与批改直接使用
+  let renamedN=0;
+  try{ renamedN = await window.__bridge.applyRenames(S.folder); L('改名 '+renamedN+' 份'); }catch(e){ L('改名失败 '+e); }
+  refreshPrepOverview();
+
   /* ---- 定位阶段：对已挂靠改名的报告，依次 文字版定位 → 扫描版定位，位置写库供批改直接复用 ---- */
   const L2=(m)=>{ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[定位] '+m); };
   const rows2=(S.prepOv&&S.prepOv.rows)||[];

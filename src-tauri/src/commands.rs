@@ -1,5 +1,6 @@
 // Tauri 命令层：前端经 tauri-bridge 调用的全部后端能力
 use crate::{db, scan};
+use rusqlite::params;
 use serde::Serialize;
 use std::fs;
 use std::path::Path;
@@ -582,6 +583,58 @@ pub fn save_scan_text(folder: String, name: String, text: String) -> Result<Stri
     let path = dir.join(format!("{}.txt", safe));
     fs::write(&path, text).map_err(|e| format!("写入还原文本失败: {e}"))?;
     Ok(path.to_string_lossy().into_owned())
+}
+
+/// 对已挂靠(matched)且尚未改名的报告生成改名版：用名单的 学号_姓名_班级_报告名称 构造文件名，
+/// 复制原始 PDF 到 renamed/ 下并写库（不改动原始文件）。返回本次改名份数。
+#[tauri::command]
+pub fn apply_renames(folder: String) -> Result<i32, String> {
+    let conn = db::open(&folder)?;
+    let bid = db::find_batch_by_folder(&conn)?.ok_or("当前文件夹尚未初始化批次")?.0;
+    let rdir = Path::new(&folder).join(db::RENAME_DIR);
+    fs::create_dir_all(&rdir).map_err(|e| format!("创建 renamed 目录失败: {e}"))?;
+    let mut st = conn
+        .prepare(
+            "SELECT r.id, r.source_path, r.report_name, r.orig_name,
+                    COALESCE(s.student_no,''), COALESCE(s.name,''), COALESCE(s.class,'')
+             FROM reports r LEFT JOIN students s ON s.id=r.student_id
+             WHERE r.batch_id=?1 AND r.match_status='matched' AND r.renamed_path=''",
+        )
+        .map_err(|e| format!("准备改名查询失败: {e}"))?;
+    let rows = st
+        .query_map(params![bid], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, String>(6)?,
+            ))
+        })
+        .map_err(|e| format!("读取改名清单失败: {e}"))?;
+    let mut n = 0i32;
+    for row in rows {
+        let (rid, src, rn, orig, no, name, cls) = row.map_err(|e| format!("解析改名清单失败: {e}"))?;
+        let exp = if rn.trim().is_empty() { orig.trim_end_matches(".pdf").to_string() } else { rn };
+        let raw = format!("{}_{}_{}_{}.pdf", no, name, cls, exp);
+        let fname: String = raw
+            .chars()
+            .map(|c| if "\\/:*?\"<>| ".contains(c) { '_' } else { c })
+            .collect();
+        if fname.trim().is_empty() { continue; }
+        let dst = rdir.join(&fname);
+        let src_full = Path::new(&folder).join(&src);
+        if src_full.exists() {
+            fs::copy(&src_full, &dst).map_err(|e| format!("复制改名文件失败 {}: {e}", fname))?;
+        }
+        let rel = format!("{}/{}", db::RENAME_DIR, fname);
+        db::set_renamed(&conn, rid, &rel).map_err(|e| format!("写改名库失败: {e}"))?;
+        n += 1;
+    }
+    dbglog(&format!("apply_renames 改名 {} 份", n));
+    Ok(n)
 }
 
 fn ocr_file_with_com(path: &str) -> Result<String, String> {

@@ -26,6 +26,7 @@ pub fn run() {
             commands::ocr_image_b64,
             commands::ocr_image_b64_words,
             commands::save_scan_text,
+            commands::apply_renames,
             commands::save_report_locate,
             commands::get_report_locate,
             commands::create_user,
