@@ -562,6 +562,7 @@ async function loadReportsFromScope(){
     const path = row.renamed_path || row.path;
     const r={
       id: 'scope_'+i+'_'+Date.now(),
+      key: row.key,   // 原始 report_key：定位存取统一以它为主键（与保存侧一致，勿用改名文件名）
       name: path.split(/[\\/]/).pop() || (row.fname||('report'+i)),
       path: path,
       student: { no: row.stu_no||'', name: row.stu_name||'', cls: row.stu_cls||'', exp: row.report_name||'' },
