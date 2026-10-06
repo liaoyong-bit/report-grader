@@ -2589,8 +2589,10 @@ async function findTitleInTextLayer(pdf, target, pageIdx){
     let first=null;
     for(const l of lines){
       const t=l.text.replace(/\s+/g,'');
-      const yPct=l.y/ph;
-      if(yPct>=0.6) continue;
+      // 行中心（顶+半高）：文字版定位与扫描版(行中心)对齐，避免偏上行高一半；各页缩放不同会放大偏上差异
+      const lh=Math.max.apply(null, l.items.map(it=>it.h||0))||0;
+      const yPct=(l.y + lh/2)/ph;
+      if(yPct>=0.7) continue;
       if(!isTitle(t)) continue;
       if(t.includes(target) || (bare && bare.length>1 && t.includes(bare))){
         first={ pageIndex:pageIdx, titleY_pct: Math.round(yPct*10000)/10000, titleX_pct: rightPct, ocr_text:'' };
