@@ -2729,6 +2729,16 @@ async function analyzePage(pdf, pageIdx, scale=2){
     grid
   };
 }
+// 最长连续公共子串长度（标题与识别文本），用于匹配容错
+function longestContMatch(a,b){
+  const m=a.length,n=b.length; if(!m||!n) return 0;
+  const dp=new Array(m+1); for(let i=0;i<=m;i++) dp[i]=new Array(n+1).fill(0);
+  let mx=0;
+  for(let i=1;i<=m;i++) for(let j=1;j<=n;j++){
+    if(a[i-1]===b[j-1]){ dp[i][j]=dp[i-1][j-1]+1; if(dp[i][j]>mx) mx=dp[i][j]; }
+  }
+  return mx;
+}
 // 扫描版定位：①像素结构分析(文字行+表格网格) → ②逐行OCR(一行一行送,含表格行带) → ③表格格内OCR补充 → ④跨行拼接匹配 → ⑤框选模板区域兜底
 async function findTitleInScan(pdf, target, pageIdx, titleRectJson){
   const p=pageIdx||0;
@@ -2776,13 +2786,13 @@ async function findTitleInScan(pdf, target, pageIdx, titleRectJson){
   // ④ 匹配标题：逐行 + 跨行拼接（标题若拆两行）
   rows.sort((a,b)=>a.top-b.top);
   for(let i=0;i<rows.length;i++){
-    const t1=norm(rows[i].text);
-    if(t1 && t1.includes(tn)){
+    const nt1=norm(rows[i].text);
+    if(nt1 && (nt1.includes(tn) || (tn.length>0 && longestContMatch(tn,nt1)/tn.length>=0.8))){
       return { pageIndex:p, titleY_pct: Math.round(rows[i].top*10000)/10000, titleX_pct: (pageRight!=null?Math.round(pageRight*10000)/10000:null), ocr_text:rows[i].text, pt:rows[i].pt };
     }
     if(i+1<rows.length){
-      const t2=norm(rows[i].text+rows[i+1].text);
-      if(t2 && t2.includes(tn)){
+      const nt2=norm(rows[i].text+rows[i+1].text);
+      if(nt2 && (nt2.includes(tn) || (tn.length>0 && longestContMatch(tn,nt2)/tn.length>=0.8))){
         return { pageIndex:p, titleY_pct: Math.round(rows[i].top*10000)/10000, titleX_pct: (pageRight!=null?Math.round(pageRight*10000)/10000:null), ocr_text:rows[i].text+rows[i+1].text, pt:rows[i].pt };
       }
     }
