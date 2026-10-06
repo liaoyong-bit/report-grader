@@ -1103,10 +1103,12 @@ function addOverlays(r, wrap, pageIndex, vp, page){
   // 每题：分数显示在标题行右端（文字区右边缘），只显示数字
   items.forEach((t,i)=>{
     let tr={}; try{ tr=JSON.parse(t.title_rect||'{}'); }catch(e){}
-    if(tr.w && tr.h && (t.score_page||0)===pageIndex){
+    const lc = (r._locate && r._locate[i]) || null;
+    // 画页优先用定位页(lc.pageIndex)，无定位回退模板框选页(score_page) —— 修复页码错位
+    const drawPg = (lc && lc.pageIndex!=null) ? lc.pageIndex : (t.score_page||0);
+    if(tr.w && tr.h && drawPg===pageIndex){
       const isPct = tr.w<=1 && tr.h<=1;
       // 纵向：优先读已存定位(titleY_pct 距顶比例)，没有则回退模板框选位置
-      const lc = (r._locate && r._locate[i]) || null;
       let top;
       if(lc && lc.titleY_pct!=null && lc.pageIndex===pageIndex){ top = lc.titleY_pct*vp.height; }
       else { const py = isPct? (tr.y||0) : (tr.y||0)/ph1; top = py*vp.height; }
@@ -2580,12 +2582,22 @@ async function findTitleInTextLayer(pdf, target, pageIdx){
     let maxRight=0;
     for(const l of lines){ for(const it of l.items){ const r=it.x+it.w; if(r>maxRight) maxRight=r; } }
     const rightPct = pw>0 ? Math.round(maxRight/pw*10000)/10000 : null;
+    // 宽松目标：完整标题串 + 去括号分数后的题名（页顶标题可能不带分数）
+    const bare = target.replace(/（[^）]*分）\s*$/,'').trim();
+    const isTitle=(txt)=>/^[一二三四五六七八九十]、/.test(txt.trim());
+    // 只匹配页面中上部(y<0.6)的标题行，避免误匹配页底统分区/评分表
+    let first=null;
     for(const l of lines){
       const t=l.text.replace(/\s+/g,'');
-      if(t.includes(target) && /^[一二三四五六七]、/.test(l.text.trim())){
-        return { pageIndex:pageIdx, titleY_pct: Math.round(l.y/ph*10000)/10000, titleX_pct: rightPct, ocr_text:'' };
+      const yPct=l.y/ph;
+      if(yPct>=0.6) continue;
+      if(!isTitle(t)) continue;
+      if(t.includes(target) || (bare && bare.length>1 && t.includes(bare))){
+        first={ pageIndex:pageIdx, titleY_pct: Math.round(yPct*10000)/10000, titleX_pct: rightPct, ocr_text:'' };
+        break;
       }
     }
+    return first;
   }catch(e){}
   return null;
 }
