@@ -472,6 +472,115 @@ fn ocr_b64_impl(b64: &str) -> Result<String, String> {
     r
 }
 
+// ============ OCR 带坐标（行级）—— 供扫描版标题定位 ============
+/// 识别整图并返回"行"列表 [{text, top(距顶0-1), left(距左0-1)}]，top/left 相对图片宽高归一化
+#[tauri::command]
+pub async fn ocr_image_b64_words(b64: String) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || ocr_words_impl(&b64))
+        .await
+        .map_err(|e| format!("OCR 任务失败: {e}"))?
+}
+fn ocr_words_impl(b64: &str) -> Result<serde_json::Value, String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .map_err(|e| format!("base64 解码失败: {e}"))?;
+    let tmp = std::env::temp_dir().join("rg_ocr_words_tmp.png");
+    std::fs::write(&tmp, &bytes).map_err(|e| format!("写临时图片失败: {e}"))?;
+    let r = ocr_words_with_com(&tmp.to_string_lossy());
+    let _ = std::fs::remove_file(&tmp);
+    r
+}
+fn ocr_words_with_com(path: &str) -> Result<serde_json::Value, String> {
+    use windows::Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED};
+    unsafe {
+        if let Err(e) = RoInitialize(RO_INIT_MULTITHREADED) {
+            return Err(format!("RoInitialize 失败: {e}"));
+        }
+    }
+    let r = ocr_words_file(path);
+    unsafe { RoUninitialize(); }
+    r
+}
+fn ocr_words_file(path: &str) -> Result<serde_json::Value, String> {
+    use windows::core::HSTRING;
+    use windows::Media::Ocr::OcrEngine;
+    use windows::Storage::{FileAccessMode, StorageFile};
+    use windows::Graphics::Imaging::BitmapDecoder;
+    use windows::Globalization::Language;
+    let hpath = HSTRING::from(path);
+    let mut diag = String::new();
+    let engine = (|| -> Result<OcrEngine, String> {
+        match OcrEngine::TryCreateFromUserProfileLanguages() {
+            Ok(e) => return Ok(e),
+            Err(e) => diag.push_str(&format!("用户语言引擎失败:{e}; ")),
+        }
+        for tag in ["zh-CN", "zh-Hans-CN", "zh-SG", "en-US", "zh-HK"] {
+            match Language::CreateLanguage(&HSTRING::from(tag)) {
+                Ok(l) => match OcrEngine::TryCreateFromLanguage(&l) {
+                    Ok(e) => return Ok(e),
+                    Err(e) => diag.push_str(&format!("{tag}:{e}; ")),
+                },
+                Err(e) => diag.push_str(&format!("CreateLanguage({tag}):{e}; ")),
+            }
+        }
+        Err(format!("所有语言均无法创建 OCR 引擎。诊断:{diag}"))
+    })()?;
+    let file = StorageFile::GetFileFromPathAsync(&hpath)
+        .map_err(|e| format!("打开文件失败: {e}"))?
+        .get()
+        .map_err(|e| format!("等待打开文件失败: {e}"))?;
+    let stream = file
+        .OpenAsync(FileAccessMode::Read)
+        .map_err(|e| format!("打开流失败: {e}"))?
+        .get()
+        .map_err(|e| format!("等待打开流失败: {e}"))?;
+    let decoder = BitmapDecoder::CreateAsync(&stream)
+        .map_err(|e| format!("创建解码器失败: {e}"))?
+        .get()
+        .map_err(|e| format!("等待解码器失败: {e}"))?;
+    let bmp = decoder
+        .GetSoftwareBitmapAsync()
+        .map_err(|e| format!("获取位图失败: {e}"))?
+        .get()
+        .map_err(|e| format!("等待位图失败: {e}"))?;
+    let res = engine
+        .RecognizeAsync(&bmp)
+        .map_err(|e| format!("识别失败: {e}"))?
+        .get()
+        .map_err(|e| format!("等待识别失败: {e}"))?;
+    let pw = bmp.PixelWidth() as f32;
+    let ph = bmp.PixelHeight() as f32;
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    for line in res.Lines().map_err(|e| format!("读取行失败: {e}"))? {
+        let rect = line.BoundingRect().map_err(|e| format!("读取行框失败: {e}"))?;
+        let top = if ph > 0.0 { rect.Y / ph } else { 0.0 };
+        let left = if pw > 0.0 { rect.X / pw } else { 0.0 };
+        let mut text = String::new();
+        for w in line.Words().map_err(|e| format!("读取词失败: {e}"))? {
+            text.push_str(&w.Text().map_err(|e| format!("读取词文本失败: {e}"))?.to_string());
+        }
+        if !text.trim().is_empty() {
+            out.push(serde_json::json!({"text": text, "top": top, "left": left}));
+        }
+    }
+    Ok(serde_json::Value::Array(out))
+}
+
+/// 保存扫描版全文 OCR 还原文本到"扫描版识别"目录（每份报告一个 .txt，作为资产）
+#[tauri::command]
+pub fn save_scan_text(folder: String, name: String, text: String) -> Result<String, String> {
+    let dir = Path::new(&folder).join("扫描版识别");
+    fs::create_dir_all(&dir).map_err(|e| format!("创建扫描版识别目录失败: {e}"))?;
+    let safe: String = name
+        .chars()
+        .map(|c| if "\\/:*?\"<>|".contains(c) { '_' } else { c })
+        .collect();
+    let path = dir.join(format!("{}.txt", safe));
+    fs::write(&path, text).map_err(|e| format!("写入还原文本失败: {e}"))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 fn ocr_file_with_com(path: &str) -> Result<String, String> {
     use windows::Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED};
     unsafe {
