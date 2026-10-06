@@ -2921,15 +2921,23 @@ async function locateReportTitlesScan(path, tpl){
       }
     }
     // 每题标题匹配（跨页，含跨行拼接与80%容错）
+    // 判定某行是否为"正文标题"：其下方(同页,限4行)应有"填写要求"或"评分标准"，以排除统分区表头(其下方无这些字样)
+    const isBodyTitle=(idx,row)=>{
+      for(let j=idx+1;j<allRows.length && j<=idx+4;j++){
+        if(allRows[j].pageIndex!==row.pageIndex) break;
+        if(/填写要求|评分标准/.test(allRows[j].text||'')) return true;
+      }
+      return false;
+    };
     for(const it of tpl){
       const tn=norm(locateTarget(it));
       let hit=null;
       for(let i=0;i<allRows.length;i++){
         const nt1=norm(allRows[i].text);
-        if(nt1 && (nt1.includes(tn)||(tn.length>0&&longestContMatch(tn,nt1)/tn.length>=0.8))){ hit=allRows[i]; break; }
+        if(nt1 && (nt1.includes(tn)||(tn.length>0&&longestContMatch(tn,nt1)/tn.length>=0.8)) && isBodyTitle(i,allRows[i])){ hit=allRows[i]; break; }
         if(i+1<allRows.length){
           const nt2=norm(allRows[i].text+allRows[i+1].text);
-          if(nt2 && (nt2.includes(tn)||(tn.length>0&&longestContMatch(tn,nt2)/tn.length>=0.8))){ hit=allRows[i]; break; }
+          if(nt2 && (nt2.includes(tn)||(tn.length>0&&longestContMatch(tn,nt2)/tn.length>=0.8)) && isBodyTitle(i,allRows[i])){ hit=allRows[i]; break; }
         }
       }
       if(hit){
@@ -3021,35 +3029,22 @@ async function runLocatePositions(){
     if(await hasTextLayer(t.renamed_path)) textNeed.push(t); else scanNeed.push(t);
   }
   L2('文字层 '+textNeed.length+' 份, 扫描版 '+scanNeed.length+' 份');
-  const toScan=[];
-  let doneText=0, doneScan=0;
-  if(textNeed.length){
-    showVerifyProgress(textNeed.length, '第1步：文字版定位');
-    for(const t of textNeed){
-      S._vpDone++; updateVerifyProgress();
-      const res=await locateReportTitlesText(t.renamed_path, itemTpl);
-      if(res.fully && res.items.length){ await saveLoc(t.key, res.items, 'auto'); doneText++; }
-      else toScan.push(t);
+  // 统一走"像素逐行扫描+OCR"：文字版/扫描版一视同仁，跨页搜索不依赖score_page(解决页码偏移/内容撑页)
+  showVerifyProgress(targets.length, '定位批阅位置：逐行扫描+OCR（跨页）');
+  let doneN=0;
+  for(const t of targets){
+    S._vpDone++; updateVerifyProgress();
+    const res=await locateReportTitlesScan(t.renamed_path, itemTpl);
+    const locKey=t.key;                    // 数据库 report_key（原始文件名）
+    const assetKey=t.renamed_path.split(/[\\/]/).pop();   // 改名文件名（还原文本资产名）
+    if(res.items.length){ await saveLoc(locKey, res.items, 'auto'); doneN++; }
+    if(res.fullText && window.__bridge.saveScanText){
+      try{ await window.__bridge.saveScanText(S.folder, assetKey, res.fullText); }catch(e){ L2('保存还原文本失败 '+assetKey+': '+e); }
     }
-    hideVerifyProgress();
   }
-  const scanList=[...scanNeed, ...toScan];
-  if(scanList.length){
-    showVerifyProgress(scanList.length, '第2步：扫描版定位');
-    for(const t of scanList){
-      S._vpDone++; updateVerifyProgress();
-      const res=await locateReportTitlesScan(t.renamed_path, itemTpl);
-      const locKey=t.key;                    // 数据库 report_key（原始文件名）
-      const assetKey=t.renamed_path.split(/[\\/]/).pop();   // 改名文件名（还原文本资产名）
-      if(res.items.length){ await saveLoc(locKey, res.items, 'auto'); doneScan++; }
-      if(res.fullText && window.__bridge.saveScanText){
-        try{ await window.__bridge.saveScanText(S.folder, assetKey, res.fullText); }catch(e){ L2('保存还原文本失败 '+assetKey+': '+e); }
-      }
-    }
-    hideVerifyProgress();
-  }
+  hideVerifyProgress();
   refreshPrepOverview();
-  setDetect('✅ 定位完成：自动定位 '+(doneText+doneScan)+' 份，未定位 '+(targets.length-doneText-doneScan)+' 份（可在核心表人工定位）');
+  setDetect('✅ 定位完成：自动定位 '+doneN+' 份，未定位 '+(targets.length-doneN)+' 份（可在核心表人工定位）');
 }
 
 /* ---- 人工定位兜底：对「待定位」的报告，拖动蓝框到每题标题行，只改纵向，横向沿用模板文字区右边缘(score_x) ---- */
