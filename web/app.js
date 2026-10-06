@@ -2670,7 +2670,7 @@ async function analyzePage(pdf, pageIdx, scale=2){
     // 表格横线：黑像素聚成一个覆盖中间的大连续段(段长>行宽一半)，且段左右都有空白
     if(maxSeg> W*0.5 && segLeft> W*0.04 && segRight< W*0.96 && ratio>0.3){
       rowType[y]='hline';
-    } else if(ratio>0.0012 && ratio<0.55){   // 文字行（黑白交替）
+    } else if(ratio>0.0012 && maxSeg < W*0.5){   // 文字行（黑白交替，含粗体大标题；用最大连续段<行宽一半防填充块，不再按占比上限排除粗体标题）
       rowType[y]='text';
     }
   }
@@ -2691,13 +2691,25 @@ async function analyzePage(pdf, pageIdx, scale=2){
   // 字号换算：行带高 → A4(297mm) → pt（行距系数1.4）
   const mmPerPx=297/H;
   blocks.forEach(b=>{ b.pt=Math.round((b.bottom-b.top+1)*mmPerPx/0.3528/1.4*10)/10; });
-  // 竖线检测：相邻两根横杠之间的区域里找"垂直连续黑"列，并与上/下横杠同x(±容差)确认
+  // 表格分组：横杠之间有文字行视为同一表格；横杠之间无文字行(纯空白)为表格边界（区分连续多套表）
+  const hasTextIn=(a,b)=>{ for(const tb of textBands){ if(tb.top>a && tb.top<b) return true; } return false; };
+  const tGroups=[]; let cur=[];
+  for(let hi=0; hi<hlines.length; hi++){
+    cur.push(hlines[hi]);
+    if(hi+1<hlines.length){
+      const a=hlines[hi].bottom+1, b=hlines[hi+1].top-1;
+      if(a<b && !hasTextIn(a,b)){ tGroups.push(cur); cur=[]; }
+    }
+  }
+  if(cur.length) tGroups.push(cur);
+  // 竖线检测：每组表格内相邻横杠之间找"垂直连续黑"列，并与上/下横杠同x(±容差)确认
   // 区域从横杠下方过约3像素开始、到下一横杠上方3像素为止，避开横杠上下阴影
   const vlines=[];
-  if(hlines.length>=2){
-    const skip=Math.max(2, Math.round(H*0.0015));   // 约3px阴影带
-    for(let hi=0; hi<hlines.length-1; hi++){
-      const top=Math.min(hlines[hi].bottom+skip, H-1), bot=Math.max(hlines[hi+1].top-skip, top+1);
+  const skip=Math.max(2, Math.round(H*0.0015));   // 约3px阴影带
+  for(const grp of tGroups){
+    if(grp.length<2) continue;
+    for(let hi=0; hi<grp.length-1; hi++){
+      const top=Math.min(grp[hi].bottom+skip, H-1), bot=Math.max(grp[hi+1].top-skip, top+1);
       if(bot-top<1) continue;
       for(let x=1;x<W-1;x++){
         let c=0;
@@ -2707,10 +2719,10 @@ async function analyzePage(pdf, pageIdx, scale=2){
           let up=false, down=false;
           for(let dx=-n;dx<=n;dx++){
             const xx=x+dx; if(xx<0||xx>=W) continue;
-            if(!isBg((hlines[hi].top*W+xx)*4)) up=true;
-            if(!isBg((hlines[hi+1].bottom*W+xx)*4)) down=true;
+            if(!isBg((grp[hi].top*W+xx)*4)) up=true;
+            if(!isBg((grp[hi+1].bottom*W+xx)*4)) down=true;
           }
-          if(up && down){ vlines.push({x, top:hlines[hi].top, bottom:hlines[hi+1].bottom}); x++; }
+          if(up && down){ vlines.push({x, top:grp[hi].top, bottom:grp[hi+1].bottom}); x++; }
         }
       }
     }
@@ -2718,10 +2730,14 @@ async function analyzePage(pdf, pageIdx, scale=2){
   // 去重竖线（合并相邻 x）
   const vx=[];
   for(const v of vlines){ if(!vx.length || v.x-vx[vx.length-1].x>2) vx.push(v.x); }
-  // 网格：横杠 y 为行边界，竖线 x 为列边界
-  const grid = (hlines.length>=2 && vx.length>=2)
-    ? { rows: hlines.map(h=>({top:h.top/H, bottom:(h.bottom+1)/H})), cols: vx.map(x=>x/W) }
-    : null;
+  // 网格：每张表的横杠 y 为行边界，竖线 x 为列边界
+  const grids=[];
+  for(const grp of tGroups){
+    if(grp.length>=2 && vx.length>=2){
+      grids.push({ rows: grp.map(h=>({top:h.top/H, bottom:(h.bottom+1)/H})), cols: vx.map(x=>x/W) });
+    }
+  }
+  const grid = grids.length? grids[0] : null;
   return {
     textLines: blocks.map(b=>({top:Math.round(b.top/H*10000)/10000, bottom:Math.round((b.bottom+1)/H*10000)/10000, pt:b.pt})),
     hlines: hlines.map(h=>({top:Math.round(h.top/H*10000)/10000, bottom:Math.round((h.bottom+1)/H*10000)/10000})),
@@ -2852,7 +2868,9 @@ async function locateReportTitlesScan(path, tpl){
         }
       }
       if(hit){
-        locItems.push({item_index:it.item_index, pageIndex:hit.pageIndex, titleY_pct:Math.round(hit.top*10000)/10000, titleX_pct:(pageRight!=null?Math.round(pageRight*10000)/10000:null), ocr_text:hit.text});
+        // 纵向取该文字行"头尾像素行的中间值"（垂直中心）÷ 整页像素 = 百分比，更科学
+        const midY=(hit.top+hit.bottom)/2;
+        locItems.push({item_index:it.item_index, pageIndex:hit.pageIndex, titleY_pct:Math.round(midY*10000)/10000, titleX_pct:(pageRight!=null?Math.round(pageRight*10000)/10000:null), ocr_text:hit.text});
       } else { locItems.push({item_index:it.item_index, pageIndex:null, titleY_pct:null, titleX_pct:null, ocr_text:''}); fully=false; }
     }
     const fullText=allRows.map(r=>r.text).join('\n');
