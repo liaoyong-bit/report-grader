@@ -549,8 +549,8 @@ fn ocr_words_file(path: &str) -> Result<serde_json::Value, String> {
         .map_err(|e| format!("识别失败: {e}"))?
         .get()
         .map_err(|e| format!("等待识别失败: {e}"))?;
-    let pw = bmp.PixelWidth() as f32;
-    let ph = bmp.PixelHeight() as f32;
+    let pw = bmp.PixelWidth().unwrap_or(0) as f32;
+    let ph = bmp.PixelHeight().unwrap_or(0) as f32;
     let mut out: Vec<serde_json::Value> = Vec::new();
     for line in res.Lines().map_err(|e| format!("读取行失败: {e}"))? {
         let rect = line.BoundingRect().map_err(|e| format!("读取行框失败: {e}"))?;
