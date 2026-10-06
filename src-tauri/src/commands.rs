@@ -383,21 +383,30 @@ pub fn locate_init(folder: String, report_key: String, rows: Vec<serde_json::Val
 #[tauri::command]
 pub fn locate_set_ocr(folder: String, id: i64, text: String) -> Result<(), String> {
     let conn = db::open_locate(&folder)?;
-    db::locate_set_ocr(&conn, id, &text)
+    let r = db::locate_set_ocr(&conn, id, &text);
+    if let Err(ref e) = r { dbglog(&format!("locate_set_ocr id={id} ERR={e}")); }
+    r
 }
 
 /// 记录某行匹配到的题目索引(绑定 KEY=id)
 #[tauri::command]
 pub fn locate_set_match(folder: String, id: i64, item_index: i64) -> Result<(), String> {
     let conn = db::open_locate(&folder)?;
-    db::locate_set_match(&conn, id, item_index)
+    let r = db::locate_set_match(&conn, id, item_index);
+    if let Err(ref e) = r { dbglog(&format!("locate_set_match id={id} ERR={e}")); }
+    r
 }
 
 /// 读取某份报告全部定位行(含 KEY、页码、m-n 位置、OCR 文本、匹配结果)，供渲染与取位置
 #[tauri::command]
 pub fn locate_get_rows(folder: String, report_key: String) -> Result<Vec<serde_json::Value>, String> {
     let conn = db::open_locate(&folder)?;
-    db::locate_rows(&conn, &report_key)
+    let r = db::locate_rows(&conn, &report_key);
+    match &r {
+        Ok(rows) => dbglog(&format!("locate_get_rows key={report_key} rows={}", rows.len())),
+        Err(e) => dbglog(&format!("locate_get_rows key={report_key} ERR={e}")),
+    }
+    r
 }
 
 // ==================== 登录账号 ====================

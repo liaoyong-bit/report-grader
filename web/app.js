@@ -2979,6 +2979,7 @@ async function locateReportTitlesScan(path, tpl){
 
 // 落库版扫描定位：以数据库为唯一数据源。1)所有扫描行先编号(KEY=locate.sqlite自增id)入库；2)逐行OCR结果写回库；3)读库核对匹配，匹配到题目写回库；4)最后从库读取渲染/取位置(m-n取中值)
 async function locateReportTitlesScanDB(path, tpl, reportKey){
+  const LD=(m)=>{ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[定位DB] '+m); };
   try{
     const bytes=await window.__bridge.readPdf(S.folder, path);
     const pdf=await pdfjsLib.getDocument({data:bytes.slice(0)}).promise;
@@ -2986,15 +2987,17 @@ async function locateReportTitlesScanDB(path, tpl, reportKey){
     const items=[]; let fully=true;
     const bandList=[]; let pageRight=null;
     for(let p=0;p<pdf.numPages;p++){
-      let ana=null; try{ ana=await analyzePage(pdf,p,2); }catch(e){}
+      let ana=null; try{ ana=await analyzePage(pdf,p,2); }catch(e){ LD('analyzePage p'+p+' err '+e); }
       if(ana && ana.pageRight!=null && (pageRight==null || ana.pageRight>pageRight)) pageRight=ana.pageRight;
       const lines=(ana&&ana.textLines)||[];
       for(const ln of lines){
         bandList.push({pageIndex:p, top:ln.top, bottom:ln.bottom, left:ln.left!=null?ln.left:0.02, right:ln.right!=null?ln.right:0.98, cell:ln.cell||null});
       }
     }
+    LD('bandList len='+bandList.length+' pages='+pdf.numPages);
     // 1) 所有行先编号(KEY)入库
-    const ids=await window.__bridge.locateInit(S.folder, reportKey, bandList.map(b=>({pageIndex:b.pageIndex, top:b.top, bottom:b.bottom, left:b.left, right:b.right, cell:b.cell?JSON.stringify(b.cell):'{}'}))).catch(()=>[]);
+    const ids=await window.__bridge.locateInit(S.folder, reportKey, bandList.map(b=>({pageIndex:b.pageIndex, top:b.top, bottom:b.bottom, left:b.left, right:b.right, cell:b.cell?JSON.stringify(b.cell):'{}'}))).catch(e=>{ LD('locateInit ERR '+e); return []; });
+    LD('locateInit ids='+ids.length);
     // 2) 逐行OCR，结果写回库(绑定KEY=id)
     for(let i=0;i<ids.length && i<bandList.length;i++){
       const ln=bandList[i];
@@ -3003,12 +3006,14 @@ async function locateReportTitlesScanDB(path, tpl, reportKey){
       const h=Math.min(1-top,(ln.bottom-ln.top)+2*exp);
       const wd=Math.max(0.01,ln.right-ln.left);
       const ab64=await renderAreaB64(pdf,ln.pageIndex,ln.left,top,wd,Math.max(h,0.01),4);
-      const l=(await window.__bridge.ocrImageB64Words(ab64).catch(()=>[]))||[];
+      const l=(await window.__bridge.ocrImageB64Words(ab64).catch(e=>{ LD('ocr err i'+i+' '+e); return []; }))||[];
       const text=(l||[]).map(x=>x.text).join('');
-      await window.__bridge.locateSetOcr(S.folder, ids[i], text).catch(()=>{});
+      await window.__bridge.locateSetOcr(S.folder, ids[i], text).catch(e=>{ LD('setOcr ERR id'+ids[i]+' '+e); });
     }
+    LD('setOcr done '+ids.length);
     // 3) 从库读全部行，核对匹配，匹配结果写回库
-    const rows=await window.__bridge.locateGetRows(S.folder, reportKey).catch(()=>[])||[];
+    const rows=await window.__bridge.locateGetRows(S.folder, reportKey).catch(e=>{ LD('locateGetRows ERR '+e); return []; })||[];
+    LD('locateGetRows rows='+rows.length);
     const isBodyTitle=(idx,row)=>{
       for(let j=idx+1;j<rows.length && j<=idx+4;j++){
         if(rows[j].page_index!==row.page_index) break;
@@ -3028,16 +3033,17 @@ async function locateReportTitlesScanDB(path, tpl, reportKey){
         }
       }
       if(hit){
-        await window.__bridge.locateSetMatch(S.folder, hit.id, it.item_index).catch(()=>{});
+        await window.__bridge.locateSetMatch(S.folder, hit.id, it.item_index).catch(e=>{ LD('setMatch ERR '+e); });
         const midY=(hit.top+hit.bottom)/2;   // 该行 m-n 取中值
         items.push({item_index:it.item_index, pageIndex:hit.page_index, titleY_pct:Math.round(midY*10000)/10000, titleX_pct:(pageRight!=null?Math.round(pageRight*10000)/10000:null), ocr_text:hit.text});
       } else { items.push({item_index:it.item_index, pageIndex:null, titleY_pct:null, titleX_pct:null, ocr_text:''}); fully=false; }
     }
     // 4) 从库读取渲染用数据(含全局KEY=id)
-    const renderRows=await window.__bridge.locateGetRows(S.folder, reportKey).catch(()=>[])||[];
+    const renderRows=await window.__bridge.locateGetRows(S.folder, reportKey).catch(e=>{ LD('final getRows ERR '+e); return []; })||[];
+    LD('final rows='+renderRows.length+' items='+items.length+' fully='+fully);
     const fullText=(renderRows||[]).map(r=>r.text).join('\n');
     return {items, fully, fullText, rows: renderRows};
-  }catch(e){ return {items:[], fully:false, fullText:'', rows:[]}; }
+  }catch(e){ LD('locateReportTitlesScanDB CATCH '+e); return {items:[], fully:false, fullText:'', rows:[]}; }
 }
 // 探测 PDF 是否有文字层（首页文本量）
 async function hasTextLayer(path){
@@ -3147,7 +3153,9 @@ async function runLocatePositions(){
       if(res.scanRows && res.scanRows.length){ previewData.push({key:t.key, path:t.renamed_path, rows:res.scanRows, items:res.items||[]}); }
     }
     hideVerifyProgress();
+    L2('扫描定位预览 previewData='+previewData.length);
     if(previewData.length){ try{ await openScanPreview(previewData); }catch(e){ L2('预览弹窗失败 '+e); } }
+    else { L2('无预览数据: 扫描版定位未产出 rows'); }
   }
   refreshPrepOverview();
   setDetect('✅ 定位完成：自动定位 '+(doneText+doneScan)+' 份，未定位 '+(targets.length-doneText-doneScan)+' 份（可在核心表人工定位）');
