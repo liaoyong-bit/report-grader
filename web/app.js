@@ -2924,7 +2924,7 @@ async function locateReportTitlesScan(path, tpl){
         const ab64=await renderAreaB64(pdf,p,ln.left,top,Math.max(0.01,ln.right-ln.left),Math.max(h,0.01),4);
         const l=(await window.__bridge.ocrImageB64Words(ab64).catch(()=>[]))||[];
         const t=(l||[]).map(x=>x.text).join('');
-        allRows.push({pageIndex:p, top:ln.top, bottom:ln.bottom, text:t});
+        allRows.push({pageIndex:p, top:ln.top, bottom:ln.bottom, left:ln.left!=null?ln.left:0.02, right:ln.right!=null?ln.right:0.98, text:t, cell:ln.cell||null});
       }
     }
     // 每题标题匹配（跨页，含跨行拼接与80%容错）
@@ -2954,7 +2954,7 @@ async function locateReportTitlesScan(path, tpl){
       } else { locItems.push({item_index:it.item_index, pageIndex:null, titleY_pct:null, titleX_pct:null, ocr_text:''}); fully=false; }
     }
     const fullText=allRows.map(r=>r.text).join('\n');
-    return {items:locItems, fully, fullText};
+    return {items:locItems, fully, fullText, scanRows: allRows};
   }catch(e){ return {items:[], fully:false, fullText:''}; }
 }
 // 探测 PDF 是否有文字层（首页文本量）
@@ -3052,6 +3052,7 @@ async function runLocatePositions(){
   const scanList=[...scanNeed, ...toScan];
   if(scanList.length){
     showVerifyProgress(scanList.length, '第2步：扫描版定位');
+    const previewData=[];
     for(const t of scanList){
       S._vpDone++; updateVerifyProgress();
       const res=await locateReportTitlesScan(t.renamed_path, itemTpl);
@@ -3061,11 +3062,112 @@ async function runLocatePositions(){
       if(res.fullText && window.__bridge.saveScanText){
         try{ await window.__bridge.saveScanText(S.folder, assetKey, res.fullText); }catch(e){ L2('保存还原文本失败 '+assetKey+': '+e); }
       }
+      if(res.scanRows && res.scanRows.length){ previewData.push({key:t.key, path:t.renamed_path, rows:res.scanRows, items:res.items||[]}); }
     }
     hideVerifyProgress();
+    if(previewData.length){ try{ await openScanPreview(previewData); }catch(e){ L2('预览弹窗失败 '+e); } }
   }
   refreshPrepOverview();
   setDetect('✅ 定位完成：自动定位 '+(doneText+doneScan)+' 份，未定位 '+(targets.length-doneText-doneScan)+' 份（可在核心表人工定位）');
+}
+
+/* ==================== 可视化扫描框选预览：左栏渲染PDF+自动框选叠加编号，右栏表格收集(序号/页码/行像素/表格标记/OCR结果) ==================== */
+async function openScanPreview(list){
+  const L=(m)=>{ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[预览] '+m); };
+  if(!(list&&list.length)) return;
+  let m=document.getElementById('scanPrev');
+  if(!m){ m=document.createElement('div'); m.id='scanPrev'; m.style.cssText='position:fixed;inset:0;z-index:1200;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;'; document.body.appendChild(m); }
+  m.innerHTML='';
+  const state={list, ri:0, page:0, pdf:null};
+  const box=document.createElement('div');
+  box.style.cssText='width:94vw;max-width:1280px;height:92vh;background:#fff;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.3);display:flex;flex-direction:column;overflow:hidden;';
+  m.appendChild(box);
+  const mkBtn=(txt,accent)=>{ const b=document.createElement('button'); b.textContent=txt; b.style.cssText='padding:6px 12px;border:1px solid #cbd5e1;background:'+(accent?'#0d9488':'#f8fafc')+';color:'+(accent?'#fff':'#334155')+';border-radius:6px;cursor:pointer;font-size:13px;margin:0 2px;'; return b; };
+  const head=document.createElement('div'); head.style.cssText='padding:10px 16px;border-bottom:1px solid #e5e8ec;display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+  head.innerHTML='<span style="font-weight:700;color:#2b3a55">扫描框选预览</span><span id="spInfo" style="color:#666;font-size:13px"></span><span style="flex:1"></span>';
+  const bPrevR=mkBtn('◀ 上一份'), bNextR=mkBtn('下一份 ▶'), bPrevP=mkBtn('◀ 上一页'), bNextP=mkBtn('下一页 ▶'), bClose=mkBtn('关闭',1);
+  head.append(bPrevR,bNextR,bPrevP,bNextP,bClose); box.appendChild(head);
+  const body=document.createElement('div'); body.style.cssText='flex:1;display:flex;min-height:0;';
+  const left=document.createElement('div'); left.style.cssText='width:56%;position:relative;overflow:auto;background:#525659;';
+  const right=document.createElement('div'); right.style.cssText='width:44%;overflow:auto;background:#fff;border-left:1px solid #e5e8ec;';
+  body.append(left,right); box.appendChild(body);
+  const info=()=>{
+    const r=state.list[state.ri];
+    document.getElementById('spInfo').textContent='报告 '+(state.ri+1)+'/'+state.list.length+'（'+r.key+'）· 第'+(state.page+1)+'页 · 共'+state.pdf.numPages+'页';
+  };
+  async function loadPdf(force){
+    const r=state.list[state.ri];
+    if(force || !state.pdf){
+      const bytes=await window.__bridge.readPdf(S.folder, r.path);
+      state.pdf=await pdfjsLib.getDocument({data:bytes.slice(0)}).promise;
+      if(state.page>=state.pdf.numPages) state.page=0;
+    }
+  }
+  function buildRight(){
+    const r=state.list[state.ri];
+    right.innerHTML='';
+    const tbl=document.createElement('table');
+    tbl.style.cssText='width:100%;border-collapse:collapse;font-size:12px;';
+    tbl.innerHTML='<thead><tr style="background:#f1f5f9">'+
+      '<th style="padding:5px;border:1px solid #e2e8f0">#</th>'+
+      '<th style="padding:5px;border:1px solid #e2e8f0">页</th>'+
+      '<th style="padding:5px;border:1px solid #e2e8f0">位置%</th>'+
+      '<th style="padding:5px;border:1px solid #e2e8f0">区域</th>'+
+      '<th style="padding:5px;border:1px solid #e2e8f0;min-width:180px">OCR识别内容</th></tr></thead><tbody>';
+    const rows=r.rows.slice().sort((a,b)=>a.pageIndex-b.pageIndex || a.top-b.top);
+    let n=1;
+    for(const b of rows){
+      const area = b.cell ? ('表'+(b.cell.grid+1)+'-'+'第'+(b.cell.row+1)+'行'+'列'+(b.cell.col+1)) : '整页行';
+      tbl.innerHTML+='<tr>'+
+        '<td style="padding:4px;border:1px solid #e2e8f0;text-align:center">'+(n++)+'</td>'+
+        '<td style="padding:4px;border:1px solid #e2e8f0;text-align:center">'+(b.pageIndex+1)+'</td>'+
+        '<td style="padding:4px;border:1px solid #e2e8f0">'+(b.top*100).toFixed(1)+'~'+(b.bottom*100).toFixed(1)+'</td>'+
+        '<td style="padding:4px;border:1px solid #e2e8f0">'+area+'</td>'+
+        '<td style="padding:4px;border:1px solid #e2e8f0;word-break:break-all">'+((b.text||'').replace(/</g,'&lt;'))+'</td></tr>';
+    }
+    tbl.innerHTML+='</tbody>';
+    right.appendChild(tbl);
+  }
+  async function renderLeft(){
+    const r=state.list[state.ri];
+    await loadPdf(false);
+    const vp=await (await state.pdf.getPage(state.page+1)).getViewport({scale:2});
+    const b64=await renderPageB64(state.pdf, state.page, 2);
+    left.innerHTML='';
+    const wrap=document.createElement('div'); wrap.style.cssText='position:relative;';
+    const img=document.createElement('img'); img.src='data:image/png;base64,'+b64; img.style.cssText='display:block;width:100%;height:auto;';
+    wrap.appendChild(img); left.appendChild(wrap);
+    const rows=r.rows.filter(x=>x.pageIndex===state.page);
+    for(let i=0;i<rows.length;i++){
+      const b=rows[i];
+      const d=document.createElement('div');
+      d.style.cssText='position:absolute;left:'+(b.left*100).toFixed(1)+'%;top:'+(b.top*100).toFixed(1)+'%;width:'+Math.max(0.5,((b.right-b.left)*100)).toFixed(1)+'%;height:'+Math.max(0.5,((b.bottom-b.top)*100)).toFixed(1)+'%;border:1.5px solid #e07b39;box-sizing:border-box;pointer-events:none;';
+      d.innerHTML='<span style="position:absolute;top:-15px;left:0;background:#e07b39;color:#fff;font-size:10px;padding:0 4px;border-radius:3px;white-space:nowrap">'+(i+1)+'</span>';
+      d.title=(b.text||'')+'  [top'+(b.top*100).toFixed(1)+'%]';
+      img.parentNode.appendChild(d);
+    }
+    // 标题匹配结果高亮(绿横线)
+    const sp=rows.length;
+    for(const it of (r.items||[])){
+      if(it.pageIndex!==state.page || it.titleY_pct==null) continue;
+      const m2=document.createElement('div');
+      m2.style.cssText='position:absolute;left:0;right:0;top:'+(it.titleY_pct*100).toFixed(1)+'%;height:2px;background:#10b981;';
+      m2.title='题目'+((it.item_index!=null?it.item_index+1:'?'))+' 定位在此行中心 y='+(it.titleY_pct*100).toFixed(1)+'%';
+      img.parentNode.appendChild(m2);
+    }
+    info();
+  }
+  async function render(){
+    await renderLeft();
+    buildRight();
+  }
+  const nav=async()=>{ try{ await render(); }catch(e){ L('render err '+e); } };
+  bPrevR.onclick=async()=>{ if(state.ri>0){ state.ri--; state.page=0; state.pdf=null; await nav(); } };
+  bNextR.onclick=async()=>{ if(state.ri<state.list.length-1){ state.ri++; state.page=0; state.pdf=null; await nav(); } };
+  bPrevP.onclick=async()=>{ if(state.page>0){ state.page--; await nav(); } };
+  bNextP.onclick=async()=>{ if(state.pdf && state.page<state.pdf.numPages-1){ state.page++; await nav(); } };
+  bClose.onclick=()=>{ m.remove(); };
+  await render();
 }
 
 /* ---- 人工定位兜底：对「待定位」的报告，拖动蓝框到每题标题行，只改纵向，横向沿用模板文字区右边缘(score_x) ---- */
