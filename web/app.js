@@ -1052,34 +1052,40 @@ async function renderPages(r){
 
 function px2(x,y,vp){ return vp.convertToViewportPoint(x,y); }
 
-// —— 叠加层"得分:N / 总分:N"：位置来自模板框选的 title_rect / total_region。
-//    新格式为百分比(0-1)，直接映射；旧格式为像素(>1)，用报告页 scale1 宽高归一化（重框保存后即精确）。
+// —— 叠加层：每题得分显示在"文字区右边缘(score_x/蓝框) + 标题行y"，统分区内等距排多分数（各题分+总分）。
+//    只显示数字，不再写"得分:N / 总分:N"。坐标沿用模板百分比(0-1)；旧像素数据(w>1)按报告页归一化，重框后精确。
 function addOverlays(r, wrap, pageIndex, vp, page){
   const vp1 = page.getViewport({scale:1});
   const pw1 = vp1.width||1, ph1 = vp1.height||1;
   const items=(S.itemsFull||[]).filter(x=>x.item_index>=0);
 
-  // 每题标题框旁显示"得分：N"
+  // 每题：分数显示在标题行右端（文字区右边缘），只显示数字
   items.forEach((t,i)=>{
     let tr={}; try{ tr=JSON.parse(t.title_rect||'{}'); }catch(e){}
     if(tr.w && tr.h && (t.score_page||0)===pageIndex){
       const isPct = tr.w<=1 && tr.h<=1;
-      const px = isPct? (tr.x||0) : (tr.x||0)/pw1;
       const py = isPct? (tr.y||0) : (tr.y||0)/ph1;
-      const pw = isPct? tr.w : tr.w/pw1;
-      const left=px*vp.width, top=py*vp.height, w=pw*vp.width;
+      const top = py*vp.height;
+      // 横向：优先 score_x（文字区右边缘/蓝框）；旧数据/缺失则回退红框右边缘
+      let xPct=null;
+      const sx = t.score_x;
+      if(sx && sx>0 && sx<=1){ xPct = sx; }
+      else if(sx && sx>1){ xPct = sx/pw1; }
+      if(xPct==null){ xPct = isPct ? (tr.x+tr.w) : (tr.x+tr.w)/pw1; }
+      const left = xPct*vp.width;
       const ov=document.createElement('div');
       ov.className = 'ov-score ov-title-score';
-      ov.style.left = (left + w - 100) + 'px';
+      ov.style.left = (left - 100) + 'px';
       ov.style.top  = (top - 14) + 'px';
       ov.style.width = '100px'; ov.style.textAlign='right';
+      ov.textContent = String(r.scores[i]!=null ? r.scores[i] : 0);
       ov.dataset.itemIndex = i;
       wrap.appendChild(ov);
       r._rendered.titleOv.push({ node: ov, itemIndex: i });
     }
   });
 
-  // 统分区总分（模板 item_index<0 的 total_region，第1页）
+  // 统分区：框内横向等距排 (题目数+1) 个分数 = 各题分 + 总分（第1页）
   const total=(S.itemsFull||[]).find(x=>x.item_index<0);
   if(total && pageIndex===0){
     let ttr={}; try{ ttr=JSON.parse(total.total_region||'{}'); }catch(e){}
@@ -1088,14 +1094,23 @@ function addOverlays(r, wrap, pageIndex, vp, page){
       const px = isPct? (ttr.x||0) : (ttr.x||0)/pw1;
       const py = isPct? (ttr.y||0) : (ttr.y||0)/ph1;
       const pw = isPct? ttr.w : ttr.w/pw1;
-      const left=px*vp.width, top=py*vp.height, w=pw*vp.width;
-      const ov=document.createElement('div');
-      ov.className = 'ov-score ov-total-score';
-      ov.style.left = (left + w - 100) + 'px';
-      ov.style.top  = (top - 14) + 'px';
-      ov.style.width = '100px'; ov.style.textAlign='right';
-      wrap.appendChild(ov);
-      r._rendered.totalOv = ov;
+      const ph = isPct? ttr.h : ttr.h/ph1;
+      const left=px*vp.width, top=py*vp.height, w=pw*vp.width, h=ph*vp.height;
+      const N = items.length;
+      const nSlots = Math.max(2, N + 1);   // 各题分 + 总分
+      const slotW = w / nSlots;
+      r._rendered.totalOv = [];
+      for(let k=0;k<nSlots;k++){
+        const ov=document.createElement('div');
+        ov.className='ov-score ov-total-score';
+        ov.style.left = (left + slotW*(k+0.5) - 16) + 'px';
+        ov.style.top  = (top + h/2 - 10) + 'px';
+        ov.style.width = '32px'; ov.style.textAlign='center';
+        ov.textContent = '';
+        ov.dataset.slot = k;
+        wrap.appendChild(ov);
+        r._rendered.totalOv.push(ov);
+      }
     }
   }
 }
@@ -1105,9 +1120,15 @@ function fillOverlays(r){
   if(!r._rendered) return;
   const total = r.scores.reduce((x,y)=>x+y,0);
   for(const t of r._rendered.titleOv){
-    t.node.textContent = '得分：' + String(r.scores[t.itemIndex]||0);
+    t.node.textContent = String(r.scores[t.itemIndex]!=null ? r.scores[t.itemIndex] : 0);
   }
-  if(r._rendered.totalOv) r._rendered.totalOv.textContent = '总分：' + String(total||0);
+  const tslots = r._rendered.totalOv;
+  if(tslots && tslots.length){
+    const N = tslots.length - 1;
+    tslots.forEach((node,k)=>{
+      node.textContent = (k<N) ? String(r.scores[k]!=null?r.scores[k]:0) : String(total||0);
+    });
+  }
 }
 
 function refreshOverlays(r){
@@ -1133,11 +1154,12 @@ function buildScoreRows(r){
   const target = byItem ? (S.itemCursor!=null?S.itemCursor:0) : -1;
   // 若无模板则回退 analysis.items
   const list = tpl.length ? tpl.map(t=>({name:t.item_name||('题'+(t.item_index+1)), max:(t.max_score!=null?t.max_score:0)})) : (r.analysis && r.analysis.items||[]).map((it,i)=>({name:it.name||('题'+(i+1)), max:(r.maxs&&r.maxs[i]!=null)?r.maxs[i]:it.max}));
+  const activeIdx = byItem ? (target>=0?target:0) : (S.selectedItem!=null?S.selectedItem:0);
   list.forEach((it,i)=>{
     if(byItem && i!==target) return;   // 按题模式：只渲染当前题的打分框
     const max = it.max;
     const row = document.createElement('div');
-    row.className = 'score-row';
+    row.className = 'score-row' + (i===activeIdx ? ' active' : '');   // 当前题高亮（同报告列表）
     const nm = document.createElement('span'); nm.className='name'; nm.textContent = it.name;   // 只显示题名，不带序号
     const mx = document.createElement('span'); mx.className='max'; mx.textContent = '满分'+max;
     const inp = document.createElement('input');
@@ -1152,9 +1174,11 @@ function buildScoreRows(r){
       if(n>max){ n=max; inp.value=n; }
       r.scores[i]=n; updateTotal(r); refreshOverlays(r); saveState(r);
     });
-    // 聚焦 → 记录当前项、立即全选已有分数以便直接输入（P0-2），不视为已批
+    // 聚焦 → 记录当前项、立即全选已有分数以便直接输入（P0-2），不视为已批；同时高亮当前题
     inp.addEventListener('focus', ()=>{
       S.selectedItem = i;
+      document.querySelectorAll('#scoreRows .score-row').forEach(rd=>rd.classList.remove('active'));
+      row.classList.add('active');
       inp.select();
       jumpToItem(i);
     });
@@ -1858,9 +1882,14 @@ async function loadSavedBoxes(){
       }
       let tr={}; try{ tr=JSON.parse(it.title_rect||'{}'); }catch(e){}
       if(tr.w && tr.h){
+        const spvp = S.tplPages[(it.score_page||0)] ? S.tplPages[(it.score_page||0)].vp : null;
+        const spw = (spvp && spvp.width) ? spvp.width : 1;
+        // score_x 新格式为百分比(<=1) → 还原为模板预览像素；旧格式为模板scale像素(>1) → 直接乘 scale
+        const sx = it.score_x||0;
+        const scoreX = (sx>0 && sx<=1) ? sx*(S.tplScale||1)*spw : sx*(S.tplScale||1);
         S_TPL_RECTS.push({ pageIndex:it.score_page||0, x:tr.x||0, y:tr.y||0, w:tr.w||0, h:tr.h||0,
           item_name:it.item_name||('题目'+(it.item_index+1)), max_score:it.max_score||0,
-          scoreX:(it.score_x||0)*(S.tplScale||1), title_img:it.title_img||'' });
+          scoreX, title_img:it.title_img||'' });
       } else {
         S_ITEMS.push({ item_name:it.item_name||('题目'+(it.item_index+1)), max_score:it.max_score||0 });
       }
@@ -2455,6 +2484,31 @@ async function ocrReportBasic(path, basicFields){
     return Object.keys(res).length ? res : null;
   }catch(e){ return null; }
 }
+// —— 核对原始报告进度条（前端逐份 OCR，可控进度）
+function showVerifyProgress(total){
+  let bar=document.getElementById('verifyProgress');
+  if(!bar){
+    bar=document.createElement('div'); bar.id='verifyProgress';
+    bar.style.cssText='position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:999;background:#fff;border:1px solid #dde1e6;border-radius:8px;padding:12px 18px;box-shadow:0 2px 12px rgba(0,0,0,.12);min-width:380px;text-align:left;';
+    bar.innerHTML='<div style="font-size:13px;color:#2b3a55;margin-bottom:6px">正在核对原始报告…</div>'+
+      '<div style="height:10px;background:#eef1f5;border-radius:5px;overflow:hidden"><div id="vpFill" style="height:100%;width:0;background:#e07b39;transition:width .2s"></div></div>'+
+      '<div id="vpTxt" style="font-size:12px;color:#666;margin-top:6px"></div>';
+    document.body.appendChild(bar);
+  }
+  bar.style.display='block';
+  const fill=document.getElementById('vpFill'); if(fill) fill.style.width='0%';
+  const txt=document.getElementById('vpTxt'); if(txt) txt.textContent='0% ｜ 已处理 0 份 ｜ 剩余 '+(total||0)+' 份';
+  S._vpTotal=total||0; S._vpDone=0;
+  updateVerifyProgress();
+}
+function updateVerifyProgress(){
+  const t=S._vpTotal||0, d=S._vpDone||0;
+  const pct = t? Math.round(d/t*100) : 100;
+  const fill=document.getElementById('vpFill'); if(fill) fill.style.width=pct+'%';
+  const txt=document.getElementById('vpTxt'); if(txt) txt.textContent=pct+'% ｜ 已处理 '+d+' 份 ｜ 剩余 '+(t-d)+' 份';
+}
+function hideVerifyProgress(){ const bar=document.getElementById('verifyProgress'); if(bar) bar.style.display='none'; }
+
 async function runSourceVerify(){
   const L=(m)=>{ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[核对] '+m); };
   L('入口 folder='+(S.folder||'<空>'));
@@ -2475,7 +2529,9 @@ async function runSourceVerify(){
   need.sort((a,b)=>{ const ka=a.path.includes('扫描')||a.path.includes('scan')?1:0; const kb=b.path.includes('扫描')||b.path.includes('scan')?1:0; return ka-kb; });
   L('需OCR '+need.length+' 份');
   let ok=0;
+  showVerifyProgress(need.length);
   for(const r of need){
+    S._vpDone++; updateVerifyProgress();
     try{
       const ocr = await ocrReportBasic(r.path, basicFields);
       if(!ocr){ L('ocr none '+r.path); continue; }
@@ -2487,6 +2543,7 @@ async function runSourceVerify(){
       if(hit){ await window.__bridge.resolveUnmatched(S.folder, {path:r.path}, hit.no); ok++; L('挂靠 '+hit.no); }
     }catch(e){ L('单份失败 '+e); }
   }
+  hideVerifyProgress();
   refreshPrepOverview();
   setDetect('✅ 核对完成'+(ok?('，自动挂靠 '+ok+' 份'):''));
 }
@@ -2497,8 +2554,13 @@ el.btnItemSave.onclick=async ()=>{
   const rectPct=(pageIndex,x,y,w,h)=>{ const pvp=(S.tplPages[pageIndex]||{}).vp; const pw=(pvp&&pvp.width)?pvp.width:1, ph=(pvp&&pvp.height)?pvp.height:1; return {x:x/ts/pw, y:y/ts/ph, w:w/ts/pw, h:h/ts/ph}; };
   S_TPL_RECTS.forEach((rt,i)=>{
     const rp=rectPct(rt.pageIndex, rt.x, rt.y, rt.w, rt.h);
+    // score_x 存"相对模板页宽的百分比"(0-1)：得分显示在文字区右边缘(蓝框)，批改渲染直接用百分比
+    const spvp=(S.tplPages[rt.pageIndex]||{}).vp;
+    const spw=(spvp&&spvp.width)?spvp.width:1;
+    const scorePct = ((rt.scoreX||0)/(S.tplScale||1))/spw;
     items.push({ item_index:i, item_name:rt.item_name||('第'+(i+1)+'项'),
-      max_score:rt.max_score||0, score_page:rt.pageIndex||0, score_x:Math.round((rt.scoreX||0)/(S.tplScale||1)),
+      max_score:rt.max_score||0, score_page:rt.pageIndex||0,
+      score_x: (rt.scoreX? Math.round(scorePct*10000)/10000 : 0),
       title_rect:JSON.stringify(rp), total_region:'{}', title_img:rt.title_img||'' });
   });
   S_ITEMS.forEach((it,ix)=>{
