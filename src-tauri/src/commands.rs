@@ -553,16 +553,19 @@ fn ocr_words_file(path: &str) -> Result<serde_json::Value, String> {
     let ph = bmp.PixelHeight().unwrap_or(0) as f32;
     let mut out: Vec<serde_json::Value> = Vec::new();
     for line in res.Lines().map_err(|e| format!("读取行失败: {e}"))? {
-        let rect = line.BoundingRect().map_err(|e| format!("读取行框失败: {e}"))?;
-        let top = if ph > 0.0 { rect.Y / ph } else { 0.0 };
-        let left = if pw > 0.0 { rect.X / pw } else { 0.0 };
         let mut text = String::new();
+        let mut top_min = f32::MAX;
+        let mut left_min = f32::MAX;
         for w in line.Words().map_err(|e| format!("读取词失败: {e}"))? {
+            let wr = w.BoundingRect().map_err(|e| format!("读取词框失败: {e}"))?;
+            if wr.Y < top_min { top_min = wr.Y; }
+            if wr.X < left_min { left_min = wr.X; }
             text.push_str(&w.Text().map_err(|e| format!("读取词文本失败: {e}"))?.to_string());
         }
-        if !text.trim().is_empty() {
-            out.push(serde_json::json!({"text": text, "top": top, "left": left}));
-        }
+        if text.trim().is_empty() { continue; }
+        let top = if ph > 0.0 && top_min != f32::MAX { top_min / ph } else { 0.0 };
+        let left = if pw > 0.0 && left_min != f32::MAX { left_min / pw } else { 0.0 };
+        out.push(serde_json::json!({"text": text, "top": top, "left": left}));
     }
     Ok(serde_json::Value::Array(out))
 }
