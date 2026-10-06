@@ -2586,27 +2586,24 @@ async function findTitleInTextLayer(pdf, target, pageIdx){
     const bare = target.replace(/（[^）]*分）\s*$/,'').trim();
     const isTitle=(txt)=>/^[一二三四五六七八九十]、/.test(txt.trim());
     // 只匹配页面中上部(y<0.6)的标题行，避免误匹配页底统分区/评分表
-    let first=null;
+    let best=null;
     const dbg=(m)=>{ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[locDBG] '+m); };
     dbg('pg='+pageIdx+' target="'+target+'" bare="'+bare+'" 总行='+lines.length+' ph='+ph.toFixed(1));
     for(const l of lines){
       const t=l.text.replace(/\s+/g,'');
-      // 行中心（顶+半高）：文字版定位与扫描版(行中心)对齐，避免偏上行高一半；各页缩放不同会放大偏上差异
+      // 行中心（顶+半高）：与扫描版(行中心)对齐，避免偏上行高一半
       const lh=Math.max.apply(null, l.items.map(it=>it.h||0))||0;
       const yPct=(l.y + lh/2)/ph;
-      const isCand = isTitle(t) && (t.includes(target) || (bare && bare.length>1 && t.includes(bare)));
-      if(isCand || isTitle(t) || (bare && bare.length>1 && t.includes(bare))){
-        dbg('pg='+pageIdx+' 行 t="'+t.slice(0,28)+'" yTop='+(l.y/ph).toFixed(4)+' lh='+(lh/ph).toFixed(4)+' yPct='+yPct.toFixed(4)+' isTitle='+isTitle(t)+' hit='+(yPct<0.7));
-      }
-      if(yPct>=0.7) continue;
       if(!isTitle(t)) continue;
-      if(t.includes(target) || (bare && bare.length>1 && t.includes(bare))){
-        first={ pageIndex:pageIdx, titleY_pct: Math.round(yPct*10000)/10000, titleX_pct: rightPct, ocr_text:'' };
-        break;
+      if(!(t.includes(target) || (bare && bare.length>1 && t.includes(bare)))) continue;
+      dbg('pg='+pageIdx+' 命中行 t="'+t.slice(0,28)+'" yPct='+yPct.toFixed(4));
+      // 取页面最靠下的匹配标题行(正文标题)，避开页顶统分区表头
+      if(!best || yPct>best.yPct){
+        best={ pageIndex:pageIdx, titleY_pct: Math.round(yPct*10000)/10000, titleX_pct: rightPct, ocr_text:'' };
       }
     }
-    dbg('pg='+pageIdx+' 匹配结果='+(first?JSON.stringify(first):'null'));
-    return first;
+    dbg('pg='+pageIdx+' 匹配结果='+(best?JSON.stringify({y:best.titleY_pct,pg:best.pageIndex,x:best.titleX_pct}):'null'));
+    return best;
   }catch(e){}
   return null;
 }
@@ -2618,7 +2615,14 @@ async function locateReportTitlesText(path, tpl){
     const locItems=[]; let fully=true;
     for(const it of tpl){
       const target=locateTarget(it);
-      const f=await findTitleInTextLayer(pdf, target, it.score_page||0);
+      const sp=it.score_page||0;
+      let f=null;
+      // 模板 score_page 可能比实际报告页码偏移1：在 ±1 页范围内搜索，自动纠正
+      for(const p of [sp-1, sp, sp+1]){
+        if(p<0 || p>=n) continue;
+        f=await findTitleInTextLayer(pdf, target, p);
+        if(f) break;
+      }
       if(f){ locItems.push({item_index:it.item_index, pageIndex:f.pageIndex, titleY_pct:f.titleY_pct, titleX_pct:f.titleX_pct, ocr_text:''}); }
       else fully=false;
     }
