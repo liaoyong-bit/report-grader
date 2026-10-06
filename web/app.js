@@ -249,6 +249,18 @@ async function refreshPrepOverview(){
   }catch(e){
     const msg = String(e);
     if(S.needsInit || /初始化|未找到批次/.test(msg)){
+      // 数据库可能被删：尝试从 source_files/ 名单 CSV 自动恢复（有名单就自动摘录）
+      let recovered=false;
+      if(window.__bridge && window.__bridge.recoverRoster && S.folder){
+        try{
+          const list = await window.__bridge.recoverRoster(S.folder, S.teacher||'');
+          if(list && list.length){ S.roster = list; recovered=true; }
+        }catch(re){ setErr('自动恢复名单失败: ' + re); }
+      }
+      if(recovered){
+        setDetect('✅ 已从 source_files 自动恢复名单 ' + (S.roster||[]).length + ' 人');
+        return refreshPrepOverview();   // 重建批次后重新刷新
+      }
       S.needsInit=true;
       el.prepFolder.textContent = S.folder;
       el.prepTbody.innerHTML = '<tr><td colspan="9" style="color:#c62828;padding:24px;text-align:center">该文件夹尚未初始化。<br>请在右侧「名单管理」中导入学生名单完成初始化。</td></tr>';

@@ -59,6 +59,7 @@ pub fn init_batch(
 ) -> Result<(), String> {
     let conn = db::open(&folder)?;
     let bid = db::get_or_create_batch(&conn, &report_name, &teacher)?;
+    db::delete_students(&conn, bid)?;   // 重新导入：先清旧名单再写新，避免残留
     db::insert_students(&conn, bid, &students)?;
     Ok(())
 }
@@ -206,10 +207,20 @@ pub fn get_batch_info(folder: String) -> Result<BatchInfoDetail, String> {
 }
 
 /// 把"名单 + 报告名称"写成 CSV 存到 source_files，供查看/迁移
+/// 覆盖式：写入前删除 source_files 下旧的名单 CSV，保证同一文件夹只有一份最新名单
 #[tauri::command]
 pub fn save_roster(folder: String, report_name: String, students: Vec<db::StudentIn>) -> Result<String, String> {
     let src_dir = Path::new(&folder).join(db::SOURCE_DIR);
     fs::create_dir_all(&src_dir).map_err(|e| format!("创建 source_files 失败: {e}"))?;
+    // 删除旧的 _名单_*.csv
+    if let Ok(rd) = fs::read_dir(&src_dir) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with("_名单_") && name.ends_with(".csv") {
+                let _ = fs::remove_file(e.path());
+            }
+        }
+    }
     let safe: String = report_name
         .chars()
         .map(|c| if "\\/:*?\"<>|".contains(c) { '_' } else { c })
@@ -221,6 +232,44 @@ pub fn save_roster(folder: String, report_name: String, students: Vec<db::Studen
     }
     fs::write(&path, csv).map_err(|e| format!("写入名单失败: {e}"))?;
     Ok(path.to_string_lossy().into_owned())
+}
+
+/// 删库后从 source_files/ 名单 CSV 自动恢复名单并重建批次（有名单就自动摘录）
+#[tauri::command]
+pub fn recover_roster(folder: String, teacher: String) -> Result<Vec<db::StudentIn>, String> {
+    let src_dir = Path::new(&folder).join(db::SOURCE_DIR);
+    let mut csv_path: Option<std::path::PathBuf> = None;
+    if let Ok(rd) = fs::read_dir(&src_dir) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with("_名单_") && name.ends_with(".csv") {
+                csv_path = Some(e.path());
+                break;
+            }
+        }
+    }
+    let path = csv_path.ok_or("source_files 中未找到名单文件（_名单_*.csv）")?;
+    let content = fs::read_to_string(&path).map_err(|e| format!("读取名单失败: {e}"))?;
+    let mut list: Vec<db::StudentIn> = Vec::new();
+    for (idx, raw) in content.lines().enumerate() {
+        if idx == 0 { continue; }   // 跳过表头
+        let line = raw.trim_start_matches('\u{feff}').trim();
+        if line.is_empty() { continue; }
+        let p: Vec<&str> = line.split(',').collect();
+        let no = p.get(0).unwrap_or(&"").trim().to_string();
+        let name = p.get(1).unwrap_or(&"").trim().to_string();
+        let cls = p.get(2).unwrap_or(&"").trim().to_string();
+        let rn = p.get(3).unwrap_or(&"").trim().to_string();
+        if no.is_empty() && name.is_empty() { continue; }
+        list.push(db::StudentIn { no, name, cls, report_name: rn });
+    }
+    if list.is_empty() { return Err("名单文件内容为空".into()); }
+    let conn = db::open(&folder)?;
+    let bid = db::get_or_create_batch(&conn, &folder, &teacher)?;
+    db::delete_students(&conn, bid)?;
+    db::insert_students(&conn, bid, &list)?;
+    dbglog(&format!("recover_roster 恢复名单 {} 人", list.len()));
+    Ok(list)
 }
 
 /// 保存名单模板：弹系统保存对话框，用户选位置后写入（供"下载名单模板"使用）

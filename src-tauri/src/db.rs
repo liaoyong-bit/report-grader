@@ -308,6 +308,13 @@ pub fn insert_students(conn: &Connection, batch_id: i64, list: &[StudentIn]) -> 
     Ok(())
 }
 
+/// 清空某批次全部学生（重新导入名单前先删旧，避免残留）
+pub fn delete_students(conn: &Connection, batch_id: i64) -> Result<(), String> {
+    conn.execute("DELETE FROM students WHERE batch_id=?1", params![batch_id])
+        .map(|_| ())
+        .map_err(|e| format!("清空名单失败: {e}"))
+}
+
 pub fn get_students(conn: &Connection, batch_id: i64) -> Result<Vec<Student>, String> {
     let mut st = conn
         .prepare("SELECT id, student_no, name, class, report_name FROM students WHERE batch_id=?1 ORDER BY student_no")
