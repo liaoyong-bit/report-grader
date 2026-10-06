@@ -2957,22 +2957,15 @@ async function locateReportTitlesScan(path, tpl){
         }
       }
       if(hit){
-        // 精确定位：把该band的OCR word按纵向聚类成"视觉行"，取含标题文本那一行的中心
-        // (band可能把标题行与紧邻的上一行合并，用band中心会偏上；用标题文字所在视觉行则精确)
+        // 每条OCR行独立定位：该行位置=m-n(top~top+height)，取中值(top+height/2)。不聚类合并(合并会把标题行与上一行混在一起致中心偏上)。
         let titleRowY=null;
         if(hit.words && hit.words.length){
-          const ws=hit.words.slice().sort((a,b)=>a.top-b.top);
-          const gap=(hit.bottom-hit.top)*0.55;
-          const gps=[];
-          for(const w of ws){
-            const wbot=w.top+(w.height!=null?w.height:0);
-            const last=gps[gps.length-1];
-            if(last && w.top-last.bottom < gap){ last.bottom=Math.max(last.bottom,wbot); last.top=Math.min(last.top,w.top); last.text+=w.text; }
-            else gps.push({top:w.top, bottom:wbot, text:w.text});
-          }
-          for(const g of gps){
-            const gt=norm(g.text);
-            if(gt && (gt.includes(tn)||(tn.length>0&&longestContMatch(tn,gt)/tn.length>=0.8))){ titleRowY=(g.top+g.bottom)/2; break; }
+          for(const w of hit.words){
+            const wt=norm(w.text);
+            if(wt && (wt.includes(tn)||(tn.length>0&&longestContMatch(tn,wt)/tn.length>=0.8))){
+              const c=w.top + (w.height!=null?w.height:0.03)/2;
+              if(titleRowY==null) titleRowY=c;
+            }
           }
         }
         const midY = titleRowY!=null ? titleRowY : (hit.top+hit.bottom)/2;
