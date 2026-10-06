@@ -141,6 +141,9 @@
   window.__bridge.readPdf = async (folder, path) => { return await invoke('read_pdf', { folder, path }); };
   window.__bridge.pickTemplate = async (folder) => { return await invoke('pick_template', { folder }); };
   window.__bridge.ocrImageB64 = async (b64) => { return await invoke('ocr_image_b64', { b64 }); };
+  window.__bridge.ocrImageB64Words = async (b64) => { return await invoke('ocr_image_b64_words', { b64 }); };
+  window.__bridge.saveScanText = async (folder, name, text) => { await invoke('save_scan_text', { folder, name, text }); };
+  window.__bridge.applyRenames = async (folder) => { return await invoke('apply_renames', { folder }); };
   window.__bridge.saveReportLocate = async (folder, reportKey, locateJson) => { await invoke('save_report_locate', { folder, reportKey, locateJson }); };
   window.__bridge.getReportLocate = async (folder, reportKey) => { return await invoke('get_report_locate', { folder, reportKey }); };
   window.__bridge.createUser = async (username, name, password) => { return await invoke('create_user', { username, name, password }); };
