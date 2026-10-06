@@ -2641,31 +2641,65 @@ function clusterLines(lines, gap=0.016){
   }
   return blocks;
 }
-// 扫描版定位：①整页OCR(scale3)拿行坐标→自动聚合成"段落框"；②逐段聚焦OCR(scale4)精确识别；③框选模板区域兜底；返回命中段落位置与文本
+// 逐像素行扫描检测"文字行带"：文字行是连续多条像素行且行内黑白交替(非背景像素占比适中)，空白行没有。
+// 返回段落块(top/bottom 比例)——字体大小不影响，按真实文字区域切分。
+async function detectTextBands(pdf, pageIdx, scale=2){
+  const page=await pdf.getPage(pageIdx+1);
+  const vp=page.getViewport({scale});
+  const canvas=document.createElement('canvas'); canvas.width=Math.floor(vp.width); canvas.height=Math.floor(vp.height);
+  await page.render({canvasContext:canvas.getContext('2d'), viewport:vp}).promise;
+  const W=canvas.width, H=canvas.height;
+  if(!W||!H) return [];
+  const data=canvas.getContext('2d').getImageData(0,0,W,H).data;
+  const rowText=new Array(H).fill(false);
+  for(let y=0;y<H;y++){
+    let cnt=0; const off=y*W;
+    for(let x=0;x<W;x++){
+      const i=(off+x)*4;
+      const r=data[i],g=data[i+1],b=data[i+2];
+      if(!(r>242&&g>242&&b>242)) cnt++;   // 非背景(接近白)像素
+    }
+    const ratio=cnt/W;
+    // 有文字(占比>0.12%)但非整行连续(占比<55%，排除表格横线/填充块)
+    rowText[y]= ratio>0.0012 && ratio<0.55;
+  }
+  // 连续文字像素行 → 文字行带
+  const bands=[];
+  let start=-1;
+  for(let y=0;y<H;y++){
+    if(rowText[y] && start<0) start=y;
+    if(!rowText[y] && start>=0){ bands.push({top:start,bottom:y-1}); start=-1; }
+  }
+  if(start>=0) bands.push({top:start,bottom:H-1});
+  if(!bands.length) return [];
+  // 相邻行带之间空白少 → 合并为段落（同一标题多行/相邻正文），空白大 → 分段
+  const gapMax=Math.max(1, Math.round(H*0.012));
+  const blocks=[];
+  for(const b of bands){
+    const last=blocks[blocks.length-1];
+    if(last && (b.top-last.bottom)<=gapMax){ last.bottom=b.bottom; }
+    else blocks.push({top:b.top,bottom:b.bottom});
+  }
+  return blocks.map(b=>({ top: Math.round(b.top/H*10000)/10000, bottom: Math.round((b.bottom+1)/H*10000)/10000 }));
+}
+// 扫描版定位：①逐像素行扫描检测文字段落块（自动框选）→ ②逐段落区域聚焦OCR(scale4)精确识别匹配标题 → ③框选模板区域兜底；返回命中段落位置与文本
 async function findTitleInScan(pdf, target, pageIdx, titleRectJson){
   const p=pageIdx||0;
   const norm=(s)=>(s||'').replace(/\s+/g,'').replace(/[，。、；：（）()【】《》"'“”]/g,'');
   const tn=norm(target);
-  let lines=[], blocks=[], pageRight=null;
-  // ① 整页 OCR → 段落聚类，先用段落拼接文本匹配
+  let lines=[], pageRight=null;
+  // ① 像素行检测段落 + 整页OCR(拿右缘与还原文本)
+  let blocks=[];
   try{
+    blocks=await detectTextBands(pdf,p,2)||[];
     const b64=await renderPageB64(pdf, p, 3);
     lines=(await window.__bridge.ocrImageB64Words(b64).catch(()=>[]))||[];
     let mr=0;
     for(const l of lines){ const r=(l.right!=null?l.right:l.left)||0; if(r>mr) mr=r; }
     pageRight = mr>0 ? mr : null;
-    blocks=clusterLines(lines);
+    // 逐段落区域聚焦 OCR(scale4) 匹配标题，命中段落 → 位置取段落 top
     for(const b of blocks){
-      if(norm(b.text).includes(tn)){
-        return { pageIndex:p, titleY_pct: Math.round(b.top*10000)/10000, titleX_pct: (pageRight!=null?Math.round(pageRight*10000)/10000:null), ocr_text:b.text };
-      }
-    }
-  }catch(e){}
-  // ② 段落拼接未命中 → 对每个"段落框"区域单独聚焦OCR(scale4)再匹配（识别更准）
-  try{
-    for(const b of blocks){
-      const w=b.right-b.left||0.02, h=b.bottom-b.top||0.02;
-      const ab64=await renderAreaB64(pdf, p, b.left, b.top, w, h, 4);
+      const ab64=await renderAreaB64(pdf, p, 0.02, b.top, 0.96, (b.bottom-b.top)||0.02, 4);
       const alines=(await window.__bridge.ocrImageB64Words(ab64).catch(()=>[]))||[];
       const atext=(alines||[]).map(x=>x.text).join('');
       if(norm(atext).includes(tn)){
@@ -2673,7 +2707,7 @@ async function findTitleInScan(pdf, target, pageIdx, titleRectJson){
       }
     }
   }catch(e){}
-  // ③ 框选模板区域兜底（原 title_rect）
+  // ② 框选模板区域兜底（原 title_rect）
   try{
     let rect={}; try{ rect=JSON.parse(titleRectJson||'{}'); }catch(e){}
     if(rect.x!=null && rect.y!=null && rect.w && rect.h){
@@ -2687,7 +2721,7 @@ async function findTitleInScan(pdf, target, pageIdx, titleRectJson){
       }
     }
   }catch(e){}
-  // ④ 全部未命中 → 返回还原文本（位置空）
+  // ③ 全部未命中 → 返回还原文本（位置空）
   return { pageIndex:p, titleY_pct: null, titleX_pct: null, ocr_text: (lines||[]).map(x=>x.text).join('\n') };
 }
 // 扫描版定位整份报告
