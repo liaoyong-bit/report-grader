@@ -358,6 +358,48 @@ pub fn get_report_locate(folder: String, report_key: String) -> Result<Option<St
     db::get_report_locate(&conn, rid)
 }
 
+// ==================== 独立定位库(locate.sqlite) ====================
+/// 初始化某份报告的扫描行：先清空旧行，逐行入库并返回全局唯一 KEY(id) 列表(与传入 rows 顺序对应)
+#[tauri::command]
+pub fn locate_init(folder: String, report_key: String, rows: Vec<serde_json::Value>) -> Result<Vec<i64>, String> {
+    let conn = db::open_locate(&folder)?;
+    db::locate_clear(&conn, &report_key)?;
+    let mut ids = Vec::new();
+    for r in rows {
+        let page = r.get("pageIndex").and_then(|v| v.as_i64()).unwrap_or(0);
+        let top = r.get("top").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let bottom = r.get("bottom").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let left = r.get("left").and_then(|v| v.as_f64()).unwrap_or(0.02);
+        let right = r.get("right").and_then(|v| v.as_f64()).unwrap_or(0.98);
+        let cell = r.get("cell").and_then(|v| v.as_str()).unwrap_or("{}");
+        let id = db::locate_insert(&conn, &report_key, page, top, bottom, left, right, cell)?;
+        ids.push(id);
+    }
+    dbglog(&format!("locate_init key={report_key} rows={}", ids.len()));
+    Ok(ids)
+}
+
+/// 逐行写回 OCR 识别结果(绑定 KEY=id)
+#[tauri::command]
+pub fn locate_set_ocr(folder: String, id: i64, text: String) -> Result<(), String> {
+    let conn = db::open_locate(&folder)?;
+    db::locate_set_ocr(&conn, id, &text)
+}
+
+/// 记录某行匹配到的题目索引(绑定 KEY=id)
+#[tauri::command]
+pub fn locate_set_match(folder: String, id: i64, item_index: i64) -> Result<(), String> {
+    let conn = db::open_locate(&folder)?;
+    db::locate_set_match(&conn, id, item_index)
+}
+
+/// 读取某份报告全部定位行(含 KEY、页码、m-n 位置、OCR 文本、匹配结果)，供渲染与取位置
+#[tauri::command]
+pub fn locate_get_rows(folder: String, report_key: String) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db::open_locate(&folder)?;
+    db::locate_rows(&conn, &report_key)
+}
+
 // ==================== 登录账号 ====================
 fn hash_pwd(pwd: &str) -> String {
     use sha2::{Digest, Sha256};

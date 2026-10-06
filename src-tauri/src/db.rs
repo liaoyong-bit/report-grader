@@ -718,3 +718,91 @@ pub fn get_batch_items(conn: &Connection, batch_id: i64) -> Result<Vec<BatchItem
         .map_err(|e| format!("查询评分项失败: {e}"))?;
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| format!("解析评分项失败: {e}"))
 }
+
+/* ==================== 独立定位库(locate.sqlite) ====================
+   定位模块以数据库为唯一数据源：每条扫描行先入库获得全局唯一 KEY(id)，
+   再逐行把 OCR 结果写回库，匹配到题目也写回库，最后从库读取渲染/取位置。 */
+pub fn open_locate(folder: &str) -> Result<Connection, String> {
+    let data_dir = Path::new(folder).join(DATA_DIR);
+    fs::create_dir_all(&data_dir).map_err(|e| format!("创建 data 目录失败: {e}"))?;
+    let conn = Connection::open(data_dir.join("locate.sqlite"))
+        .map_err(|e| format!("打开定位库失败: {e}"))?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS loc_rows(
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             report_key TEXT NOT NULL,
+             page_index INTEGER DEFAULT 0,
+             top REAL DEFAULT 0, bottom REAL DEFAULT 0,
+             left REAL DEFAULT 0, right REAL DEFAULT 0,
+             cell TEXT DEFAULT '{}',
+             text TEXT DEFAULT '',
+             matched_item INTEGER DEFAULT -1,
+             processed INTEGER DEFAULT 0
+         );
+         CREATE INDEX IF NOT EXISTS idx_loc_key ON loc_rows(report_key);",
+    )
+    .map_err(|e| format!("建定位表失败: {e}"))?;
+    Ok(conn)
+}
+
+pub fn locate_clear(conn: &Connection, report_key: &str) -> Result<(), String> {
+    conn.execute("DELETE FROM loc_rows WHERE report_key=?1", params![report_key])
+        .map(|_| ())
+        .map_err(|e| format!("清空定位行失败: {e}"))
+}
+
+pub fn locate_insert(
+    conn: &Connection,
+    report_key: &str,
+    page_index: i64,
+    top: f64,
+    bottom: f64,
+    left: f64,
+    right: f64,
+    cell: &str,
+) -> Result<i64, String> {
+    conn.execute(
+        "INSERT INTO loc_rows(report_key,page_index,top,bottom,left,right,cell) VALUES(?1,?2,?3,?4,?5,?6,?7)",
+        params![report_key, page_index, top, bottom, left, right, cell],
+    )
+    .map_err(|e| format!("插入定位行失败: {e}"))?;
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn locate_set_ocr(conn: &Connection, id: i64, text: &str) -> Result<(), String> {
+    conn.execute("UPDATE loc_rows SET text=?1, processed=1 WHERE id=?2", params![text, id])
+        .map(|_| ())
+        .map_err(|e| format!("写入OCR结果失败: {e}"))
+}
+
+pub fn locate_set_match(conn: &Connection, id: i64, item_index: i64) -> Result<(), String> {
+    conn.execute("UPDATE loc_rows SET matched_item=?1 WHERE id=?2", params![item_index, id])
+        .map(|_| ())
+        .map_err(|e| format!("写入匹配结果失败: {e}"))
+}
+
+pub fn locate_rows(conn: &Connection, report_key: &str) -> Result<Vec<serde_json::Value>, String> {
+    let mut st = conn
+        .prepare(
+            "SELECT id,page_index,top,bottom,left,right,cell,text,matched_item,processed
+             FROM loc_rows WHERE report_key=?1 ORDER BY page_index,top",
+        )
+        .map_err(|e| format!("准备查询失败: {e}"))?;
+    let rows = st
+        .query_map(params![report_key], |r| {
+            Ok(serde_json::json!({
+                "id": r.get::<_, i64>(0)?,
+                "page_index": r.get::<_, i64>(1)?,
+                "top": r.get::<_, f64>(2)?,
+                "bottom": r.get::<_, f64>(3)?,
+                "left": r.get::<_, f64>(4)?,
+                "right": r.get::<_, f64>(5)?,
+                "cell": r.get::<_, String>(6)?,
+                "text": r.get::<_, String>(7)?,
+                "matched_item": r.get::<_, i64>(8)?,
+                "processed": r.get::<_, i64>(9)?,
+            }))
+        })
+        .map_err(|e| format!("查询定位行失败: {e}"))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| format!("解析定位行失败: {e}"))
+}

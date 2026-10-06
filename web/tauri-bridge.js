@@ -146,6 +146,10 @@
   window.__bridge.applyRenames = async (folder) => { return await invoke('apply_renames', { folder }); };
   window.__bridge.saveReportLocate = async (folder, reportKey, locateJson) => { await invoke('save_report_locate', { folder, reportKey, locateJson }); };
   window.__bridge.getReportLocate = async (folder, reportKey) => { return await invoke('get_report_locate', { folder, reportKey }); };
+  window.__bridge.locateInit = async (folder, reportKey, rows) => { return await invoke('locate_init', { folder, reportKey, rows }); };
+  window.__bridge.locateSetOcr = async (folder, id, text) => { await invoke('locate_set_ocr', { folder, id, text }); };
+  window.__bridge.locateSetMatch = async (folder, id, itemIndex) => { await invoke('locate_set_match', { folder, id, itemIndex }); };
+  window.__bridge.locateGetRows = async (folder, reportKey) => { return await invoke('locate_get_rows', { folder, reportKey }); };
   window.__bridge.createUser = async (username, name, password) => { return await invoke('create_user', { username, name, password }); };
   window.__bridge.login = async (username, password) => { return await invoke('login', { username, password }); };
   window.__bridge.listUsers = async () => { return await invoke('list_users', {}); };

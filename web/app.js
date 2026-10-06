@@ -2976,6 +2976,69 @@ async function locateReportTitlesScan(path, tpl){
     return {items:locItems, fully, fullText, scanRows: allRows};
   }catch(e){ return {items:[], fully:false, fullText:''}; }
 }
+
+// 落库版扫描定位：以数据库为唯一数据源。1)所有扫描行先编号(KEY=locate.sqlite自增id)入库；2)逐行OCR结果写回库；3)读库核对匹配，匹配到题目写回库；4)最后从库读取渲染/取位置(m-n取中值)
+async function locateReportTitlesScanDB(path, tpl, reportKey){
+  try{
+    const bytes=await window.__bridge.readPdf(S.folder, path);
+    const pdf=await pdfjsLib.getDocument({data:bytes.slice(0)}).promise;
+    const norm=(s)=>(s||'').replace(/\s+/g,'').replace(/[，。、；：（）()【】《》"'“”]/g,'');
+    const items=[]; let fully=true;
+    const bandList=[]; let pageRight=null;
+    for(let p=0;p<pdf.numPages;p++){
+      let ana=null; try{ ana=await analyzePage(pdf,p,2); }catch(e){}
+      if(ana && ana.pageRight!=null && (pageRight==null || ana.pageRight>pageRight)) pageRight=ana.pageRight;
+      const lines=(ana&&ana.textLines)||[];
+      for(const ln of lines){
+        bandList.push({pageIndex:p, top:ln.top, bottom:ln.bottom, left:ln.left!=null?ln.left:0.02, right:ln.right!=null?ln.right:0.98, cell:ln.cell||null});
+      }
+    }
+    // 1) 所有行先编号(KEY)入库
+    const ids=await window.__bridge.locateInit(S.folder, reportKey, bandList.map(b=>({pageIndex:b.pageIndex, top:b.top, bottom:b.bottom, left:b.left, right:b.right, cell:b.cell?JSON.stringify(b.cell):'{}'}))).catch(()=>[]);
+    // 2) 逐行OCR，结果写回库(绑定KEY=id)
+    for(let i=0;i<ids.length && i<bandList.length;i++){
+      const ln=bandList[i];
+      let exp=0.004; try{ const vp0=await (await pdf.getPage(ln.pageIndex+1)).getViewport({scale:4}); exp=Math.max(0.0005,3/vp0.height); }catch(e){}
+      const top=Math.max(0,ln.top-exp);
+      const h=Math.min(1-top,(ln.bottom-ln.top)+2*exp);
+      const wd=Math.max(0.01,ln.right-ln.left);
+      const ab64=await renderAreaB64(pdf,ln.pageIndex,ln.left,top,wd,Math.max(h,0.01),4);
+      const l=(await window.__bridge.ocrImageB64Words(ab64).catch(()=>[]))||[];
+      const text=(l||[]).map(x=>x.text).join('');
+      await window.__bridge.locateSetOcr(S.folder, ids[i], text).catch(()=>{});
+    }
+    // 3) 从库读全部行，核对匹配，匹配结果写回库
+    const rows=await window.__bridge.locateGetRows(S.folder, reportKey).catch(()=>[])||[];
+    const isBodyTitle=(idx,row)=>{
+      for(let j=idx+1;j<rows.length && j<=idx+4;j++){
+        if(rows[j].page_index!==row.page_index) break;
+        if(/填写要求|评分标准/.test(rows[j].text||'')) return true;
+      }
+      return false;
+    };
+    for(const it of tpl){
+      const tn=norm(locateTarget(it));
+      let hit=null;
+      for(let i=0;i<rows.length;i++){
+        const nt1=norm(rows[i].text);
+        if(nt1 && (nt1.includes(tn)||(tn.length>0&&longestContMatch(tn,nt1)/tn.length>=0.8)) && isBodyTitle(i,rows[i])){ hit=rows[i]; break; }
+        if(i+1<rows.length){
+          const nt2=norm(rows[i].text+rows[i+1].text);
+          if(nt2 && (nt2.includes(tn)||(tn.length>0&&longestContMatch(tn,nt2)/tn.length>=0.8)) && isBodyTitle(i,rows[i])){ hit=rows[i]; break; }
+        }
+      }
+      if(hit){
+        await window.__bridge.locateSetMatch(S.folder, hit.id, it.item_index).catch(()=>{});
+        const midY=(hit.top+hit.bottom)/2;   // 该行 m-n 取中值
+        items.push({item_index:it.item_index, pageIndex:hit.page_index, titleY_pct:Math.round(midY*10000)/10000, titleX_pct:(pageRight!=null?Math.round(pageRight*10000)/10000:null), ocr_text:hit.text});
+      } else { items.push({item_index:it.item_index, pageIndex:null, titleY_pct:null, titleX_pct:null, ocr_text:''}); fully=false; }
+    }
+    // 4) 从库读取渲染用数据(含全局KEY=id)
+    const renderRows=await window.__bridge.locateGetRows(S.folder, reportKey).catch(()=>[])||[];
+    const fullText=(renderRows||[]).map(r=>r.text).join('\n');
+    return {items, fully, fullText, rows: renderRows};
+  }catch(e){ return {items:[], fully:false, fullText:'', rows:[]}; }
+}
 // 探测 PDF 是否有文字层（首页文本量）
 async function hasTextLayer(path){
   try{
@@ -3074,7 +3137,7 @@ async function runLocatePositions(){
     const previewData=[];
     for(const t of scanList){
       S._vpDone++; updateVerifyProgress();
-      const res=await locateReportTitlesScan(t.renamed_path, itemTpl);
+      const res=await locateReportTitlesScanDB(t.renamed_path, itemTpl, t.key);
       const locKey=t.key;                    // 数据库 report_key（原始文件名）
       const assetKey=t.renamed_path.split(/[\\/]/).pop();   // 改名文件名（还原文本资产名）
       if(res.items.length){ await saveLoc(locKey, res.items, 'auto'); doneScan++; }
@@ -3133,13 +3196,12 @@ async function openScanPreview(list){
       '<th style="padding:5px;border:1px solid #e2e8f0">位置%</th>'+
       '<th style="padding:5px;border:1px solid #e2e8f0">区域</th>'+
       '<th style="padding:5px;border:1px solid #e2e8f0;min-width:180px">OCR识别内容</th></tr></thead><tbody>';
-    const rows=r.rows.slice().sort((a,b)=>a.pageIndex-b.pageIndex || a.top-b.top);
-    let n=1;
+    const rows=r.rows.slice().sort((a,b)=>a.page_index-b.page_index || a.top-b.top);
     for(const b of rows){
-      const area = b.cell ? ('表'+(b.cell.grid+1)+'-'+'第'+(b.cell.row+1)+'行'+'列'+(b.cell.col+1)) : '整页行';
+      const area = (b.cell&&b.cell!=='{}') ? ('表格区域') : '整页行';
       tbl.innerHTML+='<tr>'+
-        '<td style="padding:4px;border:1px solid #e2e8f0;text-align:center">'+(n++)+'</td>'+
-        '<td style="padding:4px;border:1px solid #e2e8f0;text-align:center">'+(b.pageIndex+1)+'</td>'+
+        '<td style="padding:4px;border:1px solid #e2e8f0;text-align:center">'+(b.id!=null?b.id:'')+'</td>'+
+        '<td style="padding:4px;border:1px solid #e2e8f0;text-align:center">'+(b.page_index+1)+'</td>'+
         '<td style="padding:4px;border:1px solid #e2e8f0">'+(b.top*100).toFixed(1)+'~'+(b.bottom*100).toFixed(1)+'</td>'+
         '<td style="padding:4px;border:1px solid #e2e8f0">'+area+'</td>'+
         '<td style="padding:4px;border:1px solid #e2e8f0;word-break:break-all">'+((b.text||'').replace(/</g,'&lt;'))+'</td></tr>';
@@ -3156,13 +3218,12 @@ async function openScanPreview(list){
     const wrap=document.createElement('div'); wrap.style.cssText='position:relative;';
     const img=document.createElement('img'); img.src='data:image/png;base64,'+b64; img.style.cssText='display:block;width:100%;height:auto;';
     wrap.appendChild(img); left.appendChild(wrap);
-    const rows=r.rows.filter(x=>x.pageIndex===state.page);
-    for(let i=0;i<rows.length;i++){
-      const b=rows[i];
+    const rows=r.rows.filter(x=>x.page_index===state.page);
+    for(const b of rows){
       const d=document.createElement('div');
       d.style.cssText='position:absolute;left:'+(b.left*100).toFixed(1)+'%;top:'+(b.top*100).toFixed(1)+'%;width:'+Math.max(0.5,((b.right-b.left)*100)).toFixed(1)+'%;height:'+Math.max(0.5,((b.bottom-b.top)*100)).toFixed(1)+'%;border:1.5px solid #e07b39;box-sizing:border-box;pointer-events:none;';
-      d.innerHTML='<span style="position:absolute;top:-15px;left:0;background:#e07b39;color:#fff;font-size:10px;padding:0 4px;border-radius:3px;white-space:nowrap">'+(i+1)+'</span>';
-      d.title=(b.text||'')+'  [top'+(b.top*100).toFixed(1)+'%]';
+      d.innerHTML='<span style="position:absolute;top:-15px;left:0;background:#e07b39;color:#fff;font-size:10px;padding:0 4px;border-radius:3px;white-space:nowrap">'+(b.id!=null?b.id:'')+'</span>';
+      d.title=(b.text||'')+'  [KEY '+(b.id!=null?b.id:'')+', top'+(b.top*100).toFixed(1)+'%~'+(b.bottom*100).toFixed(1)+'%]';
       img.parentNode.appendChild(d);
     }
     // 标题匹配结果高亮(绿横线)
