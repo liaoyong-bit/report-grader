@@ -995,7 +995,9 @@ async function loadLocate(r){
   if(!window.__bridge.getReportLocate) return;
   try{
     const j=await window.__bridge.getReportLocate(S.folder, r.key);   // 统一以原始 report_key 存取（与保存侧一致，勿用改名文件名）
-    if(j){ const loc=JSON.parse(j); (loc.items||[]).forEach(li=>{ if(li.item_index!=null) r._locate[li.item_index]={ titleY_pct:li.titleY_pct!=null?li.titleY_pct:null, pageIndex:li.pageIndex, titleX_pct:li.titleX_pct!=null?li.titleX_pct:null }; }); }
+    if(j){ const loc=JSON.parse(j); (loc.items||[]).forEach(li=>{ if(li.item_index!=null) r._locate[li.item_index]={ titleY_pct:li.titleY_pct!=null?li.titleY_pct:null, pageIndex:li.pageIndex, titleX_pct:li.titleX_pct!=null?li.titleX_pct:null }; });
+      if(window.__bridge&&window.__bridge.log) window.__bridge.log('[定位读] key='+(r.key||'?')+' items='+(loc.items||[]).length+' 明细='+JSON.stringify((loc.items||[]).map(x=>({i:x.item_index,y:x.titleY_pct,pg:x.pageIndex}))));
+    }
   }catch(e){}
 }
 async function autoLocateTitles(r){
@@ -1093,6 +1095,7 @@ function px2(x,y,vp){ return vp.convertToViewportPoint(x,y); }
 // —— 叠加层：每题得分显示在"文字区右边缘(score_x/蓝框) + 标题行y"，统分区内等距排多分数（各题分+总分）。
 //    只显示数字，不再写"得分:N / 总分:N"。坐标沿用模板百分比(0-1)；旧像素数据(w>1)按报告页归一化，重框后精确。
 function addOverlays(r, wrap, pageIndex, vp, page){
+  const L=(m)=>{ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[批阅叠加] '+m); };
   const vp1 = page.getViewport({scale:1});
   const pw1 = vp1.width||1, ph1 = vp1.height||1;
   const items=(S.itemsFull||[]).filter(x=>x.item_index>=0);
@@ -1107,6 +1110,7 @@ function addOverlays(r, wrap, pageIndex, vp, page){
       let top;
       if(lc && lc.titleY_pct!=null && lc.pageIndex===pageIndex){ top = lc.titleY_pct*vp.height; }
       else { const py = isPct? (tr.y||0) : (tr.y||0)/ph1; top = py*vp.height; }
+      L('题'+i+' key='+(r.key||'?')+' lc='+(lc?JSON.stringify({y:lc.titleY_pct,pg:lc.pageIndex,x:lc.titleX_pct}):'无')+' pg='+pageIndex+' sp='+(t.score_page||0)+' try='+(isPct?tr.y:(tr.y||0)/ph1)+' topPx='+Math.round(top));
       // 横向：优先已存定位的整页文字区右缘(titleX_pct)；其次 score_x（文字区右边缘/蓝框）；最后红框右边缘
       let xPct=null;
       if(lc && lc.titleX_pct!=null && lc.titleX_pct>0){ xPct = lc.titleX_pct; }
