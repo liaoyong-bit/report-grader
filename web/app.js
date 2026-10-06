@@ -2735,11 +2735,15 @@ async function findTitleInScan(pdf, target, pageIdx, titleRectJson){
   let rows=[], pageRight=null, ana=null;
   // ① 像素结构分析
   try{ ana=await analyzePage(pdf,p,2); }catch(e){}
-  // ② 逐行 OCR（一行一行送，scale4，含表格内的文字行带）
+  // ② 逐行 OCR（一行一行送，scale4，含表格内的文字行带；上下各扩充3像素防裁字）
   try{
     const lines=(ana&&ana.textLines)||[];
+    let exp=0.004;   // 默认扩充(约3px@scale4)，下面按实际页高折算
+    try{ const vp0=await (await pdf.getPage(p+1)).getViewport({scale:4}); exp=Math.max(0.0005, 3/vp0.height); }catch(e){}
     for(const ln of lines){
-      const ab64=await renderAreaB64(pdf, p, 0.02, ln.top, 0.96, Math.max((ln.bottom-ln.top)||0.01, 0.006), 4);
+      const top=Math.max(0, ln.top-exp);
+      const h=Math.min(1-top, (ln.bottom-ln.top)+2*exp);
+      const ab64=await renderAreaB64(pdf, p, 0.02, top, 0.96, Math.max(h, 0.01), 4);
       const l=(await window.__bridge.ocrImageB64Words(ab64).catch(()=>[]))||[];
       const t=(l||[]).map(x=>x.text).join('');
       let r=0; for(const w of l){ const rr=0.02+((w.right!=null?w.right:w.left)||0)*0.96; if(rr>r) r=rr; }
