@@ -993,7 +993,7 @@ async function loadLocate(r){
   if(!r._locate) r._locate = {};
   if(!window.__bridge.getReportLocate) return;
   try{
-    const j=await window.__bridge.getReportLocate(S.folder, r.name);
+    const j=await window.__bridge.getReportLocate(S.folder, r.key);   // 统一以原始 report_key 存取（与保存侧一致，勿用改名文件名）
     if(j){ const loc=JSON.parse(j); (loc.items||[]).forEach(li=>{ if(li.item_index!=null) r._locate[li.item_index]={ titleY_pct:li.titleY_pct!=null?li.titleY_pct:null, pageIndex:li.pageIndex, titleX_pct:li.titleX_pct!=null?li.titleX_pct:null }; }); }
   }catch(e){}
 }
@@ -1010,7 +1010,7 @@ async function autoLocateTitles(r){
   // 已存定位 → 直接复用
   if(window.__bridge.getReportLocate){
     try{
-      const j=await window.__bridge.getReportLocate(S.folder, r.name);
+      const j=await window.__bridge.getReportLocate(S.folder, r.key);   // 统一以原始 report_key 存取（与保存侧一致，勿用改名文件名）
       if(j){ log('复用已存定位 '+j.length+'B'); const loc=JSON.parse(j); (loc.items||[]).forEach(li=>{ const it=r.analysis.items[li.item_index]; if(it){ it.titleY=li.titleY; it.pageIndex=li.pageIndex; if(li.titleX!=null) it.titleX=li.titleX; } }); return; }
       else log('无已存定位，开始找图');
     }catch(e){ log('读定位失败: '+e); }
