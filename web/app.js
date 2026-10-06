@@ -2587,14 +2587,16 @@ async function findTitleInTextLayer(pdf, target, pageIdx){
     const isTitle=(txt)=>/^[一二三四五六七八九十]、/.test(txt.trim());
     // 只匹配页面中上部(y<0.6)的标题行，避免误匹配页底统分区/评分表
     let first=null;
+    const dbg=(m)=>{ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[locDBG] '+m); };
+    dbg('pg='+pageIdx+' target="'+target+'" bare="'+bare+'" 总行='+lines.length+' ph='+ph.toFixed(1));
     for(const l of lines){
       const t=l.text.replace(/\s+/g,'');
       // 行中心（顶+半高）：文字版定位与扫描版(行中心)对齐，避免偏上行高一半；各页缩放不同会放大偏上差异
       const lh=Math.max.apply(null, l.items.map(it=>it.h||0))||0;
       const yPct=(l.y + lh/2)/ph;
       const isCand = isTitle(t) && (t.includes(target) || (bare && bare.length>1 && t.includes(bare)));
-      if(isCand){
-        console.log('[locDBG] pg='+pageIdx+' 候选 t="'+t+'" yTop='+(l.y/ph).toFixed(4)+' lh='+(lh/ph).toFixed(4)+' yPct='+yPct.toFixed(4)+' hit='+(yPct<0.7));
+      if(isCand || isTitle(t) || (bare && bare.length>1 && t.includes(bare))){
+        dbg('pg='+pageIdx+' 行 t="'+t.slice(0,28)+'" yTop='+(l.y/ph).toFixed(4)+' lh='+(lh/ph).toFixed(4)+' yPct='+yPct.toFixed(4)+' isTitle='+isTitle(t)+' hit='+(yPct<0.7));
       }
       if(yPct>=0.7) continue;
       if(!isTitle(t)) continue;
@@ -2603,6 +2605,7 @@ async function findTitleInTextLayer(pdf, target, pageIdx){
         break;
       }
     }
+    dbg('pg='+pageIdx+' 匹配结果='+(first?JSON.stringify(first):'null'));
     return first;
   }catch(e){}
   return null;
