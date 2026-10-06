@@ -2686,14 +2686,8 @@ async function analyzePage(pdf, pageIdx, scale=2){
   }
   if(tStart>=0) textBands.push({top:tStart,bottom:H-1});
   if(hStart>=0) hlines.push({top:hStart,bottom:H-1});
-  // 文字行带：相邻空白小 → 合并为段落
-  const gapMax=Math.max(1, Math.round(H*0.012));
-  const blocks=[];
-  for(const b of textBands){
-    const last=blocks[blocks.length-1];
-    if(last && (b.top-last.bottom)<=gapMax){ last.bottom=b.bottom; }
-    else blocks.push({top:b.top,bottom:b.bottom});
-  }
+  // 文字行带（单行，不做段落合并——定位时逐行送OCR）
+  const blocks=textBands.slice();
   // 字号换算：行带高 → A4(297mm) → pt（行距系数1.4）
   const mmPerPx=297/H;
   blocks.forEach(b=>{ b.pt=Math.round((b.bottom-b.top+1)*mmPerPx/0.3528/1.4*10)/10; });
@@ -2727,52 +2721,67 @@ async function analyzePage(pdf, pageIdx, scale=2){
     ? { rows: hlines.map(h=>({top:h.top/H, bottom:(h.bottom+1)/H})), cols: vx.map(x=>x/W) }
     : null;
   return {
-    textBands: blocks.map(b=>({top:Math.round(b.top/H*10000)/10000, bottom:Math.round((b.bottom+1)/H*10000)/10000, pt:b.pt})),
+    textLines: blocks.map(b=>({top:Math.round(b.top/H*10000)/10000, bottom:Math.round((b.bottom+1)/H*10000)/10000, pt:b.pt})),
     hlines: hlines.map(h=>({top:Math.round(h.top/H*10000)/10000, bottom:Math.round((h.bottom+1)/H*10000)/10000})),
     vlines: vlines.map(v=>({x:Math.round(v.x/W*10000)/10000, top:Math.round(v.top/H*10000)/10000, bottom:Math.round((v.bottom+1)/H*10000)/10000})),
     grid
   };
 }
-// 扫描版定位：①像素结构分析(文字段落+表格网格) → ②非表格段落整段聚焦OCR → ③表格格内逐格聚焦OCR → ④框选模板区域兜底；返回命中位置与文本
+// 扫描版定位：①像素结构分析(文字行+表格网格) → ②逐行OCR(一行一行送,含表格行带) → ③表格格内OCR补充 → ④跨行拼接匹配 → ⑤框选模板区域兜底
 async function findTitleInScan(pdf, target, pageIdx, titleRectJson){
   const p=pageIdx||0;
   const norm=(s)=>(s||'').replace(/\s+/g,'').replace(/[，。、；：（）()【】《》"'“”]/g,'');
   const tn=norm(target);
-  let lines=[], pageRight=null, ana=null;
+  let rows=[], pageRight=null, ana=null;
+  // ① 像素结构分析
+  try{ ana=await analyzePage(pdf,p,2); }catch(e){}
+  // ② 逐行 OCR（一行一行送，scale4，含表格内的文字行带）
   try{
-    ana=await analyzePage(pdf,p,2);
-    const b64=await renderPageB64(pdf, p, 3);
-    lines=(await window.__bridge.ocrImageB64Words(b64).catch(()=>[]))||[];
-    let mr=0;
-    for(const l of lines){ const r=(l.right!=null?l.right:l.left)||0; if(r>mr) mr=r; }
-    pageRight = mr>0 ? mr : null;
-    // ② 非表格文字段落：整段聚焦 OCR(scale4) 匹配标题
-    for(const b of (ana.textBands||[])){
-      const ab64=await renderAreaB64(pdf, p, 0.02, b.top, 0.96, (b.bottom-b.top)||0.02, 4);
-      const alines=(await window.__bridge.ocrImageB64Words(ab64).catch(()=>[]))||[];
-      const atext=(alines||[]).map(x=>x.text).join('');
-      if(norm(atext).includes(tn)){
-        return { pageIndex:p, titleY_pct: Math.round(b.top*10000)/10000, titleX_pct: (pageRight!=null?Math.round(pageRight*10000)/10000:null), ocr_text:atext, pt:b.pt };
-      }
+    const lines=(ana&&ana.textLines)||[];
+    for(const ln of lines){
+      const ab64=await renderAreaB64(pdf, p, 0.02, ln.top, 0.96, Math.max((ln.bottom-ln.top)||0.01, 0.006), 4);
+      const l=(await window.__bridge.ocrImageB64Words(ab64).catch(()=>[]))||[];
+      const t=(l||[]).map(x=>x.text).join('');
+      let r=0; for(const w of l){ const rr=0.02+((w.right!=null?w.right:w.left)||0)*0.96; if(rr>r) r=rr; }
+      if(r>0 && (pageRight==null || r>pageRight)) pageRight=r;
+      rows.push({top:ln.top, bottom:ln.bottom, text:t, pt:ln.pt});
     }
-    // ③ 表格格内：逐格聚焦 OCR 匹配
-    if(ana.grid && ana.grid.rows.length>=2 && ana.grid.cols.length>=2){
-      const rows=ana.grid.rows, cols=ana.grid.cols;
-      for(let ri=0; ri<rows.length-1; ri++){
-        const top=rows[ri].top, h=(rows[ri+1].top-top)||0.02;
+  }catch(e){}
+  // ③ 表格格内 OCR 补充（标题若整格、行带漏了也能补上）
+  try{
+    if(ana && ana.grid && ana.grid.rows.length>=2 && ana.grid.cols.length>=2){
+      const gR=ana.grid.rows, cols=ana.grid.cols;
+      for(let ri=0; ri<gR.length-1; ri++){
+        const top=gR[ri].top, h=(gR[ri+1].top-top)||0.02;
         for(let ci=0; ci<cols.length-1; ci++){
           const left=cols[ci], w=(cols[ci+1]-left)||0.02;
           const ab64=await renderAreaB64(pdf, p, left, top, w, h, 4);
-          const alines=(await window.__bridge.ocrImageB64Words(ab64).catch(()=>[]))||[];
-          const atext=(alines||[]).map(x=>x.text).join('');
-          if(norm(atext).includes(tn)){
-            return { pageIndex:p, titleY_pct: Math.round(top*10000)/10000, titleX_pct: (pageRight!=null?Math.round(pageRight*10000)/10000:null), ocr_text:atext };
+          const l=(await window.__bridge.ocrImageB64Words(ab64).catch(()=>[]))||[];
+          const t=(l||[]).map(x=>x.text).join('');
+          if(t.trim()){
+            let r=0; for(const ww of l){ const rr=left+((ww.right!=null?ww.right:ww.left)||0)*w; if(rr>r) r=rr; }
+            if(r>0 && (pageRight==null || r>pageRight)) pageRight=r;
+            rows.push({top, bottom:top+h, text:t, isCell:true});
           }
         }
       }
     }
   }catch(e){}
-  // ④ 框选模板区域兜底（原 title_rect）
+  // ④ 匹配标题：逐行 + 跨行拼接（标题若拆两行）
+  rows.sort((a,b)=>a.top-b.top);
+  for(let i=0;i<rows.length;i++){
+    const t1=norm(rows[i].text);
+    if(t1 && t1.includes(tn)){
+      return { pageIndex:p, titleY_pct: Math.round(rows[i].top*10000)/10000, titleX_pct: (pageRight!=null?Math.round(pageRight*10000)/10000:null), ocr_text:rows[i].text, pt:rows[i].pt };
+    }
+    if(i+1<rows.length){
+      const t2=norm(rows[i].text+rows[i+1].text);
+      if(t2 && t2.includes(tn)){
+        return { pageIndex:p, titleY_pct: Math.round(rows[i].top*10000)/10000, titleX_pct: (pageRight!=null?Math.round(pageRight*10000)/10000:null), ocr_text:rows[i].text+rows[i+1].text, pt:rows[i].pt };
+      }
+    }
+  }
+  // ⑤ 框选模板区域兜底（原 title_rect）
   try{
     let rect={}; try{ rect=JSON.parse(titleRectJson||'{}'); }catch(e){}
     if(rect.x!=null && rect.y!=null && rect.w && rect.h){
@@ -2786,8 +2795,9 @@ async function findTitleInScan(pdf, target, pageIdx, titleRectJson){
       }
     }
   }catch(e){}
-  // ⑤ 全部未命中 → 返回还原文本（位置空）
-  return { pageIndex:p, titleY_pct: null, titleX_pct: null, ocr_text: (lines||[]).map(x=>x.text).join('\n') };
+  // ⑥ 全部未命中 → 返回还原文本（逐行拼接，位置空）
+  const rt=rows.map(x=>x.text).join('\n');
+  return { pageIndex:p, titleY_pct: null, titleX_pct: null, ocr_text: rt };
 }
 // 扫描版定位整份报告
 async function locateReportTitlesScan(path, tpl){
