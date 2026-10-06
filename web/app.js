@@ -2657,6 +2657,7 @@ async function analyzePage(pdf, pageIdx, scale=2){
   const isBg=(i)=>{ const r=data[i],g=data[i+1],b=data[i+2]; return r>242&&g>242&&b>242; };
   // 逐像素行：统计非背景占比 + 最大连续黑段（判断表格横线）
   const rowType=new Array(H).fill('blank');
+  let maxRightPx=-1;   // 本页文字区最右黑像素（文字区右边界判定：该页顶到最右端的行）
   for(let y=0;y<H;y++){
     let cnt=0, maxSeg=0, seg=0, segStart=-1, segLeft=W, segRight=-1;
     const off=y*W;
@@ -2672,6 +2673,7 @@ async function analyzePage(pdf, pageIdx, scale=2){
       rowType[y]='hline';
     } else if(ratio>0.0012 && maxSeg < W*0.5){   // 文字行（黑白交替，含粗体大标题；用最大连续段<行宽一半防填充块，不再按占比上限排除粗体标题）
       rowType[y]='text';
+      if(segRight>maxRightPx) maxRightPx=segRight;
     }
   }
   // 连续同类行 → 文字行带 / 表格横杠（连续横线行合并为同一根横杠）
@@ -2775,7 +2777,8 @@ async function analyzePage(pdf, pageIdx, scale=2){
     textLines: textLines.map(b=>({top:Math.round(b.top/H*10000)/10000, bottom:Math.round((b.bottom+1)/H*10000)/10000, left:Math.round(b.left*10000)/10000, right:Math.round(b.right*10000)/10000, pt:b.pt, cell:b.cell})),
     hlines: hlines.map(h=>({top:Math.round(h.top/H*10000)/10000, bottom:Math.round((h.bottom+1)/H*10000)/10000})),
     vlines: vlines.map(v=>({x:Math.round(v.x/W*10000)/10000, top:Math.round(v.top/H*10000)/10000, bottom:Math.round((v.bottom+1)/H*10000)/10000})),
-    grid
+    grid,
+    pageRight: maxRightPx>0 ? Math.round(maxRightPx/W*10000)/10000 : null
   };
 }
 // 最长连续公共子串长度（标题与识别文本），用于匹配容错
@@ -2875,6 +2878,7 @@ async function locateReportTitlesScan(path, tpl){
     // 全页逐行 OCR（从第一页起，完整还原文本 + 跨页定位）
     for(let p=0;p<pdf.numPages;p++){
       let ana=null; try{ ana=await analyzePage(pdf,p,2); }catch(e){}
+      if(ana && ana.pageRight!=null && (pageRight==null || ana.pageRight>pageRight)) pageRight=ana.pageRight;
       const lines=(ana&&ana.textLines)||[];
       let exp=0.004; try{ const vp0=await (await pdf.getPage(p+1)).getViewport({scale:4}); exp=Math.max(0.0005,3/vp0.height); }catch(e){}
       for(const ln of lines){
@@ -2883,7 +2887,6 @@ async function locateReportTitlesScan(path, tpl){
         const ab64=await renderAreaB64(pdf,p,ln.left,top,Math.max(0.01,ln.right-ln.left),Math.max(h,0.01),4);
         const l=(await window.__bridge.ocrImageB64Words(ab64).catch(()=>[]))||[];
         const t=(l||[]).map(x=>x.text).join('');
-        if(!ln.cell){ let r=0; for(const w of l){ const rr=ln.left+((w.right!=null?w.right:w.left)||0)*(ln.right-ln.left); if(rr>r) r=rr; } if(r>0 && (pageRight==null || r>pageRight)) pageRight=r; }
         allRows.push({pageIndex:p, top:ln.top, bottom:ln.bottom, text:t});
       }
     }
