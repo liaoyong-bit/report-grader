@@ -2643,71 +2643,136 @@ function clusterLines(lines, gap=0.016){
 }
 // 逐像素行扫描检测"文字行带"：文字行是连续多条像素行且行内黑白交替(非背景像素占比适中)，空白行没有。
 // 返回段落块(top/bottom 比例)——字体大小不影响，按真实文字区域切分。
-async function detectTextBands(pdf, pageIdx, scale=2){
+// 页面结构分析（逐像素行扫描）：区分 文字行带 / 表格横线 / 空白；检测表格竖线→重建网格；并反推字号(A4)
+// 返回 { textBands:[{top,bottom,pt}], hlines:[{top,bottom}], vlines:[{x,top,bottom}], grid:{rows,cols}|null }
+async function analyzePage(pdf, pageIdx, scale=2){
   const page=await pdf.getPage(pageIdx+1);
   const vp=page.getViewport({scale});
   const canvas=document.createElement('canvas'); canvas.width=Math.floor(vp.width); canvas.height=Math.floor(vp.height);
   await page.render({canvasContext:canvas.getContext('2d'), viewport:vp}).promise;
   const W=canvas.width, H=canvas.height;
-  if(!W||!H) return [];
+  const empty={textBands:[], hlines:[], vlines:[], grid:null};
+  if(!W||!H) return empty;
   const data=canvas.getContext('2d').getImageData(0,0,W,H).data;
-  const rowText=new Array(H).fill(false);
+  const isBg=(i)=>{ const r=data[i],g=data[i+1],b=data[i+2]; return r>242&&g>242&&b>242; };
+  // 逐像素行：统计非背景占比 + 最大连续黑段（判断表格横线）
+  const rowType=new Array(H).fill('blank');
   for(let y=0;y<H;y++){
-    let cnt=0; const off=y*W;
+    let cnt=0, maxSeg=0, seg=0, segStart=-1, segLeft=W, segRight=-1;
+    const off=y*W;
     for(let x=0;x<W;x++){
-      const i=(off+x)*4;
-      const r=data[i],g=data[i+1],b=data[i+2];
-      if(!(r>242&&g>242&&b>242)) cnt++;   // 非背景(接近白)像素
+      if(!isBg((off+x)*4)){
+        cnt++; if(seg===0) segStart=x; seg++; if(seg>maxSeg) maxSeg=seg; segRight=x;
+      } else { if(seg>0){ if(segStart<segLeft) segLeft=segStart; seg=0; } }
     }
+    if(seg>0 && segStart<segLeft) segLeft=segStart;
     const ratio=cnt/W;
-    // 有文字(占比>0.12%)但非整行连续(占比<55%，排除表格横线/填充块)
-    rowText[y]= ratio>0.0012 && ratio<0.55;
+    // 表格横线：黑像素聚成一个覆盖中间的大连续段(段长>行宽一半)，且段左右都有空白
+    if(maxSeg> W*0.5 && segLeft> W*0.04 && segRight< W*0.96 && ratio>0.3){
+      rowType[y]='hline';
+    } else if(ratio>0.0012 && ratio<0.55){   // 文字行（黑白交替）
+      rowType[y]='text';
+    }
   }
-  // 连续文字像素行 → 文字行带
-  const bands=[];
-  let start=-1;
+  // 连续同类行 → 文字行带 / 表格横杠（连续横线行合并为同一根横杠）
+  const textBands=[], hlines=[];
+  let tStart=-1, hStart=-1;
   for(let y=0;y<H;y++){
-    if(rowText[y] && start<0) start=y;
-    if(!rowText[y] && start>=0){ bands.push({top:start,bottom:y-1}); start=-1; }
+    const ty=rowType[y];
+    if(ty==='text' && tStart<0) tStart=y;
+    if(ty!=='text' && tStart>=0){ textBands.push({top:tStart,bottom:y-1}); tStart=-1; }
+    if(ty==='hline' && hStart<0) hStart=y;
+    if(ty!=='hline' && hStart>=0){ hlines.push({top:hStart,bottom:y-1}); hStart=-1; }
   }
-  if(start>=0) bands.push({top:start,bottom:H-1});
-  if(!bands.length) return [];
-  // 相邻行带之间空白少 → 合并为段落（同一标题多行/相邻正文），空白大 → 分段
+  if(tStart>=0) textBands.push({top:tStart,bottom:H-1});
+  if(hStart>=0) hlines.push({top:hStart,bottom:H-1});
+  // 文字行带：相邻空白小 → 合并为段落
   const gapMax=Math.max(1, Math.round(H*0.012));
   const blocks=[];
-  for(const b of bands){
+  for(const b of textBands){
     const last=blocks[blocks.length-1];
     if(last && (b.top-last.bottom)<=gapMax){ last.bottom=b.bottom; }
     else blocks.push({top:b.top,bottom:b.bottom});
   }
-  return blocks.map(b=>({ top: Math.round(b.top/H*10000)/10000, bottom: Math.round((b.bottom+1)/H*10000)/10000 }));
+  // 字号换算：行带高 → A4(297mm) → pt（行距系数1.4）
+  const mmPerPx=297/H;
+  blocks.forEach(b=>{ b.pt=Math.round((b.bottom-b.top+1)*mmPerPx/0.3528/1.4*10)/10; });
+  // 竖线检测：相邻两根横杠之间的区域里找"垂直连续黑"列，并与上/下横杠同x(±容差)确认
+  const vlines=[];
+  if(hlines.length>=2){
+    for(let hi=0; hi<hlines.length-1; hi++){
+      const top=hlines[hi].bottom+1, bot=hlines[hi+1].top-1;
+      if(bot-top<1) continue;
+      for(let x=1;x<W-1;x++){
+        let c=0;
+        for(let y=top;y<=bot;y++){ if(!isBg((y*W+x)*4)) c++; }
+        if(c/(bot-top+1)>0.85){   // 该列垂直连续黑 → 竖线候选
+          const n=Math.max(1, Math.round(W*0.0015));   // 容差：与横杠像素 x 差在 n 内
+          let up=false, down=false;
+          for(let dx=-n;dx<=n;dx++){
+            const xx=x+dx; if(xx<0||xx>=W) continue;
+            if(!isBg((hlines[hi].top*W+xx)*4)) up=true;
+            if(!isBg((hlines[hi+1].bottom*W+xx)*4)) down=true;
+          }
+          if(up && down){ vlines.push({x, top:hlines[hi].top, bottom:hlines[hi+1].bottom}); x++; }
+        }
+      }
+    }
+  }
+  // 去重竖线（合并相邻 x）
+  const vx=[];
+  for(const v of vlines){ if(!vx.length || v.x-vx[vx.length-1].x>2) vx.push(v.x); }
+  // 网格：横杠 y 为行边界，竖线 x 为列边界
+  const grid = (hlines.length>=2 && vx.length>=2)
+    ? { rows: hlines.map(h=>({top:h.top/H, bottom:(h.bottom+1)/H})), cols: vx.map(x=>x/W) }
+    : null;
+  return {
+    textBands: blocks.map(b=>({top:Math.round(b.top/H*10000)/10000, bottom:Math.round((b.bottom+1)/H*10000)/10000, pt:b.pt})),
+    hlines: hlines.map(h=>({top:Math.round(h.top/H*10000)/10000, bottom:Math.round((h.bottom+1)/H*10000)/10000})),
+    vlines: vlines.map(v=>({x:Math.round(v.x/W*10000)/10000, top:Math.round(v.top/H*10000)/10000, bottom:Math.round((v.bottom+1)/H*10000)/10000})),
+    grid
+  };
 }
-// 扫描版定位：①逐像素行扫描检测文字段落块（自动框选）→ ②逐段落区域聚焦OCR(scale4)精确识别匹配标题 → ③框选模板区域兜底；返回命中段落位置与文本
+// 扫描版定位：①像素结构分析(文字段落+表格网格) → ②非表格段落整段聚焦OCR → ③表格格内逐格聚焦OCR → ④框选模板区域兜底；返回命中位置与文本
 async function findTitleInScan(pdf, target, pageIdx, titleRectJson){
   const p=pageIdx||0;
   const norm=(s)=>(s||'').replace(/\s+/g,'').replace(/[，。、；：（）()【】《》"'“”]/g,'');
   const tn=norm(target);
-  let lines=[], pageRight=null;
-  // ① 像素行检测段落 + 整页OCR(拿右缘与还原文本)
-  let blocks=[];
+  let lines=[], pageRight=null, ana=null;
   try{
-    blocks=await detectTextBands(pdf,p,2)||[];
+    ana=await analyzePage(pdf,p,2);
     const b64=await renderPageB64(pdf, p, 3);
     lines=(await window.__bridge.ocrImageB64Words(b64).catch(()=>[]))||[];
     let mr=0;
     for(const l of lines){ const r=(l.right!=null?l.right:l.left)||0; if(r>mr) mr=r; }
     pageRight = mr>0 ? mr : null;
-    // 逐段落区域聚焦 OCR(scale4) 匹配标题，命中段落 → 位置取段落 top
-    for(const b of blocks){
+    // ② 非表格文字段落：整段聚焦 OCR(scale4) 匹配标题
+    for(const b of (ana.textBands||[])){
       const ab64=await renderAreaB64(pdf, p, 0.02, b.top, 0.96, (b.bottom-b.top)||0.02, 4);
       const alines=(await window.__bridge.ocrImageB64Words(ab64).catch(()=>[]))||[];
       const atext=(alines||[]).map(x=>x.text).join('');
       if(norm(atext).includes(tn)){
-        return { pageIndex:p, titleY_pct: Math.round(b.top*10000)/10000, titleX_pct: (pageRight!=null?Math.round(pageRight*10000)/10000:null), ocr_text:atext };
+        return { pageIndex:p, titleY_pct: Math.round(b.top*10000)/10000, titleX_pct: (pageRight!=null?Math.round(pageRight*10000)/10000:null), ocr_text:atext, pt:b.pt };
+      }
+    }
+    // ③ 表格格内：逐格聚焦 OCR 匹配
+    if(ana.grid && ana.grid.rows.length>=2 && ana.grid.cols.length>=2){
+      const rows=ana.grid.rows, cols=ana.grid.cols;
+      for(let ri=0; ri<rows.length-1; ri++){
+        const top=rows[ri].top, h=(rows[ri+1].top-top)||0.02;
+        for(let ci=0; ci<cols.length-1; ci++){
+          const left=cols[ci], w=(cols[ci+1]-left)||0.02;
+          const ab64=await renderAreaB64(pdf, p, left, top, w, h, 4);
+          const alines=(await window.__bridge.ocrImageB64Words(ab64).catch(()=>[]))||[];
+          const atext=(alines||[]).map(x=>x.text).join('');
+          if(norm(atext).includes(tn)){
+            return { pageIndex:p, titleY_pct: Math.round(top*10000)/10000, titleX_pct: (pageRight!=null?Math.round(pageRight*10000)/10000:null), ocr_text:atext };
+          }
+        }
       }
     }
   }catch(e){}
-  // ② 框选模板区域兜底（原 title_rect）
+  // ④ 框选模板区域兜底（原 title_rect）
   try{
     let rect={}; try{ rect=JSON.parse(titleRectJson||'{}'); }catch(e){}
     if(rect.x!=null && rect.y!=null && rect.w && rect.h){
@@ -2721,7 +2786,7 @@ async function findTitleInScan(pdf, target, pageIdx, titleRectJson){
       }
     }
   }catch(e){}
-  // ③ 全部未命中 → 返回还原文本（位置空）
+  // ⑤ 全部未命中 → 返回还原文本（位置空）
   return { pageIndex:p, titleY_pct: null, titleX_pct: null, ocr_text: (lines||[]).map(x=>x.text).join('\n') };
 }
 // 扫描版定位整份报告
