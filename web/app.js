@@ -2921,10 +2921,19 @@ async function locateReportTitlesScan(path, tpl){
       for(const ln of lines){
         const top=Math.max(0,ln.top-exp);
         const h=Math.min(1-top,(ln.bottom-ln.top)+2*exp);
-        const ab64=await renderAreaB64(pdf,p,ln.left,top,Math.max(0.01,ln.right-ln.left),Math.max(h,0.01),4);
+        const wd=Math.max(0.01,ln.right-ln.left);
+        const ab64=await renderAreaB64(pdf,p,ln.left,top,wd,Math.max(h,0.01),4);
         const l=(await window.__bridge.ocrImageB64Words(ab64).catch(()=>[]))||[];
         const t=(l||[]).map(x=>x.text).join('');
-        allRows.push({pageIndex:p, top:ln.top, bottom:ln.bottom, left:ln.left!=null?ln.left:0.02, right:ln.right!=null?ln.right:0.98, text:t, cell:ln.cell||null});
+        // 记录每个 word 的页内坐标(相对该band区域 top/h 换算)：用于标题精确定位(避免band合并多行致中心偏上)
+        const words=(l||[]).map(w=>({
+          text:w.text,
+          top: top + (w.top!=null?w.top:0.5)*h,
+          bottom: top + (w.bottom!=null?w.bottom:0.9)*h,
+        }));
+        allRows.push({pageIndex:p, top:ln.top, bottom:ln.bottom, left:ln.left!=null?ln.left:0.02, right:ln.right!=null?ln.right:0.98, text:t, cell:ln.cell||null, words});
+        let rr=0; for(const w of l){ const rv=ln.left+((w.right!=null?w.right:w.left)||0)*wd; if(rv>rr) rr=rv; }
+        if(rr>0 && (pageRight==null||rr>pageRight)) pageRight=rr;
       }
     }
     // 每题标题匹配（跨页，含跨行拼接与80%容错）
@@ -2948,8 +2957,24 @@ async function locateReportTitlesScan(path, tpl){
         }
       }
       if(hit){
-        // 纵向取该文字行"头尾像素行的中间值"（垂直中心）÷ 整页像素 = 百分比，更科学
-        const midY=(hit.top+hit.bottom)/2;
+        // 精确定位：把该band的OCR word按纵向聚类成"视觉行"，取含标题文本那一行的中心
+        // (band可能把标题行与紧邻的上一行合并，用band中心会偏上；用标题文字所在视觉行则精确)
+        let titleRowY=null;
+        if(hit.words && hit.words.length){
+          const ws=hit.words.slice().sort((a,b)=>a.top-b.top);
+          const gap=(hit.bottom-hit.top)*0.55;
+          const gps=[];
+          for(const w of ws){
+            const last=gps[gps.length-1];
+            if(last && w.top-last.bottom < gap){ last.bottom=Math.max(last.bottom,w.bottom); last.top=Math.min(last.top,w.top); last.text+=w.text; }
+            else gps.push({top:w.top, bottom:w.bottom, text:w.text});
+          }
+          for(const g of gps){
+            const gt=norm(g.text);
+            if(gt && (gt.includes(tn)||(tn.length>0&&longestContMatch(tn,gt)/tn.length>=0.8))){ titleRowY=(g.top+g.bottom)/2; break; }
+          }
+        }
+        const midY = titleRowY!=null ? titleRowY : (hit.top+hit.bottom)/2;
         locItems.push({item_index:it.item_index, pageIndex:hit.pageIndex, titleY_pct:Math.round(midY*10000)/10000, titleX_pct:(pageRight!=null?Math.round(pageRight*10000)/10000:null), ocr_text:hit.text});
       } else { locItems.push({item_index:it.item_index, pageIndex:null, titleY_pct:null, titleX_pct:null, ocr_text:''}); fully=false; }
     }
