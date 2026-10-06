@@ -2589,15 +2589,24 @@ async function findTitleInTextLayer(pdf, target, pageIdx){
     let best=null;
     const dbg=(m)=>{ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[locDBG] '+m); };
     dbg('pg='+pageIdx+' target="'+target+'" bare="'+bare+'" 总行='+lines.length+' ph='+ph.toFixed(1));
-    for(const l of lines){
+    for(let li=0; li<lines.length; li++){
+      const l=lines[li];
       const t=l.text.replace(/\s+/g,'');
       // 行中心（顶+半高）：与扫描版(行中心)对齐，避免偏上行高一半
       const lh=Math.max.apply(null, l.items.map(it=>it.h||0))||0;
       const yPct=(l.y + lh/2)/ph;
       if(!isTitle(t)) continue;
       if(!(t.includes(target) || (bare && bare.length>1 && t.includes(bare)))) continue;
-      dbg('pg='+pageIdx+' 命中行 t="'+t.slice(0,28)+'" yPct='+yPct.toFixed(4));
-      // 取页面最靠下的匹配标题行(正文标题)，避开页顶统分区表头
+      // 正文标题验证：该行下方(同页,限5行)应有"填写要求"或"评分标准"，排除统分区表头(评分表内无此字样)；遇下一标题行即停
+      let body=false;
+      for(let j=li+1; j<lines.length && j<=li+5; j++){
+        const nt=lines[j].text||'';
+        if(/填写要求|评分标准/.test(nt)){ body=true; break; }
+        if(/^[一二三四五六七八九十]、/.test(nt.trim())) break;
+      }
+      if(!body) continue;
+      dbg('pg='+pageIdx+' 命中正文标题 t="'+t.slice(0,28)+'" yPct='+yPct.toFixed(4));
+      // 取页面最靠下的匹配正文标题行
       if(!best || yPct>best.yPct){
         best={ pageIndex:pageIdx, titleY_pct: Math.round(yPct*10000)/10000, titleX_pct: rightPct, ocr_text:'' };
       }
@@ -2615,11 +2624,9 @@ async function locateReportTitlesText(path, tpl){
     const locItems=[]; let fully=true;
     for(const it of tpl){
       const target=locateTarget(it);
-      const sp=it.score_page||0;
       let f=null;
-      // 模板 score_page 可能比实际报告页码偏移1：在 ±1 页范围内搜索，自动纠正
-      for(const p of [sp-1, sp, sp+1]){
-        if(p<0 || p>=n) continue;
+      // 跨页搜索：不依赖score_page(解决内容撑页/页码偏移)，每题取第一个匹配的正文标题页
+      for(let p=0; p<pdf.numPages; p++){
         f=await findTitleInTextLayer(pdf, target, p);
         if(f) break;
       }
@@ -3029,22 +3036,36 @@ async function runLocatePositions(){
     if(await hasTextLayer(t.renamed_path)) textNeed.push(t); else scanNeed.push(t);
   }
   L2('文字层 '+textNeed.length+' 份, 扫描版 '+scanNeed.length+' 份');
-  // 统一走"像素逐行扫描+OCR"：文字版/扫描版一视同仁，跨页搜索不依赖score_page(解决页码偏移/内容撑页)
-  showVerifyProgress(targets.length, '定位批阅位置：逐行扫描+OCR（跨页）');
-  let doneN=0;
-  for(const t of targets){
-    S._vpDone++; updateVerifyProgress();
-    const res=await locateReportTitlesScan(t.renamed_path, itemTpl);
-    const locKey=t.key;                    // 数据库 report_key（原始文件名）
-    const assetKey=t.renamed_path.split(/[\\/]/).pop();   // 改名文件名（还原文本资产名）
-    if(res.items.length){ await saveLoc(locKey, res.items, 'auto'); doneN++; }
-    if(res.fullText && window.__bridge.saveScanText){
-      try{ await window.__bridge.saveScanText(S.folder, assetKey, res.fullText); }catch(e){ L2('保存还原文本失败 '+assetKey+': '+e); }
+  // 文字版优先用文字层精确匹配(跨页+正文验证,位置精确)；扫描版/文字层失败者用像素扫描定位
+  const toScan=[];
+  let doneText=0, doneScan=0;
+  if(textNeed.length){
+    showVerifyProgress(textNeed.length, '第1步：文字版定位');
+    for(const t of textNeed){
+      S._vpDone++; updateVerifyProgress();
+      const res=await locateReportTitlesText(t.renamed_path, itemTpl);
+      if(res.fully && res.items.length){ await saveLoc(t.key, res.items, 'auto'); doneText++; }
+      else toScan.push(t);
     }
+    hideVerifyProgress();
   }
-  hideVerifyProgress();
+  const scanList=[...scanNeed, ...toScan];
+  if(scanList.length){
+    showVerifyProgress(scanList.length, '第2步：扫描版定位');
+    for(const t of scanList){
+      S._vpDone++; updateVerifyProgress();
+      const res=await locateReportTitlesScan(t.renamed_path, itemTpl);
+      const locKey=t.key;                    // 数据库 report_key（原始文件名）
+      const assetKey=t.renamed_path.split(/[\\/]/).pop();   // 改名文件名（还原文本资产名）
+      if(res.items.length){ await saveLoc(locKey, res.items, 'auto'); doneScan++; }
+      if(res.fullText && window.__bridge.saveScanText){
+        try{ await window.__bridge.saveScanText(S.folder, assetKey, res.fullText); }catch(e){ L2('保存还原文本失败 '+assetKey+': '+e); }
+      }
+    }
+    hideVerifyProgress();
+  }
   refreshPrepOverview();
-  setDetect('✅ 定位完成：自动定位 '+doneN+' 份，未定位 '+(targets.length-doneN)+' 份（可在核心表人工定位）');
+  setDetect('✅ 定位完成：自动定位 '+(doneText+doneScan)+' 份，未定位 '+(targets.length-doneText-doneScan)+' 份（可在核心表人工定位）');
 }
 
 /* ---- 人工定位兜底：对「待定位」的报告，拖动蓝框到每题标题行，只改纵向，横向沿用模板文字区右边缘(score_x) ---- */
