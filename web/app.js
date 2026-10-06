@@ -319,42 +319,49 @@ function renderPrepTable(ov, roster){
 
   rosterL.forEach((s,i)=>{
     const mine = rows.filter(r=>r.matched && r.stu_no===s.no);
-    const tr = document.createElement('tr');
-    const tdC = document.createElement('td'); tdC.className='col-check';
-    const cb = document.createElement('input'); cb.type='checkbox'; cb.dataset.i = i;
-    cb.checked = !!(S.prepChecked && S.prepChecked[i]);
-    cb.addEventListener('change', ()=>{ S.prepChecked[i]=cb.checked; });
-    tdC.appendChild(cb); tr.appendChild(tdC);
-    addTd(tr, s.no); addTd(tr, s.name); addTd(tr, s.cls); addTd(tr, s.report_name);
-    addNodes(tr, mine.map(mkSrc));
-    const rnm = mine.map(mkRnm).filter(Boolean);
-    addNodes(tr, rnm);
-    const anyRen = mine.some(r=>r.renamed_path);
-    const tdR=document.createElement('td'); tdR.appendChild(tagSpan(anyRen?'renamed':'unrenamed', anyRen?'已改名':(mine.length?'未改名':'—'))); tr.appendChild(tdR);
-    // 「已定位」列：待定位/已定位(自动)/人工定位 + 定位按钮（只对有改名版的报告）
-    const locR = mine.find(x=>x.renamed_path);
-    const tdL=document.createElement('td');
-    if(locR){
-      const st=locR.locate_status||'pending';
-      const lcls = st==='auto'?'done':(st==='manual'?'manual':'todo');
-      const ltxt = st==='auto'?'已定位':(st==='manual'?'人工定位':'待定位');
-      tdL.appendChild(tagSpan(lcls,ltxt));
-      if(st==='pending'){
+    // 每份匹配报告独立一行（各自一套状态）；该学生没有报告则一行表示缺交
+    const lines = mine.length ? mine : [null];
+    lines.forEach((r,li)=>{
+      const tr = document.createElement('tr');
+      const tdC = document.createElement('td'); tdC.className='col-check';
+      const cb = document.createElement('input'); cb.type='checkbox'; cb.dataset.i = i;
+      cb.checked = !!(S.prepChecked && S.prepChecked[i]);
+      cb.addEventListener('change', ()=>{ S.prepChecked[i]=cb.checked; });
+      tdC.appendChild(cb); tr.appendChild(tdC);
+      // 学号/姓名/班级/报告名称：多份时只在首行显示学生信息
+      addTd(tr, li===0?s.no:''); addTd(tr, li===0?s.name:''); addTd(tr, li===0?s.cls:''); addTd(tr, li===0?s.report_name:'');
+      if(!r){
+        addNodes(tr,[]); addNodes(tr,[]);
+        const tdR=document.createElement('td'); tdR.appendChild(tagSpan('unrenamed','—')); tr.appendChild(tdR);
+        const tdL=document.createElement('td'); tdL.appendChild(tagSpan('todo','—')); tr.appendChild(tdL);
+        const tdM=document.createElement('td'); tdM.appendChild(tagSpan('new','未交')); tr.appendChild(tdM);
+        const tdG=document.createElement('td'); tdG.appendChild(tagSpan('todo','待批')); tr.appendChild(tdG);
+        const tdO=document.createElement('td'); tdO.textContent='—'; tr.appendChild(tdO);
+        tbody.appendChild(tr); return;
+      }
+      addNodes(tr,[mkSrc(r)]);
+      addNodes(tr,[mkRnm(r)].filter(Boolean));
+      // 改名状态：按本份报告独立
+      const tdR=document.createElement('td'); tdR.appendChild(tagSpan(r.renamed_path?'renamed':'unrenamed', r.renamed_path?'已改名':'未改名')); tr.appendChild(tdR);
+      // 「已定位」列：按本份报告独立
+      const st=r.locate_status||'pending';
+      const lcls=st==='auto'?'done':(st==='manual'?'manual':'todo');
+      const ltxt=st==='auto'?'已定位':(st==='manual'?'人工定位':'待定位');
+      const tdL=document.createElement('td'); tdL.appendChild(tagSpan(lcls,ltxt));
+      if(st==='pending' && r.renamed_path){
         const lb=document.createElement('button'); lb.className='opbtn locate'; lb.textContent='定位';
         lb.title='人工定位：拖动蓝框到每题标题行';
-        lb.onclick=()=>{ manualLocate(locR); };
+        lb.onclick=()=>{ manualLocate(r); };
         tdL.appendChild(lb);
       }
-    } else { tdL.appendChild(tagSpan('todo','—')); }
-    tr.appendChild(tdL);
-    const tdM=document.createElement('td'); tdM.appendChild(tagSpan(mine.length?'mat':'new', mine.length?'已挂靠':'未交')); tr.appendChild(tdM);
-    const anyDone=mine.some(r=>r.done); const anyGraded=mine.some(r=>r.graded);
-    const tdG=document.createElement('td'); tdG.appendChild(tagSpan(anyDone?'done':'todo', anyDone?'已批':(mine.length?(anyGraded?'部分':'待批'):'—'))); tr.appendChild(tdG);
-    const tdO=document.createElement('td');
-    if(mine.length){ const ab=document.createElement('button'); ab.className='opbtn attached'; ab.textContent=mine.length>1?('自动挂靠 ×'+mine.length):'已挂靠'; tdO.appendChild(ab); }
-    else { tdO.textContent='—'; }
-    tr.appendChild(tdO);
-    tbody.appendChild(tr);
+      tr.appendChild(tdL);
+      // 匹配/批改：按本份报告独立
+      const tdM=document.createElement('td'); tdM.appendChild(tagSpan('mat','已挂靠')); tr.appendChild(tdM);
+      const tdG=document.createElement('td'); tdG.appendChild(tagSpan(r.done?'done':'todo', r.done?'已批':(r.graded?'部分':'待批'))); tr.appendChild(tdG);
+      const tdO=document.createElement('td');
+      const ab=document.createElement('button'); ab.className='opbtn attached'; ab.textContent='已挂靠'; tdO.appendChild(ab); tr.appendChild(tdO);
+      tbody.appendChild(tr);
+    });
   });
 
   const unmatch = rows.filter(r=>!r.matched);
