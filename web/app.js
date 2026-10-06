@@ -2738,8 +2738,41 @@ async function analyzePage(pdf, pageIdx, scale=2){
     }
   }
   const grid = grids.length? grids[0] : null;
+  // —— 表格格内文字扫描：先重建网格，再在格内逐像素行（左右限于格列、上下限于格行）——
+  const tableYRanges = tGroups.map(grp=>({a:grp[0].top, b:grp[grp.length-1].bottom}));
+  const inTable=(y)=>{ for(const r of tableYRanges){ if(y>=r.a && y<=r.b) return true; } return false; };
+  const freeBlocks = blocks.filter(b=>!inTable((b.top+b.bottom)>>1));
+  const cellLines=[];
+  const colEdges=[0].concat(vx, W);
+  const mmPerPx2=297/H;
+  for(let gi=0; gi<tGroups.length; gi++){
+    const grp=tGroups[gi];
+    for(let ri=0; ri<grp.length-1; ri++){
+      const rowTop=grp[ri].bottom+1, rowBot=grp[ri+1].top-1;
+      if(rowBot-rowTop<1) continue;
+      for(let ci=0; ci<colEdges.length-1; ci++){
+        const cLeft=colEdges[ci]+1, cRight=colEdges[ci+1]-1;
+        if(cRight-cLeft<1) continue;
+        let gStart=-1;
+        for(let y=rowTop;y<=rowBot;y++){
+          let cnt=0; const off=y*W;
+          for(let x=cLeft;x<=cRight;x++){ if(!isBg((off+x)*4)) cnt++; }
+          const gRatio=cnt/(cRight-cLeft+1);
+          const isGText = gRatio>0.0012 && gRatio<0.6;   // 格内文字行
+          if(isGText && gStart<0) gStart=y;
+          if(!isGText && gStart>=0){ cellLines.push({top:gStart,bottom:y-1,left:cLeft/W,right:cRight/W,cell:{grid:gi,row:ri,col:ci},pt:Math.round((y-gStart)*mmPerPx2/0.3528/1.4*10)/10}); gStart=-1; }
+        }
+        if(gStart>=0){ cellLines.push({top:gStart,bottom:rowBot,left:cLeft/W,right:cRight/W,cell:{grid:gi,row:ri,col:ci},pt:Math.round((rowBot-gStart+1)*mmPerPx2/0.3528/1.4*10)/10}); }
+      }
+    }
+  }
+  // 汇总：非表格行带(整页宽) + 格内行带，按纵向排序
+  const textLines=[];
+  freeBlocks.forEach(b=>{ textLines.push({top:b.top,bottom:b.bottom,left:0.02,right:0.98,pt:b.pt,cell:null}); });
+  cellLines.forEach(c=>{ textLines.push({top:c.top,bottom:c.bottom,left:c.left,right:c.right,pt:c.pt,cell:c.cell}); });
+  textLines.sort((a,b)=>a.top-b.top);
   return {
-    textLines: blocks.map(b=>({top:Math.round(b.top/H*10000)/10000, bottom:Math.round((b.bottom+1)/H*10000)/10000, pt:b.pt})),
+    textLines: textLines.map(b=>({top:Math.round(b.top/H*10000)/10000, bottom:Math.round((b.bottom+1)/H*10000)/10000, left:Math.round(b.left*10000)/10000, right:Math.round(b.right*10000)/10000, pt:b.pt, cell:b.cell})),
     hlines: hlines.map(h=>({top:Math.round(h.top/H*10000)/10000, bottom:Math.round((h.bottom+1)/H*10000)/10000})),
     vlines: vlines.map(v=>({x:Math.round(v.x/W*10000)/10000, top:Math.round(v.top/H*10000)/10000, bottom:Math.round((v.bottom+1)/H*10000)/10000})),
     grid
@@ -2847,11 +2880,10 @@ async function locateReportTitlesScan(path, tpl){
       for(const ln of lines){
         const top=Math.max(0,ln.top-exp);
         const h=Math.min(1-top,(ln.bottom-ln.top)+2*exp);
-        const ab64=await renderAreaB64(pdf,p,0.02,top,0.96,Math.max(h,0.01),4);
+        const ab64=await renderAreaB64(pdf,p,ln.left,top,Math.max(0.01,ln.right-ln.left),Math.max(h,0.01),4);
         const l=(await window.__bridge.ocrImageB64Words(ab64).catch(()=>[]))||[];
         const t=(l||[]).map(x=>x.text).join('');
-        let r=0; for(const w of l){ const rr=0.02+((w.right!=null?w.right:w.left)||0)*0.96; if(rr>r) r=rr; }
-        if(r>0 && (pageRight==null || r>pageRight)) pageRight=r;
+        if(!ln.cell){ let r=0; for(const w of l){ const rr=ln.left+((w.right!=null?w.right:w.left)||0)*(ln.right-ln.left); if(rr>r) r=rr; } if(r>0 && (pageRight==null || r>pageRight)) pageRight=r; }
         allRows.push({pageIndex:p, top:ln.top, bottom:ln.bottom, text:t});
       }
     }
