@@ -742,11 +742,12 @@ async function selectReport(idx){
     }
     if(!r.basic) r.basic = analysis.basic;
 
-    // 基本信息回填（来自准备阶段核心表，纯文本展示）
-    el.inpName.textContent = r.basic.name || '';
-    el.inpId.textContent   = r.basic.id   || '';
-    el.inpClass.textContent= r.basic.cls  || '';
-    el.inpExp.textContent  = r.basic.exp  || '';
+    // 基本信息回填（来自准备阶段核心数据表，纯文本展示）
+    const st = r.student || {};
+    el.inpName.textContent = st.name || '';
+    el.inpId.textContent   = st.no   || '';
+    el.inpClass.textContent= st.cls  || '';
+    el.inpExp.textContent  = st.exp  || '';
 
     renderPages(r);
     buildScoreRows(r);
@@ -988,7 +989,25 @@ async function autoLocateTitles(r){
 }
 
 /* ==================== 渲染所有页面(自适应中间栏) + 得分叠加（P1-5 缓存） ==================== */
+// 旧版模板坐标检测提示：标题/总分框选若为旧像素数据(w>1)，渲染无法精确定位，提示重新框选
+function ensureTplWarn(){
+  let old=false;
+  (S.itemsFull||[]).forEach(t=>{
+    try{ const tr=JSON.parse(t.title_rect||'{}'); if(tr.w>1) old=true; }catch(e){}
+    try{ const tt=JSON.parse(t.total_region||'{}'); if(tt.w>1) old=true; }catch(e){}
+  });
+  let w=document.getElementById('tplWarn');
+  if(old){
+    if(!w){
+      w=document.createElement('div'); w.id='tplWarn';
+      w.style.cssText='background:#fff3cd;color:#7a5c00;padding:7px 12px;font-size:12px;line-height:1.5;border:1px solid #ffe29a;border-radius:4px;margin:6px 2px;';
+      el.pdfHost.parentNode.insertBefore(w, el.pdfHost);
+    }
+    w.textContent='⚠ 检测到旧版模板框选坐标，预览区得分位置可能不准。请到准备面板【设置模板】重新框选各项并保存，即可精确定位。';
+  } else if(w){ w.remove(); }
+}
 async function renderPages(r){
+  ensureTplWarn();
   el.pdfHost.innerHTML = '';
   const centerEl = document.getElementById('center');
   const availW = Math.max(240, centerEl.clientWidth - 32); // 中间栏可用宽度(去掉padding)

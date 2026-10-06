@@ -342,9 +342,9 @@
   }
   .score-row .name { flex: 1; word-break: break-all; }
   .score-row .max { color: #999; margin-right: 8px; }
-  .score-row input { width: 92px; text-align: center; padding: 9px 6px; font-size: 18px; border-radius: 7px; border: 1.5px solid; }
-  .score-row input.ungraded { color: #c0392b; border-color: #c0392b; background: #fff7f7; }   /* 未批阅：红色醒目 */
-  .score-row input.graded { color: #2e7d32; font-weight: 700; border-color: #2e7d32; background: #eef9ef; }  /* 已批阅：绿色 */
+  .score-row input { width: 92px; text-align: center; padding: 8px 6px; font-size: 18px; font-weight: 700; color: #e07b39; border: none; background: transparent; }
+  .score-row input.ungraded { color: #e07b39; }   /* 去边框后字体同总分（橙色） */
+  .score-row input.graded { color: #e07b39; }
   .score-row .cur { width: 46px; text-align: right; color: #e07b39; font-weight: 700; font-size: 15px; }
   #totalRow {
     display: flex; justify-content: space-between; align-items: center; margin-top: 10px;
