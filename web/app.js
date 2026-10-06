@@ -2925,11 +2925,11 @@ async function locateReportTitlesScan(path, tpl){
         const ab64=await renderAreaB64(pdf,p,ln.left,top,wd,Math.max(h,0.01),4);
         const l=(await window.__bridge.ocrImageB64Words(ab64).catch(()=>[]))||[];
         const t=(l||[]).map(x=>x.text).join('');
-        // 记录每个 word 的页内坐标(相对该band区域 top/h 换算)：用于标题精确定位(避免band合并多行致中心偏上)
+        // 记录每个 word 的页内坐标(相对该band区域 top/h 换算)：用于标题精确定位(直接用OCR行top+height,绕开band中心)
         const words=(l||[]).map(w=>({
           text:w.text,
           top: top + (w.top!=null?w.top:0.5)*h,
-          bottom: top + (w.bottom!=null?w.bottom:0.9)*h,
+          height: (w.height!=null?w.height:0.03)*h,
         }));
         allRows.push({pageIndex:p, top:ln.top, bottom:ln.bottom, left:ln.left!=null?ln.left:0.02, right:ln.right!=null?ln.right:0.98, text:t, cell:ln.cell||null, words});
         let rr=0; for(const w of l){ const rv=ln.left+((w.right!=null?w.right:w.left)||0)*wd; if(rv>rr) rr=rv; }
@@ -2965,9 +2965,10 @@ async function locateReportTitlesScan(path, tpl){
           const gap=(hit.bottom-hit.top)*0.55;
           const gps=[];
           for(const w of ws){
+            const wbot=w.top+(w.height!=null?w.height:0);
             const last=gps[gps.length-1];
-            if(last && w.top-last.bottom < gap){ last.bottom=Math.max(last.bottom,w.bottom); last.top=Math.min(last.top,w.top); last.text+=w.text; }
-            else gps.push({top:w.top, bottom:w.bottom, text:w.text});
+            if(last && w.top-last.bottom < gap){ last.bottom=Math.max(last.bottom,wbot); last.top=Math.min(last.top,w.top); last.text+=w.text; }
+            else gps.push({top:w.top, bottom:wbot, text:w.text});
           }
           for(const g of gps){
             const gt=norm(g.text);

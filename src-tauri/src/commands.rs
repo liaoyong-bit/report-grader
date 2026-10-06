@@ -558,19 +558,22 @@ fn ocr_words_file(path: &str) -> Result<serde_json::Value, String> {
         let mut top_min = f32::MAX;
         let mut left_min = f32::MAX;
         let mut right_max = f32::MIN;
+        let mut row_h = 0.0f32;
         for w in line.Words().map_err(|e| format!("读取词失败: {e}"))? {
             let wr = w.BoundingRect().map_err(|e| format!("读取词框失败: {e}"))?;
             if wr.Y < top_min { top_min = wr.Y; }
             if wr.X < left_min { left_min = wr.X; }
             let wrr = wr.X + wr.Width;
             if wrr > right_max { right_max = wrr; }
+            if wr.Height > row_h { row_h = wr.Height; }
             text.push_str(&w.Text().map_err(|e| format!("读取词文本失败: {e}"))?.to_string());
         }
         if text.trim().is_empty() { continue; }
         let top = if ph > 0.0 && top_min != f32::MAX { top_min / ph } else { 0.0 };
         let left = if pw > 0.0 && left_min != f32::MAX { left_min / pw } else { 0.0 };
         let right = if pw > 0.0 && right_max != f32::MIN { right_max / pw } else { left };
-        out.push(serde_json::json!({"text": text, "top": top, "left": left, "right": right}));
+        let height = if ph > 0.0 && row_h > 0.0 { row_h / ph } else { 0.0 };
+        out.push(serde_json::json!({"text": text, "top": top, "left": left, "right": right, "height": height}));
     }
     Ok(serde_json::Value::Array(out))
 }
