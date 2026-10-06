@@ -2692,10 +2692,12 @@ async function analyzePage(pdf, pageIdx, scale=2){
   const mmPerPx=297/H;
   blocks.forEach(b=>{ b.pt=Math.round((b.bottom-b.top+1)*mmPerPx/0.3528/1.4*10)/10; });
   // 竖线检测：相邻两根横杠之间的区域里找"垂直连续黑"列，并与上/下横杠同x(±容差)确认
+  // 区域从横杠下方过约3像素开始、到下一横杠上方3像素为止，避开横杠上下阴影
   const vlines=[];
   if(hlines.length>=2){
+    const skip=Math.max(2, Math.round(H*0.0015));   // 约3px阴影带
     for(let hi=0; hi<hlines.length-1; hi++){
-      const top=hlines[hi].bottom+1, bot=hlines[hi+1].top-1;
+      const top=Math.min(hlines[hi].bottom+skip, H-1), bot=Math.max(hlines[hi+1].top-skip, top+1);
       if(bot-top<1) continue;
       for(let x=1;x<W-1;x++){
         let c=0;
