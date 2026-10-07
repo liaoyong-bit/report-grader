@@ -998,6 +998,11 @@ function reportLabel(r){
 }
 function reportState(r){
   if(r.missing) return {cls:'miss', txt:'待提交'};
+  if(S.gradeMode==='byItem'){   // 按题：以当前批的题为准，该题已批即"已批"
+    const ii=(S.itemCursor!=null?S.itemCursor:0);
+    if(r.activated && r.activated[ii]) return {cls:'done', txt:'已批'};
+    return {cls:'todo', txt:'待批'};
+  }
   if(r.done)    return {cls:'done', txt:'已批'};
   return {cls:'todo', txt:'待批'};
 }
@@ -1020,6 +1025,15 @@ function renderReportList(){
 // 底部统计：总计(黑)/已批(绿)/待批(橙)/待提交(红)
 function updateStats(){
   const total = S.reports.length;
+  if(S.gradeMode==='byItem'){   // 按题：已批/待批按当前题统计
+    const ii=(S.itemCursor!=null?S.itemCursor:0);
+    const done = S.reports.filter(r=>r.activated && r.activated[ii]).length;
+    el.statTotal.textContent = total;
+    el.statDone.textContent = done;
+    el.statPending.textContent = total - done;
+    renderAvg();
+    return;
+  }
   const done = S.reports.filter(r=>r.done).length;
   const missing = S.reports.filter(r=>r.missing).length;
   el.statTotal.textContent = total;
@@ -1551,6 +1565,17 @@ function allItemGraded(i){
   if(!S.reports || !S.reports.length) return false;
   return S.reports.every(r=> r && r.activated && r.activated[i]===true);
 }
+/* 按题：点某题切换起始题 → 自动跳到该题未批的第一份报告 */
+function switchItemStart(i){
+  S.itemCursor=i;
+  for(let k=0;k<S.reports.length;k++){
+    const t=S.reports[k];
+    if(t.activated && !t.activated[i]){ selectReport(k); focusItem(i); renderReportList(); return; }
+  }
+  if(S.current && el.scoreRows) buildScoreRows(S.current);
+  renderReportList();
+  setDetect('题'+(i+1)+'所有报告均已批阅完成');
+}
 function buildScoreRows(r){
   el.scoreRows.innerHTML = '';
   const tpl=(S.itemsFull||[]).filter(x=>x.item_index>=0).sort((a,b)=>a.item_index-b.item_index);
@@ -1567,7 +1592,7 @@ function buildScoreRows(r){
     if(byItem && i!==target) row.classList.add('dim');   // 按题：非当前题弱化
     if(allItemGraded(i)) row.classList.add('all-done');   // 该题全部报告已批完 → 绿标
     const nm = document.createElement('span'); nm.className='name'; nm.textContent = it.name;   // 只显示题名
-    if(byItem){ nm.style.cursor='pointer'; nm.title='切换到第'+(i+1)+'题按题批阅'; nm.onclick=()=>{ S.itemCursor=i; buildScoreRows(r); focusItem(i); }; }
+    if(byItem){ nm.style.cursor='pointer'; nm.title='切换到第'+(i+1)+'题按题批阅'; nm.onclick=()=>{ switchItemStart(i); }; }
     const mx = document.createElement('span'); mx.className = 'max ' + (r.activated[i] ? 'graded' : 'ungraded'); mx.textContent = '满分'+max;
     const undo = document.createElement('button');
     undo.className='undo'; undo.textContent='撤销'; undo.title='撤销确认，重新打分';
@@ -1683,12 +1708,12 @@ function gotoNextByItem(i){
   // 跳到当前题 i 未完成的第一份卷
   for(let k=0;k<S.reports.length;k++){
     const t=S.reports[k];
-    if(t.activated && !t.activated[i]){ selectReport(k); focusItem(i); setDetect('题'+(i+1)+'：已进入下一份'); return; }
+    if(t.activated && !t.activated[i]){ selectReport(k); focusItem(i); renderReportList(); setDetect('题'+(i+1)+'：已进入下一份'); return; }
   }
   // 当前题全部完成 → 下一题
   const totalItems = (S.reports[0] && S.reports[0].activated) ? S.reports[0].activated.length : 0;
-  if(i+1 < totalItems){ S.itemCursor=i+1; selectReport(0); focusItem(i+1); setDetect('进入第 '+(i+2)+' 题'); }
-  else { setDetect('🎉 当前范围所有题目已批改完成'); }
+  if(i+1 < totalItems){ S.itemCursor=i+1; selectReport(0); focusItem(i+1); renderReportList(); setDetect('进入第 '+(i+2)+' 题'); }
+  else { renderReportList(); setDetect('🎉 当前范围所有题目已批改完成'); }
 }
 function focusItem(i){ setTimeout(()=>{ const arr=S.scoreInputs||[]; const idx=(S.gradeMode==='byItem')?0:i; if(arr[idx]) arr[idx].focus(); }, 80); }
 
