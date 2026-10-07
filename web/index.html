@@ -520,6 +520,22 @@
     </div>
   </div>
 
+  <!-- 使用帮助：流程说明（带×） -->
+  <div class="tbhelp-mask" id="helpTopMask">
+    <div class="tbhelp-dlg">
+      <div class="tbhelp-hd">
+        <div class="t">使用帮助 · 报告批阅系统</div>
+        <button class="x" id="helpTopX">×</button>
+      </div>
+      <div class="tbhelp-bd">
+        <div class="st"><div class="num">1</div><div><b>准备</b>：选文件夹 → 名单管理 → 设置模板(框选题/分位置) → 核对原始报告(OCR+挂靠+改名) → 定位批阅位置。</div></div>
+        <div class="st"><div class="num">2</div><div><b>批改</b>：按卷/按题改分，支持快捷键、批阅概览统计、标记交错，成绩与批阅痕迹自动入库。</div></div>
+        <div class="st"><div class="num">3</div><div><b>导出</b>：学生成绩总表(Excel)、批阅报告(PDF)、改名文件包、带批阅痕迹PDF。</div></div>
+        <button class="go" id="helpTopOk">知道了</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 初始化向导弹窗（Tauri 模式下无数据库时弹出） -->
   <!-- 修改密码 -->
   <div id="pwdMask" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);align-items:center;justify-content:center;z-index:99">
@@ -924,22 +940,6 @@
     <span id="stErr"></span>
   </div>
 
-
-  <!-- 使用帮助：流程说明（带×） -->
-  <div class="tbhelp-mask" id="helpTopMask">
-    <div class="tbhelp-dlg">
-      <div class="tbhelp-hd">
-        <div class="t">使用帮助 · 报告批阅系统</div>
-        <button class="x" id="helpTopX">×</button>
-      </div>
-      <div class="tbhelp-bd">
-        <div class="st"><div class="num">1</div><div><b>准备</b>：选文件夹 → 名单管理 → 设置模板(框选题/分位置) → 核对原始报告(OCR+挂靠+改名) → 定位批阅位置。</div></div>
-        <div class="st"><div class="num">2</div><div><b>批改</b>：按卷/按题改分，支持快捷键、批阅概览统计、标记交错，成绩与批阅痕迹自动入库。</div></div>
-        <div class="st"><div class="num">3</div><div><b>导出</b>：学生成绩总表(Excel)、批阅报告(PDF)、改名文件包、带批阅痕迹PDF。</div></div>
-        <button class="go" id="helpTopOk">知道了</button>
-      </div>
-    </div>
-  </div>
 
 </body>
 </html>
