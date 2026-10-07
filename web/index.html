@@ -625,6 +625,10 @@
   <div id="topbar">
     <div class="tb-r1">
       <h1>实验报告批阅系统</h1>
+      <button id="btnPrepFolder">📁 选报告文件夹</button>
+      <span class="teacher" id="teacherLabel">未登录</span>
+      <button id="btnLogin">切换教师</button>
+      <button id="btnChangePwd">🔑 修改密码</button>
       <div class="spacer"></div>
       <button class="tb-panel" id="bbPrep">📋 准备面板</button>
       <button class="tb-panel" id="bbGrade">✍️ 批改面板</button>
@@ -633,16 +637,12 @@
     <div class="tb-r2" id="tbRow2"></div>
     <!-- 隐藏的原始按钮组（绑定保留，供第二行动态调用） -->
     <div style="display:none" id="grpTb">
-      <span class="teacher" id="teacherLabel">未登录</span>
-      <button id="btnLogin">切换教师</button>
-      <button id="btnChangePwd">🔑 修改密码</button>
       <button id="btnOverview">📊 批阅概览</button>
       <button id="btnSettings">⚙ 设置</button>
       <button id="btnHelp">❓ 帮助</button>
       <button id="btnMarkBad" style="background:#fdf0f0;color:#c0392b">❌ 标记交错</button>
     </div>
     <div style="display:none" id="prepTb">
-      <button id="btnPrepFolder">📁 选报告文件夹</button>
       <span id="prepFolder">未选择文件夹</span>
       <span id="pvSelbar"></span>
       <button id="btnPrepBack">退出登录</button>
@@ -770,7 +770,7 @@
           <label class="pv-range"><input type="radio" name="prepRange" value="select"> 选择一部分（请在左侧表中勾选）</label>
           <label class="pv-range"><input type="radio" name="prepRange" value="all"> 全部重新批改</label>
         </div>
-        <button id="btnPrepStart" class="primary pv-start">进入批改</button>
+        <button id="btnPrepStart" class="primary pv-start" style="display:none">进入批改</button>
       </div>
     </div>
   </div>
@@ -780,7 +780,6 @@
     <div class="pv-head">
       <div class="pv-title">导出面板</div>
       <div class="spacer"></div>
-      <button id="btnExpClose" class="ghost">返回</button>
     </div>
     <div class="ex-body">
       <div class="ex-left" id="expList"></div>
