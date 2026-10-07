@@ -38,7 +38,11 @@
   }
 
   /* 左栏 */
-  .side-title { font-size: 14px; font-weight: 700; color: #2b3a55; margin: 10px 0 8px; }
+  .side-title { font-size: 14px; font-weight: 700; color: #2b3a55; margin: 10px 0 8px; position: relative; }
+  /* 评分栏"提示"悬停气泡：列出常用快捷键，鼠标离开即消失 */
+  .side-title .hint { cursor: help; color: #1a73e8; font-size: 12px; font-weight: 400; margin-left: 8px; border-bottom: 1px dashed #1a73e8; }
+  .side-title .hint-pop { display: none; position: absolute; left: 0; top: 100%; margin-top: 6px; background: #fff; border: 1px solid #e3e8f0; border-radius: 8px; padding: 10px 14px; width: 300px; box-shadow: 0 6px 20px rgba(0,0,0,.16); z-index: 60; font-size: 12px; font-weight: 400; line-height: 1.9; color: #2b3a55; }
+  .side-title .hint:hover .hint-pop { display: block; }
   #reportListWrap { flex: 1; overflow-y: auto; padding: 10px; min-height: 0; border: 1px solid #e2e8f0; border-radius: 8px; margin: 4px 8px; background: #fbfcfe; }
   #reportList { list-style: none; }
   #reportList li {
@@ -356,7 +360,9 @@
     border-bottom: 1px dashed #eceff1; font-size: 13.5px;
   }
   .score-row .name { flex: 1; word-break: break-all; }
-  .score-row .max { color: #999; margin-right: 8px; }
+  .score-row .max { margin-right: 8px; font-weight: 800; }   /* 满分：红=未批 / 绿=已批 */
+  .score-row .max.ungraded { color: #e0245e; }   /* 红：尚未批 */
+  .score-row .max.graded { color: #2eaf5f; }      /* 绿：已批 */
   .score-row input { width: 92px; text-align: center; padding: 8px 6px; font-size: 18px; font-weight: 700; color: #e07b39; border: none; background: transparent; }
   .score-row input.ungraded { color: #e07b39; }   /* 去边框后字体同总分（橙色） */
   .score-row input.graded { color: #e07b39; }
@@ -619,7 +625,17 @@
       <div class="info-line"><span class="k">姓名</span><span class="v" id="inpName"></span></div>
       <div class="info-line"><span class="k">班级</span><span class="v" id="inpClass"></span></div>
       <div class="info-line"><span class="k">实验名称</span><span class="v" id="inpExp"></span></div>
-      <div class="side-title">评分（统分区）</div>
+      <div class="side-title">评分（统分区）<span class="hint">提示
+        <span class="hint-pop">
+          <b>快捷键</b><br>
+          · Enter：确认当前分数并标记已批（变绿）<br>
+          · Ctrl+Enter：提交本卷并切换下一份<br>
+          · ← / →：切换评分项<br>
+          · ↑ / ↓：预览微调五行<br>
+          · PgUp / PgDn：预览翻页<br>
+          <span style="color:#999">满分：<b style="color:#e0245e">红</b>=未批　<b style="color:#2eaf5f">绿</b>=已批</span>
+        </span>
+      </span></div>
       <div id="scoreRows"></div>
       <div id="totalRow"><span class="lbl">总分</span><span class="val" id="totalVal">0 / 100</span></div>
       <button class="btn-block primary" id="btnSubmitNext">提交并下一份 <span style="font-weight:400;opacity:.85">(Ctrl+Enter)</span></button>

@@ -1195,6 +1195,10 @@ function markItemGraded(r, i){
   r.activated[i] = true;
   const inp = S.scoreInputs && S.scoreInputs[i];
   if(inp){ inp.classList.remove('ungraded'); inp.classList.add('graded'); }
+  // 该行满分同步变绿（已批）
+  const rowEl = el.scoreRows && el.scoreRows.children[i];
+  const mxEl = rowEl && rowEl.querySelector('.max');
+  if(mxEl){ mxEl.className = 'max graded'; }
 }
 function buildScoreRows(r){
   el.scoreRows.innerHTML = '';
@@ -1211,7 +1215,7 @@ function buildScoreRows(r){
     const row = document.createElement('div');
     row.className = 'score-row' + (i===activeIdx ? ' active' : '');   // 当前题高亮（同报告列表）
     const nm = document.createElement('span'); nm.className='name'; nm.textContent = it.name;   // 只显示题名，不带序号
-    const mx = document.createElement('span'); mx.className='max'; mx.textContent = '满分'+max;
+    const mx = document.createElement('span'); mx.className = 'max ' + (r.activated[i] ? 'graded' : 'ungraded'); mx.textContent = '满分'+max;
     const inp = document.createElement('input');
     inp.type='number'; inp.min=0; inp.max=max; inp.inputMode='numeric';
     inp.value = (r.scores[i]!=null ? r.scores[i] : 0);
@@ -1613,6 +1617,8 @@ async function showOverview(){
 }
 el.btnOverview.onclick = showOverview;
 el.btnOverviewClose.onclick = ()=> { el.overviewMask.style.display = 'none'; };
+// 点概览弹窗以外的遮罩区域即关闭（关闭按钮保留）
+el.overviewMask.addEventListener('click', (e)=>{ if(e.target === el.overviewMask) el.overviewMask.style.display='none'; });
 
 function toggleHelp(){
   const p = el.helpPanel;
