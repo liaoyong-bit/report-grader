@@ -1972,7 +1972,7 @@ async function exportExcel(){
   ws.getRow(1).font = { bold: true };
   items.forEach(it=>{
     const row = [it.no, it.name, it.cls, S.teacher||''];
-    for(let i=0;i<n;i++) row.push(it.scores[i]||'');
+    for(let i=0;i<n;i++) row.push(it.scores[i]!=null?it.scores[i]:'');
     row.push(it.total, it.maxTotal||'', it.status, it.fname);
     ws.addRow(row);
   });
@@ -2010,7 +2010,7 @@ async function showOverview(){
   h += '<th>总分</th><th>满分</th><th>状态</th></tr></thead><tbody>';
   items.forEach(it=>{
     h += '<tr><td>'+(it.no||'')+'</td><td>'+(it.name||'')+'</td><td>'+(it.cls||'')+'</td>';
-    for(let i=0;i<n;i++) h += '<td>'+(it.scores[i]||'')+'</td>';
+    for(let i=0;i<n;i++) h += '<td>'+(it.scores[i]!=null?it.scores[i]:'')+'</td>';
     h += '<td>'+it.total+'</td><td>'+(it.maxTotal||'')+'</td>';
     h += '<td class="stc-'+it.status+'">'+it.status+'</td></tr>';
   });
