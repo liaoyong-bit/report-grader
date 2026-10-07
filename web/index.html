@@ -11,16 +11,18 @@
 
   /* ===== 顶部工具栏 ===== */
   #topbar {
-    display:flex; align-items:center; gap:12px; padding:8px 16px;
-    background:#1e293b; color:#fff; box-shadow:0 2px 6px rgba(0,0,0,.25); flex:0 0 auto; flex-wrap:wrap;
+    display:flex; flex-direction:column; gap:0; padding:5px 14px;
+    background:#2f4b76; color:#fff; box-shadow:0 2px 6px rgba(0,0,0,.18); flex:0 0 auto;
   }
-  #topbar h1 { font-size:19px; font-weight:700; margin:0; white-space:nowrap; }
-  #topbar .tb-info { font-size:13px; opacity:.95; display:inline-flex; align-items:center; gap:5px; white-space:nowrap; }
-  #topbar .tb-info b { color:#ffd479; font-weight:700; }
-  #topbar button, #topbar select { background:#33465f; color:#fff; border:none; padding:5px 12px; border-radius:6px; cursor:pointer; font-size:13px; }
-  #topbar button:hover { background:#43597a; }
+  #topbar .tb-row { display:flex; align-items:center; gap:10px; min-height:30px; }
+  #topbar .tb-row + .tb-row { margin-top:4px; padding-top:5px; border-top:1px solid rgba(255,255,255,.15); }
+  #topbar h1 { font-size:22px; font-weight:700; margin:0; white-space:nowrap; letter-spacing:1px; }
+  #topbar .tb-lab { font-size:13px; opacity:.95; white-space:nowrap; color:#cfe0f4; }
+  #topbar .tb-box { display:inline-block; width:72px; background:rgba(255,255,255,.16); color:#fff; font-size:13px; padding:3px 8px; border-radius:5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:center; box-sizing:border-box; }
+  #topbar button, #topbar select { background:#3d5a80; color:#fff; border:none; padding:5px 12px; border-radius:6px; cursor:pointer; font-size:13px; }
+  #topbar button:hover { background:#4d6d99; }
   #topbar .spacer { flex:1; }
-  #topbar .tb-panel { background:#3d5a80; font-weight:700; font-size:14px; padding:7px 16px; border-radius:8px; }
+  #topbar .tb-panel { background:#3d5a80; font-weight:700; font-size:14px; padding:6px 12px; border-radius:8px; min-width:96px; text-align:center; }
   #topbar .tb-panel:hover { background:#4d6d99; }
   #topbar .tb-panel.active { background:#1a73e8; color:#fff; }
   /* 各面板自己的头部（淡蓝，层级低于顶栏） */
@@ -35,7 +37,7 @@
   #exportView .pv-head button { background:#fff; color:#2b3a55; border:1px solid #c9d8ee; }
 
   /* ===== 主体三栏 ===== */
-  #main { display: flex; flex: 1; min-height: 0; }
+  #main { display: none; flex: 1; min-height: 0; }
   #left {
     width: 240px; min-width: 200px; background: #fff; border-right: 1px solid #dde1e6;
     display: flex; flex-direction: column; overflow: hidden; padding: 0;
@@ -619,19 +621,22 @@
       <p><b>⑦ 数据安全：</b>所有批阅进度实时保存到所选文件夹的 data/ 数据库，关闭重开不丢失；改名版 PDF 在 source_files/ 目录。</p>
     </div>
   </div>
-
-  <!-- 顶部：两行蓝条（第一行标题+面板切换，第二行当前面板操作按钮） -->
   <div id="topbar">
-    <div class="tb-r1">
+    <div class="tb-row">
       <h1>实验报告批阅系统</h1>
-      <span class="tb-info">批阅教师：<b id="teacherLabel">未登录</b></span>
-      <button id="btnLogin">切换教师</button>
-      <span class="tb-info">操作文件夹：<b id="prepFolder">未选择</b></span>
-      <button id="btnPrepFolder">📁 选文件夹</button>
       <div class="spacer"></div>
-      <button class="tb-panel" id="bbPrep">📋 准备面板</button>
-      <button class="tb-panel" id="bbGrade">✍️ 批改面板</button>
-      <button class="tb-panel" id="bbExport">📤 导出面板</button>
+      <span class="tb-lab">批阅教师</span>
+      <span class="tb-box" id="teacherLabel" title="未登录">未登录</span>
+      <button id="btnLogin">切换教师</button>
+      <span class="tb-lab">文件夹</span>
+      <span class="tb-box" id="prepFolder" title="未选择">未选择</span>
+      <button id="btnPrepFolder">选文件夹</button>
+    </div>
+    <div class="tb-row">
+      <div class="spacer"></div>
+      <button class="tb-panel" id="bbPrep">准备面板</button>
+      <button class="tb-panel" id="bbGrade">批改面板</button>
+      <button class="tb-panel" id="bbExport">导出面板</button>
     </div>
     <!-- 隐藏：供各面板头部按钮调用的原始按钮（绑定保留） -->
     <div style="display:none" id="grpTb">

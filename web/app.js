@@ -125,7 +125,7 @@ function initReportState(r){
 
 /* ==================== 登录 / 创建账号 ==================== */
 function applyLogin(){
-  el.teacherLabel.textContent = S.teacher ? ('批阅教师：' + S.teacher) : '未登录';
+  el.teacherLabel.textContent = S.teacher || '未登录'; el.teacherLabel.title = el.teacherLabel.textContent;
 }
 function showCreate(){ el.createPanel.style.display='block'; el.loginPanel.style.display='none'; el.cuUser.focus(); }
 function showLogin(){ el.createPanel.style.display='none'; el.loginPanel.style.display='block'; el.liUser.focus(); }
@@ -284,7 +284,7 @@ async function refreshPrepOverview(){
     S.prepOv = ov;
     const roster = await window.__bridge.getRoster(S.folder).catch(()=>[]);
     S.roster = roster;
-    el.prepFolder.textContent = S.folder;
+    el.prepFolder.textContent = S.folder; el.prepFolder.title = S.folder;
     renderPrepTable(ov, roster); renderPrepStats(ov); renderPrepRoster(); renderPrepSelbar();
   }catch(e){
     const msg = String(e);
@@ -302,7 +302,7 @@ async function refreshPrepOverview(){
         return refreshPrepOverview();   // 重建批次后重新刷新
       }
       S.needsInit=true;
-      el.prepFolder.textContent = S.folder;
+      el.prepFolder.textContent = S.folder; el.prepFolder.title = S.folder;
       el.prepTbody.innerHTML = '<tr><td colspan="9" style="color:#c62828;padding:24px;text-align:center">该文件夹尚未初始化。<br>请在右侧「名单管理」中导入学生名单完成初始化。</td></tr>';
       el.prepStats.innerHTML = '未初始化';
       el.prepRoster.innerHTML = '<div style="color:#c62828;font-size:13px;margin-bottom:6px">尚未导入学生名单</div>'+
