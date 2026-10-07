@@ -833,9 +833,10 @@ el.gmOk.onclick=()=>{
   S.gradeMode = m ? m.value : 'byPaper';
   closeGradeMode();
   setDetect('改分方式：'+(S.gradeMode==='byItem'?'按题改':'按卷改'));
+  if(S.current && el.scoreRows){ buildScoreRows(S.current); if(S.scoreInputs && S.scoreInputs[0]) S.scoreInputs[0].focus(); }
 };
 /* —— 快捷键：可配置 + 持久化 + 动态提示 —— */
-S.keys = { scrollDown:'PageDown', scrollUp:'PageUp', prevItem:'ArrowLeft', nextItem:'ArrowRight', confirmItem:'Enter', submit:'Ctrl+Enter', close:'Escape' };
+S.keys = { scrollDown:'PageDown', scrollUp:'PageUp', prevItem:'ArrowLeft', nextItem:'ArrowRight', confirmItem:'Enter', close:'Escape' };
 function loadKeys(){
   try{ const k=localStorage.getItem('rg_keys'); if(k){ const o=JSON.parse(k); Object.assign(S.keys, o); } }catch(e){}
 }
@@ -865,7 +866,7 @@ function refreshHintPop(){
     '· 输入分数后按 <b>'+esc(K.confirmItem)+'</b> 确认 → 标记已批（变绿、入数据库、上预览）<br>'+
     '· 已确认的分数被锁定，可点「撤销」回退重新打分（满分变回红）<br>'+
     '· 未确认的分数不作数：离开即还原为库中数值<br>'+
-    '· <b>'+esc(K.submit)+'</b>：提交本卷并切换下一份<br>'+
+    '· 全部题目批完后自动切换到下一份<br>'+
     '· '+esc(K.prevItem)+' / '+esc(K.nextItem)+'：切换评分项　'+esc(K.scrollUp)+' / '+esc(K.scrollDown)+'：预览翻五行<br>'+
     '· '+esc(K.close)+'：关闭预览/弹窗<br>'+
     '<span style="color:#999">满分：<b style="color:#e0245e">红</b>=未批　<b style="color:#2eaf5f">绿</b>=已批</span>';
@@ -1545,6 +1546,11 @@ function undoItemGraded(r, i){
   const undoEl = rowEl && rowEl.querySelector('.undo');
   if(undoEl) undoEl.style.display = 'none';
 }
+/* 某题所有报告是否都已批完（跨卷统计） */
+function allItemGraded(i){
+  if(!S.reports || !S.reports.length) return false;
+  return S.reports.every(r=> r && r.activated && r.activated[i]===true);
+}
 function buildScoreRows(r){
   el.scoreRows.innerHTML = '';
   const tpl=(S.itemsFull||[]).filter(x=>x.item_index>=0).sort((a,b)=>a.item_index-b.item_index);
@@ -1555,22 +1561,23 @@ function buildScoreRows(r){
   const list = tpl.length ? tpl.map(t=>({name:t.item_name||('题'+(t.item_index+1)), max:(t.max_score!=null?t.max_score:0)})) : (r.analysis && r.analysis.items||[]).map((it,i)=>({name:it.name||('题'+(i+1)), max:(r.maxs&&r.maxs[i]!=null)?r.maxs[i]:it.max}));
   const activeIdx = byItem ? (target>=0?target:0) : (S.selectedItem!=null?S.selectedItem:0);
   list.forEach((it,i)=>{
-    if(byItem && i!==target) return;   // 按题模式：只渲染当前题的打分框
     const max = it.max;
     const row = document.createElement('div');
-    row.className = 'score-row' + (i===activeIdx ? ' active' : '');   // 当前题高亮（同报告列表）
-    const nm = document.createElement('span'); nm.className='name'; nm.textContent = it.name;   // 只显示题名，不带序号
+    row.className = 'score-row' + (i===activeIdx ? ' active' : '');   // 当前题高亮
+    if(byItem && i!==target) row.classList.add('dim');   // 按题：非当前题弱化
+    if(allItemGraded(i)) row.classList.add('all-done');   // 该题全部报告已批完 → 绿标
+    const nm = document.createElement('span'); nm.className='name'; nm.textContent = it.name;   // 只显示题名
+    if(byItem){ nm.style.cursor='pointer'; nm.title='切换到第'+(i+1)+'题按题批阅'; nm.onclick=()=>{ S.itemCursor=i; buildScoreRows(r); focusItem(i); }; }
     const mx = document.createElement('span'); mx.className = 'max ' + (r.activated[i] ? 'graded' : 'ungraded'); mx.textContent = '满分'+max;
-    // 撤销按钮：仅已确认(activated)时显示，点击回退重新打分
     const undo = document.createElement('button');
     undo.className='undo'; undo.textContent='撤销'; undo.title='撤销确认，重新打分';
-    undo.style.display = r.activated[i] ? 'inline-block' : 'none';
+    undo.style.display = (r.activated[i] && (!byItem || i===target)) ? 'inline-block' : 'none';   // 按题：仅当前题显示撤销
     undo.onclick = ()=>{ undoItemGraded(r, i); };
     const inp = document.createElement('input');
     inp.type='number'; inp.min=0; inp.max=max; inp.inputMode='numeric';
     inp.value = (r.scores[i]!=null ? r.scores[i] : 0);
-    inp.classList.add(r.activated[i] ? 'graded' : 'ungraded');   // 恢复时保留已批阅样式
-    inp.disabled = !!r.activated[i];   // 已确认则锁定，禁止再改
+    if(byItem && i!==target){ inp.disabled=true; inp.classList.add('graded'); inp.classList.remove('ungraded'); }   // 非当前题只读展示
+    else { inp.classList.add(r.activated[i] ? 'graded' : 'ungraded'); inp.disabled = !!r.activated[i]; }   // 已确认则锁定
     // 只允许数字键（阻止 "1+1" "abc" 等非数字输入）
     inp.addEventListener('keydown', (e)=>{
       if(e.key.length===1 && !/[0-9]/.test(e.key) && !e.ctrlKey && !e.metaKey) e.preventDefault();
@@ -1599,16 +1606,20 @@ function buildScoreRows(r){
     const cur = document.createElement('span'); cur.className='cur'; cur.textContent = '';
     row.appendChild(nm); row.appendChild(mx); row.appendChild(undo); row.appendChild(cur); row.appendChild(inp);
     el.scoreRows.appendChild(row);
-    inputs.push(inp);
+    if(!byItem || i===target) inputs.push(inp);   // 按题仅当前题可操作（供 Enter/←→）
   });
   updateTotal(r);
-  S.scoreInputs = inputs;   // 供全局 ← → 键切换焦点（按题模式仅当前题）
+  S.scoreInputs = inputs;
+  const tag=document.getElementById('gradeModeTag');
+  if(tag) tag.textContent = byItem ? '按题批阅' : '按卷批阅';
 }
 function updateTotal(r){
   const total = r.scores.reduce((x,y)=>x+y,0);
   const maxAll = (r.maxs && r.maxs.length) ? r.maxs.reduce((x,y)=>x+(y||0),0) : 0;
   el.totalVal.textContent = total + ' / ' + maxAll;
-  // P0-3：已批只由"提交"决定，满不满分都不自动标记已批
+  // 全部题目批完 → 总分行变绿
+  if(allItemsGraded(r)){ el.totalVal.classList.add('done'); }
+  else { el.totalVal.classList.remove('done'); }
 }
 
 // 学生信息为纯文本（来自准备阶段核心表），不做编辑监听
@@ -1712,10 +1723,7 @@ document.addEventListener('keydown', (e)=>{
   const tag = document.activeElement && document.activeElement.tagName;
   const isInput = (tag === 'INPUT' || tag === 'TEXTAREA');
 
-  // 提交当前报告成绩并切换下一份（默认 Ctrl+Enter）
-  if(keyMatches(e, K.submit)){ e.preventDefault(); submitAndNext(); return; }
-
-  // 确认当前题（默认 Enter）：焦点在输入框内 → 确认并移到下一项，不提交
+  // 确认当前题（默认 Enter）：焦点在输入框内 → 确认并写库；全部题目批完自动切下一卷
   if(keyMatches(e, K.confirmItem)){
     if(isInput){
       e.preventDefault();
@@ -1724,18 +1732,28 @@ document.addEventListener('keydown', (e)=>{
       if(infoIdx >= 0){
         if(infoIdx < info.length-1){ info[infoIdx+1].focus(); }
         else { S.selectedItem = 0; S.scoreInputs[0].focus(); }
-      } else {
-        const ci = S.scoreInputs.indexOf(document.activeElement);
-        if(ci >= 0){
-          markItemGraded(S.current, ci);
+        return;
+      }
+      const ci = S.scoreInputs.indexOf(document.activeElement);
+      if(ci >= 0){
+        if(S.gradeMode==='byItem'){
+          // 按题：确认当前题 → 跳到当前题下一份，或当前题全部完成 → 下一题
+          const ii = (S.itemCursor!=null ? S.itemCursor : 0);
+          markItemGraded(S.current, ii);
           saveState(S.current);
-          if(ci < S.scoreInputs.length-1){ S.selectedItem = ci+1; S.scoreInputs[ci+1].focus(); }
-          else { document.activeElement.blur(); }
+          gotoNextByItem(ii);
+          return;
         }
+        // 按卷：确认当前题；全部批完自动切下一卷
+        markItemGraded(S.current, ci);
+        saveState(S.current);
+        if(allItemsGraded(S.current)){ submitAndNext(); return; }
+        if(ci < S.scoreInputs.length-1){ S.selectedItem = ci+1; S.scoreInputs[ci+1].focus(); }
+        else { document.activeElement.blur(); }
       }
       return;
     }
-    return;   // 非输入框：Enter 不再提交（改由按钮 / 提交快捷键）
+    return;   // 非输入框：Enter 不触发
   }
 
   // 上一题 / 下一题：切换焦点 + 预览跳转到对应标题（默认 ← / →）

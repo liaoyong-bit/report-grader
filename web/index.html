@@ -433,6 +433,12 @@
   .score-row input.graded { color: #e07b39; }
   .score-row .cur { display: none; }   /* 占位元素已无用处，隐藏 */
   .score-row.active { background: #fff2e3; border-radius: 5px; }   /* 当前正在评的题高亮 */
+  #scoreRows .score-row.dim { opacity: .4; }   /* 按题模式：非当前题弱化 */
+  .gm-tag { font-size: 12px; font-weight: 700; color: #fff; background: #2f8f8f; border-radius: 4px; padding: 2px 8px; margin-left: 8px; vertical-align: 2px; }
+  #scoreRows .score-row.all-done { border-left: 3px solid #2eaf5f; background: #f0faf3; }
+  #scoreRows .score-row.all-done .name { color: #2eaf5f; font-weight: 700; }
+  #scoreRows .score-row.all-done .name::after { content: ' ✓已全批'; font-size: 11px; font-weight: 600; color: #2eaf5f; }
+  #totalVal.done { color: #2eaf5f; font-weight: 800; }   /* 全题批完总分变绿 */
   #totalRow {
     display: flex; justify-content: space-between; align-items: center; margin-top: 6px;
     padding: 7px 4px; background: #f7f9fb; border-radius: 6px;
@@ -675,7 +681,7 @@
     <div class="tb-left">
       <div class="tbt1">报告批阅</div>
       <div class="tbt2">系统</div>
-      <div class="tbver">v0.1.94</div>
+      <div class="tbver">v0.1.95</div>
       <button class="tbhlp" id="btnHelpTop">使用帮助</button>
     </div>
     <div class="tb-mid">
@@ -751,7 +757,7 @@
       <div class="info-line"><span class="k">姓名</span><span class="v" id="inpName"></span></div>
       <div class="info-line"><span class="k">班级</span><span class="v" id="inpClass"></span></div>
       <div class="info-line"><span class="k">实验名称</span><span class="v" id="inpExp"></span></div>
-      <div class="side-title">评分（统分区）<span class="hint">批阅方式提示
+      <div class="side-title">评分（统分区）<span id="gradeModeTag" class="gm-tag"></span><span class="hint">批阅方式提示
         <span class="hint-pop"><span id="hintPop"></span></span>
       </span></div>
       <div id="scoreRows"></div>
@@ -919,7 +925,6 @@
         <div class="kg-col">
           <div class="kg-col-tt">确认与提交</div>
           <div class="kg-row" data-key="confirmItem"><span class="kg-name">确认当前题</span><span class="kg-val" id="kval_confirmItem">Enter</span><button class="kg-set" data-key="confirmItem">设置</button></div>
-          <div class="kg-row" data-key="submit"><span class="kg-name">提交当前卷</span><span class="kg-val" id="kval_submit">Ctrl+Enter</span><button class="kg-set" data-key="submit">设置</button></div>
           <div class="kg-row" data-key="close"><span class="kg-name">关闭预览/弹窗</span><span class="kg-val" id="kval_close">Esc</span><button class="kg-set" data-key="close">设置</button></div>
         </div>
       </div>
