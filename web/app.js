@@ -275,6 +275,7 @@ function renderTbMid(name){
   }
   var cur = name==='prep' ? el.bbPrep : (name==='grade' ? el.bbGrade : el.bbExport);
   [el.bbPrep, el.bbGrade, el.bbExport].forEach(function(x){ x.classList.toggle('on', x===cur); });
+  if(name==='prep' && S.prepSteps){ applyPrepSteps(S.prepSteps); }
 }
 /* 使用帮助（带×流程说明） */
 el.btnHelpTop.onclick = function(){ el.helpTopMask.style.display='flex'; };
@@ -300,6 +301,7 @@ async function refreshPrepOverview(){
     S.roster = roster;
     el.prepFolder.textContent = S.folder; el.prepFolder.title = S.folder;
     renderPrepTable(ov, roster); renderPrepStats(ov); renderPrepRoster(); renderPrepSelbar();
+    updatePrepSteps();
   }catch(e){
     const msg = String(e);
     if(S.needsInit || /初始化|未找到批次/.test(msg)){
@@ -317,7 +319,7 @@ async function refreshPrepOverview(){
       }
       S.needsInit=true;
       el.prepFolder.textContent = S.folder; el.prepFolder.title = S.folder;
-      el.prepTbody.innerHTML = '<tr><td colspan="9" style="color:#c62828;padding:24px;text-align:center">该文件夹尚未初始化。<br>请在右侧「名单管理」中导入学生名单完成初始化。</td></tr>';
+      el.prepTbody.innerHTML = '<tr><td colspan="9" style="color:#c62828;padding:24px;text-align:center">该文件夹尚未初始化。<br>请在顶栏点击「名单管理」导入学生名单完成初始化。<br>若数据在其他子文件夹，请选择包含 data 数据库的文件夹。</td></tr>';
       el.prepStats.innerHTML = '未初始化';
       if(el.prepRoster) el.prepRoster.innerHTML = '<div style="color:#c62828;font-size:13px;margin-bottom:6px">尚未导入学生名单</div>'+
         '<button onclick="window.__app.openPrepImport()">📋 导入学生名单（初始化）</button>';
@@ -327,10 +329,34 @@ async function refreshPrepOverview(){
     }
   }
 }
+/* —— 准备步骤完成状态（从数据库判断）：名单/模板/核对/定位 —— */
+async function updatePrepSteps(){
+  if(!window.__bridge || !S.folder) return;
+  let steps={roster:0, template:0, verify:0, locate:0};
+  try{ const rs=await window.__bridge.getRoster(S.folder).catch(()=>[]); steps.roster=(rs&&rs.length)?1:0; }catch(e){}
+  try{
+    const bf=await window.__bridge.getBasicFields(S.folder).catch(()=>[]);
+    const it=await window.__bridge.getBatchItems(S.folder).catch(()=>[]);
+    steps.template=((bf&&bf.length)||(it&&it.length))?1:0;
+  }catch(e){}
+  const rows=(S.prepOv&&S.prepOv.rows)||[];
+  steps.verify= rows.some(r=>r.matched)?1:0;
+  steps.locate= rows.some(r=>r.locate_status && r.locate_status!=='pending')?1:0;
+  S.prepSteps=steps;
+  if(S.inPrep) applyPrepSteps(steps);
+}
+/* 顶栏 prep 四按钮：名单管理/设置模板/核对原始报告/定位批阅位置 按序加绿 */
+function applyPrepSteps(steps){
+  if(!steps || !el.tbMidBtns) return;
+  const sqs=el.tbMidBtns.querySelectorAll('.tb-sq');
+  if(sqs.length<4) return;
+  const map=[steps.roster, steps.template, steps.verify, steps.locate];
+  sqs.forEach((b,i)=>{ if(i<map.length) b.classList.toggle('step-done', !!map[i]); });
+}
+
 async function renderPdfPreview(container, path){
   if(!path || !container) return;
-  container.innerHTML='';
-  if(!S.pdfjsOk){ container.innerHTML='<div style="color:#888;padding:12px">pdf.js 未就绪</div>'; return; }
+  container.innerHTML='';  if(!S.pdfjsOk){ container.innerHTML='<div style="color:#888;padding:12px">pdf.js 未就绪</div>'; return; }
   if(!window.__bridge || !window.__bridge.readPdf || !S.folder){ container.innerHTML='<div style="color:#888;padding:12px">无法读取报告</div>'; return; }
   try{
     const bytes=await window.__bridge.readPdf(S.folder, path);

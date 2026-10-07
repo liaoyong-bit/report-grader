@@ -60,6 +60,8 @@
         // 已有库 → 停在准备面板；有模板框选才同步，否则引导先设置模板
         try{ await maybeSyncAfterRoster(); }
         catch(e){ app.setErr('⚠ 同步失败: ' + e); }
+        // 无论是否同步，都刷新准备盘点（核心数据表 + 步骤完成状态）
+        if(app.refreshPrepOverview) app.refreshPrepOverview();
       } else {
         // 无库 → 停在准备面板，右侧名单管理区引导初始化（不弹向导）
         app.S.needsInit = true;
