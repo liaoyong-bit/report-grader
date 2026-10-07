@@ -89,7 +89,7 @@ const el = {
   btnTotalMode: $('btnTotalMode'), btnTitleMode: $('btnTitleMode'), btnBasicMode: $('btnBasicMode'), totalInfo: $('totalInfo'), irState: $('irState'), irTpl: $('irTpl'),
   btnSettings: $('btnSettings'), btnMarkBad: $('btnMarkBad'), btnDetail: $('btnDetail'),
   settingsMask: $('settingsMask'), stOk: $('stOk'), stClose: $('stClose'),
-  detailMask: $('detailMask'), detailTableWrap: $('detailTableWrap'), dtExport: $('dtExport'), dtOk: $('dtOk'), dtClose: $('dtClose'),
+  detailMask: $('detailMask'), detailTableWrap: $('dtTableWrap'), dtExport: $('dtExport'), dtOk: $('dtOk'), dtClose: $('dtClose'),
   statAvg: $('statAvg'),
 };
 
