@@ -480,6 +480,15 @@
   .st-keys { width: 100%; border-collapse: collapse; font-size: 12.5px; }
   .st-keys td { padding: 4px 6px; border-bottom: 1px solid #f1f5f9; color: #475569; }
   .st-keys kbd { background: #eef1f5; border: 1px solid #dbe1e8; border-radius: 4px; padding: 1px 6px; font-size: 11.5px; font-family: inherit; color: #334155; }
+  #keysGrid { display: flex; gap: 20px; }
+  .kg-col { flex: 1; }
+  .kg-col-tt { font-size: 13px; font-weight: 700; color: #2b3a55; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #eef1f5; }
+  .kg-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 13px; }
+  .kg-name { flex: 1; color: #475569; }
+  .kg-val { background: #eef1f5; border: 1px solid #dde1e6; border-radius: 4px; padding: 2px 8px; font-size: 12px; min-width: 64px; text-align: center; font-weight: 600; color: #334155; }
+  .kg-set { background: #fff; border: 1px solid #1a73e8; color: #1a73e8; border-radius: 4px; font-size: 11px; padding: 2px 9px; cursor: pointer; }
+  .kg-set:hover { background: #e8f0fe; }
+  .kg-set.capturing { background: #1a73e8; color: #fff; }
   .st-hint { font-size: 12px; color: #64748b; background: #f5f7fa; padding: 8px 10px; border-radius: 6px; line-height: 1.5; }
   .st-foot { padding: 12px 20px; border-top: 1px solid #eef1f5; display: flex; justify-content: flex-end; }
   .st-foot button { padding: 8px 22px; border: none; border-radius: 6px; cursor: pointer; }
@@ -666,7 +675,7 @@
     <div class="tb-left">
       <div class="tbt1">报告批阅</div>
       <div class="tbt2">系统</div>
-      <div class="tbver">v0.1.92</div>
+      <div class="tbver">v0.1.93</div>
       <button class="tbhlp" id="btnHelpTop">使用帮助</button>
     </div>
     <div class="tb-mid">
@@ -743,16 +752,7 @@
       <div class="info-line"><span class="k">班级</span><span class="v" id="inpClass"></span></div>
       <div class="info-line"><span class="k">实验名称</span><span class="v" id="inpExp"></span></div>
       <div class="side-title">评分（统分区）<span class="hint">批阅方式提示
-        <span class="hint-pop">
-          <b>批阅方式</b><br>
-          · 输入分数后按 <b>Enter</b> 确认 → 标记已批（变绿、入数据库、上预览）<br>
-          · 已确认的分数被锁定，可点「↩ 撤销」回退重新打分（满分变回红）<br>
-          · 未确认的分数不作数：离开即还原为库中数值<br>
-          · <b>Ctrl+Enter</b>：提交本卷并切换下一份<br>
-          · ← / →：切换评分项　↑ / ↓：预览微调五行<br>
-          · PgUp / PgDn：预览翻页（全局，仅作用于预览区）<br>
-          <span style="color:#999">满分：<b style="color:#e0245e">红</b>=未批　<b style="color:#2eaf5f">绿</b>=已批</span>
-        </span>
+        <span class="hint-pop"><span id="hintPop"></span></span>
       </span></div>
       <div id="scoreRows"></div>
       <div id="totalRow"><span class="lbl">总分</span><span class="val" id="totalVal">0 / 100</span></div>
@@ -904,18 +904,25 @@
   <div id="keysBox">
     <div class="st-head"><h2>⌨ 快捷键设置</h2><button id="keysClose" class="st-close">×</button></div>
     <div class="st-body">
-      <div class="st-sec-tt">快捷键（单手，方向键区）</div>
-      <table class="st-keys">
-        <tr><td>报告下翻整页</td><td><kbd>PageDown</kbd></td></tr>
-        <tr><td>报告上翻整页</td><td><kbd>PageUp</kbd></td></tr>
-        <tr><td>报告向下五行</td><td><kbd>↓</kbd></td></tr>
-        <tr><td>报告向上五行</td><td><kbd>↑</kbd></td></tr>
-        <tr><td>上一题</td><td><kbd>←</kbd></td></tr>
-        <tr><td>下一题</td><td><kbd>→</kbd></td></tr>
-        <tr><td>确认当前题并进入下一项</td><td><kbd>Enter</kbd></td></tr>
-        <tr><td>提交当前卷并下一份</td><td><kbd>Ctrl+Enter</kbd></td></tr>
-        <tr><td>关闭预览/弹窗</td><td><kbd>Esc</kbd></td></tr>
-      </table>
+      <div class="st-sec-tt">点「设置」后在键盘按下新按键即可绑定（支持 Ctrl / Alt / Shift 组合）</div>
+      <div id="keysGrid">
+        <div class="kg-col">
+          <div class="kg-col-tt">报告上下五行</div>
+          <div class="kg-row" data-key="scrollDown"><span class="kg-name">向下五行</span><span class="kg-val" id="kval_scrollDown">PageDown</span><button class="kg-set" data-key="scrollDown">设置</button></div>
+          <div class="kg-row" data-key="scrollUp"><span class="kg-name">向上五行</span><span class="kg-val" id="kval_scrollUp">PageUp</span><button class="kg-set" data-key="scrollUp">设置</button></div>
+        </div>
+        <div class="kg-col">
+          <div class="kg-col-tt">切换题目</div>
+          <div class="kg-row" data-key="prevItem"><span class="kg-name">上一题</span><span class="kg-val" id="kval_prevItem">←</span><button class="kg-set" data-key="prevItem">设置</button></div>
+          <div class="kg-row" data-key="nextItem"><span class="kg-name">下一题</span><span class="kg-val" id="kval_nextItem">→</span><button class="kg-set" data-key="nextItem">设置</button></div>
+        </div>
+        <div class="kg-col">
+          <div class="kg-col-tt">确认与提交</div>
+          <div class="kg-row" data-key="confirmItem"><span class="kg-name">确认当前题</span><span class="kg-val" id="kval_confirmItem">Enter</span><button class="kg-set" data-key="confirmItem">设置</button></div>
+          <div class="kg-row" data-key="submit"><span class="kg-name">提交当前卷</span><span class="kg-val" id="kval_submit">Ctrl+Enter</span><button class="kg-set" data-key="submit">设置</button></div>
+          <div class="kg-row" data-key="close"><span class="kg-name">关闭预览/弹窗</span><span class="kg-val" id="kval_close">Esc</span><button class="kg-set" data-key="close">设置</button></div>
+        </div>
+      </div>
     </div>
     <div class="st-foot"><button id="keysOk" class="primary">确定</button></div>
   </div>

@@ -396,7 +396,7 @@ async function openReportPreview(path){
 function openFile(path){ openReportPreview(path); }
 el.pvClose.onclick=()=>{ el.pvMask.style.display='none'; };
 el.pvMask.onclick=(e)=>{ if(e.target===el.pvMask){ el.pvMask.style.display='none'; } };
-document.addEventListener('keydown',(e)=>{ if(e.key==='Escape'){ el.pvMask.style.display='none'; } });
+document.addEventListener('keydown',(e)=>{ if(S.keys && keyMatches(e, S.keys.close)){ el.pvMask.style.display='none'; } });
 function renderPrepTable(ov, roster, tbodyArg){
   const tb = tbodyArg || el.prepTbody; tb.innerHTML='';
   const rows = (ov.rows||[]);
@@ -834,9 +834,75 @@ el.gmOk.onclick=()=>{
   closeGradeMode();
   setDetect('改分方式：'+(S.gradeMode==='byItem'?'按题改':'按卷改'));
 };
-function openKeysMask(){ el.keysMask.style.display='flex'; }
-el.keysClose.onclick=()=>{ el.keysMask.style.display='none'; };
-el.keysOk.onclick=()=>{ el.keysMask.style.display='none'; };
+/* —— 快捷键：可配置 + 持久化 + 动态提示 —— */
+S.keys = { scrollDown:'PageDown', scrollUp:'PageUp', prevItem:'ArrowLeft', nextItem:'ArrowRight', confirmItem:'Enter', submit:'Ctrl+Enter', close:'Escape' };
+function loadKeys(){
+  try{ const k=localStorage.getItem('rg_keys'); if(k){ const o=JSON.parse(k); Object.assign(S.keys, o); } }catch(e){}
+}
+function saveKeys(){
+  try{ localStorage.setItem('rg_keys', JSON.stringify(S.keys)); }catch(e){}
+}
+function keyMatches(e, spec){
+  if(!spec) return false;
+  const parts=String(spec).trim().split('+').map(s=>s.trim());
+  const hc=parts.includes('Ctrl'), ha=parts.includes('Alt'), hs=parts.includes('Shift');
+  if(!!hc!==!!e.ctrlKey || !!ha!==!!e.altKey || !!hs!==!!e.shiftKey) return false;
+  const k=parts[parts.length-1];
+  if(k==='Enter') return e.key==='Enter'||e.key==='\r';
+  if(k==='Esc') return e.key==='Escape';
+  if(k==='Space') return e.key===' ';
+  return e.key===k;
+}
+function renderKeysUI(){
+  Object.keys(S.keys).forEach(k=>{ const v=document.getElementById('kval_'+k); if(v) v.textContent=S.keys[k]; });
+  document.querySelectorAll('#keysGrid .kg-set').forEach(b=>{ b.classList.remove('capturing'); b.textContent='设置'; });
+}
+function refreshHintPop(){
+  const hp=document.getElementById('hintPop'); if(!hp) return;
+  const K=S.keys||{}, esc=s=>String(s==null?'':s);
+  hp.innerHTML =
+    '<b>批阅方式</b><br>'+
+    '· 输入分数后按 <b>'+esc(K.confirmItem)+'</b> 确认 → 标记已批（变绿、入数据库、上预览）<br>'+
+    '· 已确认的分数被锁定，可点「撤销」回退重新打分（满分变回红）<br>'+
+    '· 未确认的分数不作数：离开即还原为库中数值<br>'+
+    '· <b>'+esc(K.submit)+'</b>：提交本卷并切换下一份<br>'+
+    '· '+esc(K.prevItem)+' / '+esc(K.nextItem)+'：切换评分项　'+esc(K.scrollUp)+' / '+esc(K.scrollDown)+'：预览翻五行<br>'+
+    '· '+esc(K.close)+'：关闭预览/弹窗<br>'+
+    '<span style="color:#999">满分：<b style="color:#e0245e">红</b>=未批　<b style="color:#2eaf5f">绿</b>=已批</span>';
+}
+let _captureKey=null;
+function setKeysCapture(){
+  document.querySelectorAll('#keysGrid .kg-set').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      _captureKey=btn.dataset.key;
+      document.querySelectorAll('#keysGrid .kg-set').forEach(b=>{ b.classList.remove('capturing'); b.textContent='设置'; });
+      btn.classList.add('capturing'); btn.textContent='按中…';
+      setDetect('请在键盘按下新的快捷键（如 Ctrl+Enter）');
+    });
+  });
+  if(window._keysCaptureBound) return;
+  window._keysCaptureBound=true;
+  document.addEventListener('keydown', (e)=>{
+    if(!_captureKey) return;
+    e.preventDefault(); e.stopPropagation();
+    const k=e.key;
+    if(k==='Control'||k==='Alt'||k==='Shift'||k==='Meta') return;
+    const parts=[];
+    if(e.ctrlKey) parts.push('Ctrl');
+    if(e.altKey) parts.push('Alt');
+    if(e.shiftKey) parts.push('Shift');
+    if(k===' ') parts.push('Space'); else if(k==='Escape') parts.push('Esc'); else parts.push(k);
+    S.keys[_captureKey]=parts.join('+');
+    _captureKey=null;
+    renderKeysUI(); refreshHintPop();
+    setDetect('已绑定：'+S.keys[_captureKey]);
+  });
+}
+function openKeysMask(){ renderKeysUI(); el.keysMask.style.display='flex'; }
+el.keysClose.onclick=()=>{ _captureKey=null; el.keysMask.style.display='none'; };
+el.keysOk.onclick=()=>{ _captureKey=null; saveKeys(); refreshHintPop(); el.keysMask.style.display='none'; };
+loadKeys(); setKeysCapture(); refreshHintPop();
 function openRangeMask(){ el.rangeMask.style.display='flex'; }
 el.rangeClose.onclick=()=>{ el.rangeMask.style.display='none'; };
 el.rangeOk.onclick=()=>{ el.rangeMask.style.display='none'; };
@@ -1637,26 +1703,23 @@ function nudgePreview(dy){ window.scrollBy(0, dy); }
 /* ==================== 全局键盘 ==================== */
 document.addEventListener('keydown', (e)=>{
   if(!S.current || !S.scoreInputs || !S.scoreInputs.length) return;
+  const K=S.keys||{};
   const tag = document.activeElement && document.activeElement.tagName;
   const isInput = (tag === 'INPUT' || tag === 'TEXTAREA');
 
-  // Ctrl+Enter：提交当前报告成绩并切换到下一份（P0-2）
-  if(e.ctrlKey && (e.key === 'Enter' || e.key === '\r')){
-    e.preventDefault(); submitAndNext(); return;
-  }
+  // 提交当前报告成绩并切换下一份（默认 Ctrl+Enter）
+  if(keyMatches(e, K.submit)){ e.preventDefault(); submitAndNext(); return; }
 
-  // Enter：焦点在输入框内 → 确认当前并移到下一项，不提交（P0-2）
-  if(e.key === 'Enter' || e.key === '\r'){
+  // 确认当前题（默认 Enter）：焦点在输入框内 → 确认并移到下一项，不提交
+  if(keyMatches(e, K.confirmItem)){
     if(isInput){
       e.preventDefault();
       const info = [el.inpId, el.inpName, el.inpClass, el.inpExp];
       const infoIdx = info.indexOf(document.activeElement);
       if(infoIdx >= 0){
-        // 学生信息框：移到下一个信息框；最后一个则跳到第一个评分框
         if(infoIdx < info.length-1){ info[infoIdx+1].focus(); }
         else { S.selectedItem = 0; S.scoreInputs[0].focus(); }
       } else {
-        // 评分框：按 Enter 确认 → 标记已批并变色，然后移到下一评分框；最后一个则失焦
         const ci = S.scoreInputs.indexOf(document.activeElement);
         if(ci >= 0){
           markItemGraded(S.current, ci);
@@ -1667,27 +1730,28 @@ document.addEventListener('keydown', (e)=>{
       }
       return;
     }
-    return;   // 非输入框：Enter 不再提交（改由按钮 / Ctrl+Enter）
+    return;   // 非输入框：Enter 不再提交（改由按钮 / 提交快捷键）
   }
 
-  // ← → 全局切换打分项：切换焦点(自动全选已有分数) + 预览跳转到对应标题（P0-2）
-  if(e.key === 'ArrowLeft' || e.key === 'ArrowRight'){
+  // 上一题 / 下一题：切换焦点 + 预览跳转到对应标题（默认 ← / →）
+  if(keyMatches(e, K.prevItem)){
     e.preventDefault();
-    if(e.key === 'ArrowLeft') S.selectedItem = Math.max(0, S.selectedItem - 1);
-    else                      S.selectedItem = Math.min(S.scoreInputs.length - 1, S.selectedItem + 1);
+    S.selectedItem = Math.max(0, S.selectedItem - 1);
+    S.scoreInputs[S.selectedItem].focus();
+    jumpToItem(S.selectedItem);
+    return;
+  }
+  if(keyMatches(e, K.nextItem)){
+    e.preventDefault();
+    S.selectedItem = Math.min(S.scoreInputs.length - 1, S.selectedItem + 1);
     S.scoreInputs[S.selectedItem].focus();
     jumpToItem(S.selectedItem);
     return;
   }
 
-  // 上下方向键：焦点不在输入框时微调滚动五行
-  if(e.key === 'ArrowUp' || e.key === 'ArrowDown'){
-    if(!isInput){ e.preventDefault(); nudgePreview(e.key==='ArrowDown'?75:-75); }
-  }
-  // PgUp / PgDn：全局作用于预览区翻页（无论焦点在左/中/右哪一栏）
-  if(e.key==='PageUp'||e.key==='PageDown'){
-    e.preventDefault(); pagePreview(e.key==='PageDown'?1:-1);
-  }
+  // 预览翻五行（默认 PageUp / PageDown）
+  if(keyMatches(e, K.scrollUp)){ e.preventDefault(); nudgePreview(-75); return; }
+  if(keyMatches(e, K.scrollDown)){ e.preventDefault(); nudgePreview(75); return; }
 });
 
 /* ==================== 导出 ==================== */
