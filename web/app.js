@@ -3150,7 +3150,7 @@ async function runLocatePositions(){
       if(res.fullText && window.__bridge.saveScanText){
         try{ await window.__bridge.saveScanText(S.folder, assetKey, res.fullText); }catch(e){ L2('保存还原文本失败 '+assetKey+': '+e); }
       }
-      if(res.scanRows && res.scanRows.length){ previewData.push({key:t.key, path:t.renamed_path, rows:res.scanRows, items:res.items||[]}); }
+      if(res.rows && res.rows.length){ previewData.push({key:t.key, path:t.renamed_path, rows:res.rows, items:res.items||[]}); }
     }
     hideVerifyProgress();
     L2('扫描定位预览 previewData='+previewData.length);
