@@ -3025,13 +3025,20 @@ async function locateReportTitlesScanDB(path, tpl, reportKey){
     };
     for(const it of tpl){
       const tn=stripSeq(norm(locateTarget(it)));
+      // 单行匹配分（0~1）：包含得满分，否则最长连续匹配占比
+      const ms=(s)=>{ const ss=stripSeq(norm(s)); if(!ss) return 0; if(ss.includes(tn)) return 1; return tn.length? longestContMatch(tn,ss)/tn.length : 0; };
       let hit=null;
       for(let i=0;i<rows.length;i++){
         const nt1=stripSeq(norm(rows[i].text));
         if(nt1 && (nt1.includes(tn)||(tn.length>0&&longestContMatch(tn,nt1)/tn.length>=0.8)) && isBodyTitle(i,rows[i])){ hit=rows[i]; break; }
         if(i+1<rows.length){
+          const sa=ms(rows[i].text), sb=ms(rows[i+1].text);
           const nt2=stripSeq(norm(rows[i].text+rows[i+1].text));
-          if(nt2 && (nt2.includes(tn)||(tn.length>0&&longestContMatch(tn,nt2)/tn.length>=0.8)) && isBodyTitle(i,rows[i])){ hit=rows[i]; break; }
+          if(nt2 && (nt2.includes(tn)||(tn.length>0&&longestContMatch(tn,nt2)/tn.length>=0.8)) && isBodyTitle(i,rows[i])){
+            // 拼接命中时取标题匹配度更高的一行，避免取到标题的上一行(导致偏上一行)
+            hit = sb>sa ? rows[i+1] : rows[i];
+            break;
+          }
         }
       }
       if(hit){
