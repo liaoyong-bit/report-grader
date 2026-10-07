@@ -14,6 +14,7 @@ pub fn run() {
             commands::read_pdf,
             commands::save_grading_state,
             commands::save_to_output,
+            commands::pack_renamed_zip,
             commands::save_template,
             commands::append_log,
             commands::pick_template,

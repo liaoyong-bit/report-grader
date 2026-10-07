@@ -58,7 +58,7 @@ const el = {
   pvSelbar: $('pvSelbar'), prepTable: $('prepTable'), prepTbody: $('prepTbody'), prepStats: $('prepStats'),
   gradeSetup: $('gradeSetup'), gradeWrap: $('gradeWrap'), gradeScopeTbody: $('gradeScopeTbody'), gradeScopeOk: $('gradeScopeOk'),
   prepRoster: $('prepRoster'),
-  expOptions: $('expOptions'), expOps: $('expOps'), btnExpClose: $('btnExpClose'),
+  expOptions: $('expOptions'), expOps: $('expOps'), btnExpClose: $('btnExpClose'), expList: $('expList'), expPreview: $('expPreview'),
   attachMask: $('attachMask'), attachBox: $('attachBox'), attachFile: $('attachFile'),
   locateMask: $('locateMask'), locateBody: $('locateBody'), locateTitle: $('locateTitle'),
   locateSave: $('locateSave'), locateCancel: $('locateCancel'),
@@ -652,50 +652,151 @@ function renderExportPanel(){
   renderExpDetail(EXP_SEL);
 }
 function renderExpDetail(id){
-  const opt = el.expOptions, pre = el.expPreview;
-  if(id==='scores'){ opt.innerHTML = esc_m('学生成绩总表选项') + expOptLines(['学号','姓名','班级','实验名称','各题得分','总分','满分','状态','批阅教师','时间戳'], '列选择') + '<div style="font-size:12px;color:#999;margin-top:6px">默认包含核心成绩列；勾选即加入列。</div>'; pre.innerHTML = previewScores(); }
-  else if(id==='report'){ opt.innerHTML = esc_m('批阅报告选项') + expOptLines(['学生信息','评分表','统分区','总分与总评','批阅教师','批阅时间戳'], '报告包含内容') + '<div style="font-size:12px;color:#999;margin-top:6px">PDF 逐份导出，页眉含学校/课程名与报告名称。</div>'; pre.innerHTML = previewReport(); }
-  else if(id==='renamed'){ opt.innerHTML = esc_m('改名文件打包选项') + expOptLines(['ZIP 打包','含子目录结构','只打包已改名'], '打包设置') + '<div style="font-size:12px;color:#999;margin-top:6px">将改名文件夹中的报告打包为一个 ZIP。</div>'; pre.innerHTML = previewRenamed(); }
-  else if(id==='annotated'){ opt.innerHTML = esc_m('批阅痕迹选项') + expOptLines(['大题旁显示分数','显示批阅教师','显示批阅时间戳','显示总分'], '痕迹信息') + '<div style="font-size:12px;color:#999;margin-top:6px">在原始报告上叠加批阅痕迹后导出 PDF。</div>'; pre.innerHTML = previewAnnotated(); }
+  const opt = el.expOptions;
+  const meta = {
+    scores:{ tt:'列选择', note:'默认包含核心成绩列；勾选即加入导出列。',
+      rows:['学号','姓名','班级','实验名称','各题得分','总分','满分','状态','批阅教师','批阅时间戳'] },
+    report:{ tt:'报告包含内容', note:'PDF 逐份导出，页眉含学校/课程名与报告名称。',
+      rows:['学生信息','评分表','统分区','总分与总评','批阅教师','批阅时间戳'] },
+    renamed:{ tt:'打包设置', note:'将改名文件夹中的报告打包为一个 ZIP。',
+      rows:['ZIP 打包','含子目录结构','只打包已改名'] },
+    annotated:{ tt:'痕迹信息', note:'在原始报告上叠加批阅痕迹后导出 PDF。',
+      rows:['大题旁显示分数','显示批阅教师','显示批阅时间戳','显示总分'] }
+  }[id] || {tt:'',note:'',rows:[]};
+  const nm = (EXP_ITEMS.find(x=>x.id===id)||{}).name || '';
+  opt.innerHTML = esc_m(nm+'选项') + expOptLines(meta.rows, meta.tt) +
+    '<div style="font-size:12px;color:#999;margin-top:6px">'+meta.note+'</div>' +
+    '<div style="margin-top:12px;display:flex;align-items:center;gap:10px"><button id="expRunBtn" class="primary">导出</button><span id="expRunStat" style="font-size:12px;color:#888"></span></div>';
+  const b=document.getElementById('expRunBtn'); if(b) b.onclick=()=>runExport(id);
+  renderExpPreview(id);
+}
+async function renderExpPreview(id){
+  const pre=el.expPreview; if(!pre) return;
+  try{
+    if(id==='scores') pre.innerHTML=await previewScores();
+    else if(id==='report') pre.innerHTML=await previewReport();
+    else if(id==='renamed') pre.innerHTML=await previewRenamed();
+    else if(id==='annotated') pre.innerHTML=await previewAnnotated();
+  }catch(e){ pre.innerHTML='<div style="color:#e0245e">预览失败: '+esc(e&&e.message?e.message:e)+'</div>'; }
+}
+async function runExport(id){
+  const stat=document.getElementById('expRunStat');
+  const mark=(s)=>{ if(stat) stat.textContent=s; };
+  try{
+    if(id==='scores'){ mark('导出中…'); await exportExcel(); mark(''); }
+    else if(id==='report'){ mark('导出中…'); await exportReportPdfs(); mark(''); }
+    else if(id==='renamed'){ mark('打包中…'); await exportRenamedZip(); mark(''); }
+    else if(id==='annotated'){ mark('导出中…'); await exportScoredPdf(); mark(''); }
+  }catch(e){ mark(''); setErr('导出失败: '+esc(e&&e.message?e.message:e)); }
 }
 function expOptLines(items, tt){
   return '<div class="ex-tt">'+tt+'</div><div class="ex-opt-line">'+items.map(s=>'<label><input type="checkbox" checked> '+s+'</label>').join('')+'</div>';
 }
 function esc_m(s){ return '<div class="ex-tt">'+esc(s)+'</div>'; }
-/* —— 各项目预览示意（真实导出样式后续接入） —— */
-function previewScores(){
-  return '<div class="ex-ptt">学生成绩总表 · 预览</div>'+
-    '<table class="ex-tbl"><tr><th>学号</th><th>姓名</th><th>班级</th><th>报告名称</th><th>题1</th><th>题2</th><th>题3</th><th>题4</th><th>题5</th><th>总分</th><th>满分</th><th>状态</th></tr>'+
-    '<tr><td>2025112701</td><td>张三</td><td>2025级临床1班</td><td>游标卡尺实验</td><td>24</td><td>18</td><td>16</td><td>20</td><td>8</td><td>86</td><td>100</td><td style="color:#2eaf5f">已批</td></tr>'+
-    '<tr><td>2025112702</td><td>李四</td><td>2025级临床2班</td><td>螺旋测微计</td><td>20</td><td>15</td><td>20</td><td>0</td><td>0</td><td>55</td><td>100</td><td style="color:#e0245e">待批</td></tr></table>';
+async function ensurePrepOv(){ if(!S.prepOv && window.__bridge && window.__bridge.prepOverview && S.folder){ try{ S.prepOv=await window.__bridge.prepOverview(S.folder); }catch(e){} } }
+async function loadTpl(){ try{ if(!S.itemsFull && window.__bridge && window.__bridge.getBatchItems && S.folder) S.itemsFull=await window.__bridge.getBatchItems(S.folder); }catch(e){ S.itemsFull=[]; } return (S.itemsFull||[]).filter(x=>x.item_index>=0).sort((a,b)=>a.item_index-b.item_index); }
+/* —— 各项目真实数据预览 —— */
+async function previewScores(){
+  let items=[]; try{ const rows=await fetchAllGrades(); items=gradesToTable(rows); }catch(e){}
+  if(!items.length) return '<div class="ex-ptt">学生成绩总表 · 暂无成绩数据</div><div style="color:#999;font-size:12px">请先在批改面板完成批阅，或确认已选报告文件夹。</div>';
+  let h='<div class="ex-ptt">学生成绩总表 · 预览（前 8 行）</div><table class="ex-tbl"><tr><th>学号</th><th>姓名</th><th>班级</th><th>报告名称</th>';
+  const n=Math.max(0,...items.map(it=>it.scores.length));
+  for(let i=0;i<n;i++) h+='<th>第'+(i+1)+'项</th>';
+  h+='<th>总分</th><th>满分</th><th>状态</th></tr>';
+  items.slice(0,8).forEach(it=>{
+    h+='<tr><td>'+(it.no||'')+'</td><td>'+(it.name||'')+'</td><td>'+(it.cls||'')+'</td><td style="text-align:left">'+(it.fname||'')+'</td>';
+    for(let i=0;i<n;i++) h+='<td>'+(it.scores[i]!=null?it.scores[i]:'')+'</td>';
+    h+='<td><b>'+it.total+'</b></td><td>'+it.maxTotal+'</td><td class="stc-'+it.status+'">'+it.status+'</td></tr>';
+  });
+  return h+'</table>';
 }
-function previewReport(){
-  return '<div class="ex-ptt">批阅报告 · 预览（PDF 版式）</div>'+
-    '<div style="border:1px solid #e3e8f0;border-radius:6px;padding:10px;font-size:12px;background:#fff;max-width:420px">'+
-    '<div style="text-align:center;font-weight:700;font-size:14px;margin-bottom:6px">《游标卡尺与螺旋测微计的使用》批阅报告</div>'+
-    '<div style="color:#555;margin-bottom:6px">学号：2025112701　姓名：张三　班级：2025级临床1班</div>'+
-    '<table class="ex-tbl"><tr><th>题项</th><th>满分</th><th>得分</th></tr>'+
-    '<tr><td>一、实验目的与原理</td><td>30</td><td>24</td></tr>'+
-    '<tr><td>二、实验仪器与装置</td><td>20</td><td>18</td></tr>'+
-    '<tr><td>五、实验结果与分析讨论</td><td>10</td><td>8</td></tr>'+
-    '<tr style="font-weight:700"><td>总分</td><td>100</td><td>86</td></tr></table>'+
-    '<div style="margin-top:6px;color:#999">批阅教师：张老师　时间戳：2026-10-07 15:30</div></div>';
+async function previewReport(){
+  const tpl=await loadTpl();
+  let items=[]; try{ const rows=await fetchAllGrades(); items=gradesToTable(rows); }catch(e){}
+  if(!items.length) return '<div class="ex-ptt">批阅报告 · 暂无成绩</div><div style="color:#999;font-size:12px">请先完成批阅。</div>';
+  const it=items[0]; const n=it.scores.length;
+  let h='<div class="ex-ptt">批阅报告 · 预览（第一份）</div>'+
+    '<div style="border:1px solid #e3e8f0;border-radius:6px;padding:12px;font-size:12px;max-width:440px">'+
+    '<div style="text-align:center;font-weight:700;font-size:14px;margin-bottom:8px">《'+(it.fname||'报告')+'》批阅报告</div>'+
+    '<div style="color:#555;margin-bottom:8px">学号：'+(it.no||'')+'　姓名：'+(it.name||'')+'　班级：'+(it.cls||'')+'</div>'+
+    '<table class="ex-tbl"><tr><th>题项</th><th>满分</th><th>得分</th></tr>';
+  for(let i=0;i<n;i++){ const tm=(tpl[i]||{}).item_name||('第'+(i+1)+'项'); h+='<tr><td style="text-align:left">'+(i+1)+'. '+esc(tm)+'</td><td>'+(it.maxs&&it.maxs[i]!=null?it.maxs[i]:'')+'</td><td>'+(it.scores[i]!=null?it.scores[i]:'')+'</td></tr>'; }
+  h+='<tr style="font-weight:700"><td>总分</td><td>'+(it.maxTotal||'')+'</td><td>'+it.total+'</td></tr></table>'+
+    '<div style="margin-top:6px;color:#999">批阅教师：'+esc(S.teacher||'未设置')+'　时间戳：'+dateStamp()+'</div></div>';
+  return h;
 }
-function previewRenamed(){
-  return '<div class="ex-ptt">改名后的原始文件 · 打包预览</div>'+
-    '<div class="ex-tag">2025112701_张三_2025级临床1班_游标卡尺实验.pdf</div>'+
-    '<div class="ex-tag">2025112702_李四_2025级临床2班_螺旋测微计.pdf</div>'+
-    '<div style="margin-top:8px;font-size:12px;color:#999">共 2 份 · 打包为 report_renamed.zip</div>';
+async function previewRenamed(){
+  await ensurePrepOv();
+  const rows=(S.prepOv&&S.prepOv.rows)||[];
+  const rnm=rows.filter(r=>r.renamed_path);
+  if(!rnm.length) return '<div class="ex-ptt">改名后的原始文件 · 暂无已改名文件</div><div style="color:#999;font-size:12px">请先在准备面板执行「核对/挂靠/改名」。</div>';
+  let h='<div class="ex-ptt">改名后的原始文件 · 打包预览</div>';
+  rnm.slice(0,12).forEach(r=>{ h+='<div class="ex-tag">'+esc((r.renamed_path||'').split(/[\\/]/).pop()||'')+'</div>'; });
+  h+='<div style="margin-top:8px;font-size:12px;color:#999">共 '+rnm.length+' 份 · 打包为 report_renamed.zip</div>';
+  return h;
 }
-function previewAnnotated(){
-  return '<div class="ex-ptt">带批阅痕迹 · 预览（PDF）</div>'+
-    '<div style="border:1px solid #e3e8f0;border-radius:6px;padding:10px;font-size:12px;max-width:420px">'+
-    '<div>一、实验目的与原理（30分）<span style="float:right;color:#e0245e;font-weight:700">24分</span></div>'+
-    '<div style="border-top:1px dashed #e3e8f0;margin:4px 0"></div>'+
-    '<div>二、实验仪器与装置（仿真平台）（20分）<span style="float:right;color:#e0245e;font-weight:700">18分</span></div>'+
-    '<div style="border-top:1px dashed #e3e8f0;margin:4px 0"></div>'+
-    '<div>五、实验结果与分析讨论（10分）<span style="float:right;color:#e0245e;font-weight:700">8分</span></div>'+
-    '<div style="border-top:1px solid #e3e8f0;margin-top:6px;padding-top:4px">总分：<b>86</b>/100　批阅教师：张老师　2026-10-07 15:30</div></div>';
+async function previewAnnotated(){
+  const tpl=await loadTpl();
+  const r=(S.reports||[]).find(x=>x&&!x.missing);
+  if(!r || !Array.isArray(r.scores)) return '<div class="ex-ptt">带批阅痕迹 · 暂无报告</div><div style="color:#999;font-size:12px">请先在批改面板打开一份报告。</div>';
+  const n=r.scores.length;
+  let h='<div class="ex-ptt">带批阅痕迹 · 预览（PDF，第一份）</div>'+
+    '<div style="border:1px solid #e3e8f0;border-radius:6px;padding:10px;font-size:12px;max-width:440px">';
+  for(let i=0;i<n;i++){ const tm=(tpl[i]||{}).item_name||('第'+(i+1)+'项'); h+='<div>'+(i+1)+'. '+esc(tm)+'<span style="float:right;color:#e0245e;font-weight:700">'+(r.scores[i]!=null?r.scores[i]:0)+'分</span></div><div style="border-top:1px dashed #e3e8f0;margin:4px 0"></div>'; }
+  h+='<div>总分：<b>'+(r.scores.reduce((a,b)=>a+(b||0),0))+'</b>/'+((r.maxs||[]).reduce((a,b)=>a+(b||0),0))+'　批阅教师：'+esc(S.teacher||'未设置')+'　'+dateStamp()+'</div></div>';
+  return h;
+}
+async function exportReportPdfs(){
+  if(!S.pdflibOk){ setErr('pdf-lib 未加载, 无法导出'); return; }
+  const { PDFDocument, StandardFonts, rgb } = PDFLib;
+  let items=[]; try{ const rows=await fetchAllGrades(); items=gradesToTable(rows); }catch(e){ setErr('读取成绩失败: '+e); return; }
+  const tpl=await loadTpl();
+  if(!items.length){ setErr('没有可导出的成绩'); return; }
+  setDetect('⏳ 正在生成批阅报告 PDF（'+items.length+' 份）…');
+  const pdfDoc=await PDFDocument.create();
+  const font=await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const cjk=await loadCJKFont(pdfDoc);
+  items.forEach((it)=>{
+    const pg=pdfDoc.addPage([595.28, 841.89]);
+    const W=pg.getWidth(), H=pg.getHeight();
+    const f=cjk||font;
+    const red=rgb(0.85,0.1,0.1), blue=rgb(0.2,0.4,0.7), dark=rgb(0.12,0.12,0.12), gray=rgb(0.55,0.55,0.55), green=rgb(0.2,0.5,0.2);
+    pg.drawText('医用物理学 · 仿真实验报告 · 批阅', {x:60, y:H-48, size:15, font:f, color:blue});
+    pg.drawRectangle({x:60, y:H-62, width:W-120, height:1.5, color:blue});
+    pg.drawText('《'+(it.fname||'报告')+'》批阅报告', {x:60, y:H-100, size:14, font:f, color:dark});
+    let y=H-128;
+    pg.drawText('学号：'+(it.no||''), {x:60, y, size:11, font:f});
+    pg.drawText('姓名：'+(it.name||''), {x:230, y, size:11, font:f});
+    pg.drawText('班级：'+(it.cls||''), {x:340, y, size:11, font:f});
+    y-=34;
+    const cols=[330,80,90];
+    pg.drawText('题项',{x:66,y,size:11,font:f}); pg.drawText('满分',{x:60+cols[0]+12,y,size:11,font:f}); pg.drawText('得分',{x:60+cols[0]+cols[1]+12,y,size:11,font:f});
+    pg.drawRectangle({x:58,y:y-8,width:cols[0]+cols[1]+cols[2]+4,height:1,color:gray});
+    y-=26;
+    const n=Math.max(tpl.length, it.scores.length);
+    for(let k=0;k<n;k++){
+      const tm=(tpl[k]||{}).item_name||('第'+(k+1)+'项');
+      const maxv=(it.maxs&&it.maxs[k]!=null)?it.maxs[k]:'';
+      const sc=(it.scores&&it.scores[k]!=null)?it.scores[k]:'';
+      pg.drawText((k+1)+'. '+tm,{x:66,y,size:11,font:f});
+      pg.drawText(String(maxv),{x:60+cols[0]+12,y,size:11,font:font});
+      pg.drawText(String(sc),{x:60+cols[0]+cols[1]+12,y,size:11,font:font,color:red});
+      y-=22;
+    }
+    pg.drawRectangle({x:58,y:y+2,width:cols[0]+cols[1]+cols[2]+4,height:1,color:gray});
+    y-=8;
+    pg.drawText('总分：'+it.total+' / '+(it.maxTotal||''), {x:60, y, size:12, font:f, color:green});
+    y-=24;
+    pg.drawText('批阅教师：'+(S.teacher||'未设置')+'　批阅时间：'+dateStamp(), {x:60, y, size:10, font:f, color:gray});
+  });
+  const bytes=await pdfDoc.save();
+  const blob=new Blob([bytes],{type:'application/pdf'});
+  await deliverExport('批阅报告_'+dateStamp()+'.pdf', blob);
+}
+async function exportRenamedZip(){
+  if(window.__bridge && window.__bridge.packRenamedZip){
+    await window.__bridge.packRenamedZip();
+  } else { setErr('打包功能未启用（需后端支持）'); }
 }
 el.btnPrepFolder.onclick=()=>{ if(el.btnLoadFolder.onclick) el.btnLoadFolder.onclick(); };
 /* —— 批改面板：进入流程（查库 → 有上次范围直接三栏 / 无则先设置） —— */
@@ -1715,7 +1816,7 @@ function gotoNextByItem(i){
   if(i+1 < totalItems){ S.itemCursor=i+1; selectReport(0); focusItem(i+1); renderReportList(); setDetect('进入第 '+(i+2)+' 题'); }
   else { renderReportList(); setDetect('🎉 当前范围所有题目已批改完成'); }
 }
-function focusItem(i){ setTimeout(()=>{ const arr=S.scoreInputs||[]; const idx=(S.gradeMode==='byItem')?0:i; if(arr[idx]) arr[idx].focus(); }, 80); }
+function focusItem(i){ setTimeout(()=>{ const arr=S.scoreInputs||[]; const idx=(S.gradeMode==='byItem')?0:i; if(arr[idx] && !arr[idx].disabled){ arr[idx].focus(); arr[idx].select(); } }, 80); }
 
 el.btnSubmitNext.onclick = submitAndNext;
 

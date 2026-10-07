@@ -180,6 +180,35 @@ pub fn save_to_output(folder: String, name: String, data: Vec<u8>) -> Result<Str
     Ok(path.to_string_lossy().into_owned())
 }
 
+/// 将 renamed/ 目录下所有改名报告打包为一个 ZIP，写入 output/改名文件包.zip
+#[tauri::command]
+pub fn pack_renamed_zip(folder: String) -> Result<String, String> {
+    let rdir = Path::new(&folder).join(db::RENAME_DIR);
+    if !rdir.exists() { return Err("renamed 目录不存在，请先核对/改名".into()); }
+    let out_dir = Path::new(&folder).join(db::OUTPUT_DIR);
+    fs::create_dir_all(&out_dir).map_err(|e| format!("创建 output 失败: {e}"))?;
+    let out_path = out_dir.join("改名文件包.zip");
+    let f = fs::File::create(&out_path).map_err(|e| format!("创建 zip 失败: {e}"))?;
+    let mut zw = zip::ZipWriter::new(f);
+    let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let mut count = 0i32;
+    let mut total = 0u64;
+    for entry in fs::read_dir(&rdir).map_err(|e| format!("读取 renamed 目录失败: {e}"))? {
+        let ent = entry.map_err(|e| format!("读取目录项失败: {e}"))?;
+        let p = ent.path();
+        if !p.is_file() { continue; }
+        let fname = ent.file_name().to_string_lossy().into_owned();
+        zw.start_file(&fname, opts).map_err(|e| format!("写入 zip 条目失败: {e}"))?;
+        let mut src = fs::File::open(&p).map_err(|e| format!("打开文件失败: {e}"))?;
+        let n = std::io::copy(&mut src, &mut zw).map_err(|e| format!("写入 zip 失败: {e}"))?;
+        total += n;
+        count += 1;
+    }
+    zw.finish().map_err(|e| format!("完成 zip 失败: {e}"))?;
+    dbglog(&format!("pack_renamed_zip count={} total={} -> {}", count, total, out_path.to_string_lossy()));
+    Ok(format!("已打包 {} 份 → {}", count, out_path.to_string_lossy()))
+}
+
 /// 全量成绩清单（所有学生），供"保存全部成绩 CSV / 批阅概览表格"
 #[tauri::command]
 pub fn list_all_grading(folder: String) -> Result<Vec<db::GradeRow>, String> {

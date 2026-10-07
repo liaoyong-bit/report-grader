@@ -210,6 +210,11 @@
       .catch(e => log('save_grading_state 失败: ' + String(e && e.message || e)));
   };
 
+  // —— 改名文件打包 ZIP（写入 output/改名文件包.zip）
+  window.__bridge.packRenamedZip = async () => {
+    return await invoke('pack_renamed_zip', { folder: app.S.folder });
+  };
+
   // —— 导出产物写入 output/（替代浏览器下载）
   window.__bridge.saveToOutput = async (name, bytes) => {
     await invoke('save_to_output', { folder: app.S.folder, name, data: Array.from(bytes) });

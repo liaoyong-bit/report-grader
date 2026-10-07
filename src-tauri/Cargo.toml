@@ -24,3 +24,4 @@ windows = { version = "0.58", features = [
 ] }
 base64 = "0.22"
 sha2 = "0.10"
+zip = { version = "2", default-features = false, features = ["deflate"] }
