@@ -11,10 +11,11 @@
 
   /* ===== 顶部工具栏 ===== */
   #topbar {
-    display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+    display: flex; flex-direction: column; gap: 0; padding: 6px 16px;
     background: #2b3a55; color: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.2); flex: 0 0 auto;
   }
-  #topbar h1 { font-size: 18px; font-weight: 600; margin-right: 8px; white-space: nowrap; }
+  #topbar .tb-r1 { display: flex; align-items: center; gap: 12px; }
+  #topbar h1 { font-size: 18px; font-weight: 600; margin: 0; white-space: nowrap; }
   #topbar .teacher { font-size: 13px; opacity: .92; background: rgba(255,255,255,.15); padding: 3px 10px; border-radius: 12px; }
   #topbar button, #topbar select {
     background: #3d5a80; color: #fff; border: none; padding: 6px 14px; border-radius: 6px;
@@ -24,6 +25,16 @@
   #topbar button.primary { background: #e07b39; }
   #topbar button.primary:hover { background: #f08c4d; }
   #topbar .spacer { flex: 1; }
+  /* 第一行：面板切换大按钮（当前高亮） */
+  #topbar .tb-panel { background:#3d5a80; font-weight:700; font-size:14px; padding:7px 18px; border-radius:8px; }
+  #topbar .tb-panel:hover { background:#4d6d99; }
+  #topbar .tb-panel.active { background:#1a73e8; color:#fff; }
+  /* 第二行：当前面板操作按钮 */
+  #topbar .tb-r2 { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:5px 0 1px; margin-top:6px; border-top:1px solid rgba(255,255,255,.14); }
+  #topbar .tb-r2 .tb2-btn { background:#3d5a80; padding:5px 12px; font-size:13px; }
+  #topbar .tb-r2 .tb2-btn:hover { background:#4d6d99; }
+  #topbar .tb-r2 .tb2-btn.primary { background:#e07b39; }
+  #topbar .tb-r2 .tb2-label { font-size:12px; opacity:.9; background:rgba(255,255,255,.12); padding:3px 9px; border-radius:10px; }
 
   /* ===== 主体三栏 ===== */
   #main { display: flex; flex: 1; min-height: 0; }
@@ -610,17 +621,32 @@
     </div>
   </div>
 
-  <!-- 顶部 -->
+  <!-- 顶部：两行蓝条（第一行标题+面板切换，第二行当前面板操作按钮） -->
   <div id="topbar">
-    <h1>实验报告批阅系统</h1>
-    <span class="teacher" id="teacherLabel">未登录</span>
-    <button id="btnLogin">切换教师</button>
-    <button id="btnChangePwd">🔑 修改密码</button>
-    <div class="spacer"></div>
-    <button id="btnOverview">📊 批阅概览</button>
-    <button id="btnSettings">⚙ 设置</button>
-    <button id="btnHelp">❓ 帮助</button>
-    <button id="btnMarkBad" style="background:#fdf0f0;color:#c0392b">❌ 标记交错</button>
+    <div class="tb-r1">
+      <h1>实验报告批阅系统</h1>
+      <div class="spacer"></div>
+      <button class="tb-panel" id="bbPrep">📋 准备面板</button>
+      <button class="tb-panel" id="bbGrade">✍️ 批改面板</button>
+      <button class="tb-panel" id="bbExport">📤 导出面板</button>
+    </div>
+    <div class="tb-r2" id="tbRow2"></div>
+    <!-- 隐藏的原始按钮组（绑定保留，供第二行动态调用） -->
+    <div style="display:none" id="grpTb">
+      <span class="teacher" id="teacherLabel">未登录</span>
+      <button id="btnLogin">切换教师</button>
+      <button id="btnChangePwd">🔑 修改密码</button>
+      <button id="btnOverview">📊 批阅概览</button>
+      <button id="btnSettings">⚙ 设置</button>
+      <button id="btnHelp">❓ 帮助</button>
+      <button id="btnMarkBad" style="background:#fdf0f0;color:#c0392b">❌ 标记交错</button>
+    </div>
+    <div style="display:none" id="prepTb">
+      <button id="btnPrepFolder">📁 选报告文件夹</button>
+      <span id="prepFolder">未选择文件夹</span>
+      <span id="pvSelbar"></span>
+      <button id="btnPrepBack">退出登录</button>
+    </div>
   </div>
 
   <!-- 主体三栏 -->
@@ -677,12 +703,7 @@
     <span id="stErr"></span>
   </div>
 
-  <!-- 底部：三大面板全屏切换 -->
-  <div id="bottomBar">
-    <button class="bb-btn" id="bbPrep">📋 准备面板</button>
-    <button class="bb-btn" id="bbGrade">✍️ 批改面板</button>
-    <button class="bb-btn" id="bbExport">📤 导出面板</button>
-  </div>
+  <!-- 面板切换已移至顶部第一行，此处不再放置底部栏 -->
 
   <input type="file" id="fileInput" accept="application/pdf,.pdf" style="display:none" multiple>
   <input type="file" id="dirInput" webkitdirectory style="display:none">
@@ -722,11 +743,7 @@
   <div id="prepView" style="display:none">
     <div class="pv-head">
       <div class="pv-title">准备面板</div>
-      <button id="btnPrepFolder">📁 选报告文件夹</button>
-      <span id="prepFolder" class="pv-folder">未选择文件夹</span>
-      <div id="pvSelbar" class="pv-selbar"></div>
       <div class="spacer"></div>
-      <button id="btnPrepBack" class="ghost">退出登录</button>
     </div>
     <div class="pv-body">
       <div class="pv-left">

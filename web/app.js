@@ -52,6 +52,7 @@ const el = {
   pwdOld: $('pwdOld'), pwdNew: $('pwdNew'), pwdNew2: $('pwdNew2'), pwdErr: $('pwdErr'),
   btnPwdSave: $('btnPwdSave'), btnPwdCancel: $('btnPwdCancel'),
   prepView: $('prepView'), main: $('main'), exportView: $('exportView'),
+  tbRow2: $('tbRow2'),
   bbPrep: $('bbPrep'), bbGrade: $('bbGrade'), bbExport: $('bbExport'),
   btnPrepFolder: $('btnPrepFolder'), prepFolder: $('prepFolder'),
   pvSelbar: $('pvSelbar'), prepTable: $('prepTable'), prepTbody: $('prepTbody'), prepStats: $('prepStats'),
@@ -249,7 +250,37 @@ function switchPanel(name){
   S.inPrep = (name==='prep');
   const active = {prep:el.bbPrep, grade:el.bbGrade, export:el.bbExport}[name];
   [el.bbPrep, el.bbGrade, el.bbExport].forEach(b=>b.classList.toggle('active', b===active));
+  renderTb2(name);
   if(name==='export') renderExportPanel();
+}
+/* 顶部第二行：渲染当前面板的操作按钮 */
+function renderTb2(name){
+  const c = el.tbRow2; if(!c) return;
+  c.innerHTML='';
+  if(name==='prep'){
+    const f = document.createElement('span'); f.className='tb2-label'; f.textContent = '文件夹：' + (S.folder || '未选择'); c.appendChild(f);
+    c.appendChild(tbBtn('📁 选报告文件夹', ()=>{ if(el.btnLoadFolder.onclick) el.btnLoadFolder.onclick(); }));
+    c.appendChild(tbBtn('名单管理', ()=>openPrepImport()));
+    c.appendChild(tbBtn('核对原始报告', ()=>runSourceVerify()));
+    c.appendChild(tbBtn('定位批阅位置', ()=>runLocatePositions()));
+    c.appendChild(tbBtn('设置模板（框选）', ()=>openItemSetup()));
+    c.appendChild(tbBtn('进入批改 ▶', ()=>el.btnPrepStart.click()));
+    c.appendChild(tbBtn('退出登录', ()=>{ S.teacher=''; localStorage.removeItem('loginUser'); el.loginMask.style.display='flex'; showLogin(); switchPanel('grade'); }));
+  } else if(name==='grade'){
+    const t = document.createElement('span'); t.className='tb2-label'; t.textContent = '教师：' + (S.teacher||'未登录'); c.appendChild(t);
+    c.appendChild(tbBtn('切换教师', ()=>el.btnLogin.onclick()));
+    c.appendChild(tbBtn('修改密码', ()=>el.btnChangePwd.onclick()));
+    c.appendChild(tbBtn('📊 批阅概览', ()=>showOverview()));
+    c.appendChild(tbBtn('设置', ()=>el.btnSettings.onclick()));
+    c.appendChild(tbBtn('帮助', ()=>toggleHelp()));
+    c.appendChild(tbBtn('标记交错', ()=>el.btnMarkBad.onclick()));
+  } else if(name==='export'){
+    c.appendChild(tbBtn('开始导出', ()=>setDetect('导出功能待接入')));
+    c.appendChild(tbBtn('返回准备面板', ()=>switchPanel('prep')));
+  }
+}
+function tbBtn(txt, fn){
+  const b=document.createElement('button'); b.className='tb2-btn'; b.textContent=txt; b.onclick=fn; return b;
 }
 async function refreshPrepOverview(){
   if(!window.__bridge || !window.__bridge.prepOverview || !S.folder) return;
