@@ -1685,20 +1685,25 @@ el.btnSubmitNext.onclick = submitAndNext;
 
 /* ==================== 报告预览滚动（单手快捷键） ==================== */
 function pagePreview(dir){
+  const c=document.getElementById('center');
+  if(!c){ nudgePreview(dir>0?innerHeight*0.8:-(innerHeight*0.8)); return; }
   const cs = Array.from(document.querySelectorAll('#pdfHost canvas, #pdfHost .page'));
-  if(!cs.length){ nudgePreview(dir>0?innerHeight*0.8:-(innerHeight*0.8)); return; }
-  const y = window.scrollY || document.documentElement.scrollTop || 0;
+  if(!cs.length){ c.scrollTop += dir>0 ? innerHeight*0.8 : -innerHeight*0.8; return; }
+  const y = c.scrollTop;
   let target=null;
-  for(const c of cs){
-    const abs = c.getBoundingClientRect().top + y;
+  for(const co of cs){
+    const abs = co.getBoundingClientRect().top + y;
     if(dir>0 && abs > y+10 && (target===null || abs<target)) target=abs;
     if(dir<0 && abs < y-10) target=abs;   // 取最后一个在当前之上的
   }
   if(dir>0 && target===null) target = y + innerHeight*0.8;
   if(dir<0 && target===null) target = Math.max(0, y - innerHeight*0.8);
-  window.scrollTo({ top: Math.max(0,target), behavior:'smooth' });
+  c.scrollTo({ top: Math.max(0,target), behavior:'smooth' });
 }
-function nudgePreview(dy){ window.scrollBy(0, dy); }
+function nudgePreview(dy){
+  const c=document.getElementById('center');
+  if(c){ c.scrollTop += dy; } else { window.scrollBy(0, dy); }
+}
 
 /* ==================== 全局键盘 ==================== */
 document.addEventListener('keydown', (e)=>{
