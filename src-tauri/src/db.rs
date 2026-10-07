@@ -806,3 +806,13 @@ pub fn locate_rows(conn: &Connection, report_key: &str) -> Result<Vec<serde_json
         .map_err(|e| format!("查询定位行失败: {e}"))?;
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| format!("解析定位行失败: {e}"))
 }
+
+/// 重置定位库：清空全部行并重置自增 id，避免每次定位 id 一直累加、数据膨胀
+pub fn locate_reset(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "DELETE FROM loc_rows;
+         DELETE FROM sqlite_sequence WHERE name='loc_rows';",
+    )
+    .map_err(|e| format!("重置定位库失败: {e}"))?;
+    Ok(())
+}

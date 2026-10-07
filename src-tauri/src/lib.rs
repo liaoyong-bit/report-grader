@@ -30,6 +30,7 @@ pub fn run() {
             commands::save_report_locate,
             commands::get_report_locate,
             commands::locate_init,
+            commands::locate_reset,
             commands::locate_set_ocr,
             commands::locate_set_match,
             commands::locate_get_rows,

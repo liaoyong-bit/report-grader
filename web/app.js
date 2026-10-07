@@ -2692,23 +2692,25 @@ async function analyzePage(pdf, pageIdx, scale=2){
   if(!W||!H) return empty;
   const data=canvas.getContext('2d').getImageData(0,0,W,H).data;
   const isBg=(i)=>{ const r=data[i],g=data[i+1],b=data[i+2]; return r>242&&g>242&&b>242; };
-  // 逐像素行：统计非背景占比 + 最大连续黑段（判断表格横线）
+  // 深色(墨)判定：真黑/深色文字或横线。灰色背景不算墨，避免灰白黑相间的行被误判成表格横线而漏掉文字框选
+  const isInk=(i)=>{ const r=data[i],g=data[i+1],b=data[i+2]; return r<110&&g<110&&b<110; };
+  // 逐像素行：统计墨色(深色)占比 + 最大连续墨段（判断表格横线）
   const rowType=new Array(H).fill('blank');
   let maxRightPx=-1;   // 本页文字区最右黑像素（文字区右边界判定：该页顶到最右端的行）
   for(let y=0;y<H;y++){
     let cnt=0, maxSeg=0, seg=0, segStart=-1, segLeft=W, segRight=-1;
     const off=y*W;
     for(let x=0;x<W;x++){
-      if(!isBg((off+x)*4)){
+      if(isInk((off+x)*4)){
         cnt++; if(seg===0) segStart=x; seg++; if(seg>maxSeg) maxSeg=seg; segRight=x;
       } else { if(seg>0){ if(segStart<segLeft) segLeft=segStart; seg=0; } }
     }
     if(seg>0 && segStart<segLeft) segLeft=segStart;
     const ratio=cnt/W;
-    // 表格横线：黑像素聚成一个覆盖中间的大连续段(段长>行宽一半)，且段左右都有空白
+    // 表格横线：墨色聚成一个覆盖中间的大连续段(段长>行宽一半)，且段左右都有空白
     if(maxSeg> W*0.5 && segLeft> W*0.04 && segRight< W*0.96 && ratio>0.3){
       rowType[y]='hline';
-    } else if(ratio>0.0012 && maxSeg < W*0.5){   // 文字行（黑白交替，含粗体大标题；用最大连续段<行宽一半防填充块，不再按占比上限排除粗体标题）
+    } else if(ratio>0.0012 && maxSeg < W*0.5){   // 文字行（黑白交替，含粗体大标题；用最大连续段<行宽一半防填充块）
       rowType[y]='text';
       if(segRight>maxRightPx) maxRightPx=segRight;
     }
@@ -3035,8 +3037,9 @@ async function locateReportTitlesScanDB(path, tpl, reportKey){
       if(hit){
         await window.__bridge.locateSetMatch(S.folder, hit.id, it.item_index).catch(e=>{ LD('setMatch ERR '+e); });
         const midY=(hit.top+hit.bottom)/2;   // 该行 m-n 取中值
+        LD('match item'+it.item_index+' -> id='+hit.id+' pg='+hit.page_index+' y='+(hit.top*100).toFixed(1)+'~'+(hit.bottom*100).toFixed(1)+' text='+((hit.text||'').replace(/\s+/g,'').slice(0,22)));
         items.push({item_index:it.item_index, pageIndex:hit.page_index, titleY_pct:Math.round(midY*10000)/10000, titleX_pct:(pageRight!=null?Math.round(pageRight*10000)/10000:null), ocr_text:hit.text});
-      } else { items.push({item_index:it.item_index, pageIndex:null, titleY_pct:null, titleX_pct:null, ocr_text:''}); fully=false; }
+      } else { LD('match item'+it.item_index+' NOHIT tn='+tn); items.push({item_index:it.item_index, pageIndex:null, titleY_pct:null, titleX_pct:null, ocr_text:''}); fully=false; }
     }
     // 4) 从库读取渲染用数据(含全局KEY=id)
     const renderRows=await window.__bridge.locateGetRows(S.folder, reportKey).catch(e=>{ LD('final getRows ERR '+e); return []; })||[];
@@ -3140,6 +3143,8 @@ async function runLocatePositions(){
   const scanList=[...scanNeed, ...toScan];
   if(scanList.length){
     showVerifyProgress(scanList.length, '第2步：扫描版定位');
+    // 每次定位前清空定位库并重置自增id，避免行号持续累加、数据膨胀
+    try{ await window.__bridge.locateReset(S.folder); }catch(e){ L2('locateReset err '+e); }
     const previewData=[];
     for(const t of scanList){
       S._vpDone++; updateVerifyProgress();

@@ -359,6 +359,13 @@ pub fn get_report_locate(folder: String, report_key: String) -> Result<Option<St
 }
 
 // ==================== 独立定位库(locate.sqlite) ====================
+/// 重置定位库：清空全部行并重置自增 id（每次定位前调用，避免数据膨胀）
+#[tauri::command]
+pub fn locate_reset(folder: String) -> Result<(), String> {
+    let conn = db::open_locate(&folder)?;
+    db::locate_reset(&conn)
+}
+
 /// 初始化某份报告的扫描行：先清空旧行，逐行入库并返回全局唯一 KEY(id) 列表(与传入 rows 顺序对应)
 #[tauri::command]
 pub fn locate_init(folder: String, report_key: String, rows: Vec<serde_json::Value>) -> Result<Vec<i64>, String> {
