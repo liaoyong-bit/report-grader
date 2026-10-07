@@ -24,6 +24,11 @@
   .tb-sq { background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.28); color:#fff; font-size:14px; font-weight:600; padding:6px 9px; border-radius:7px; cursor:pointer; min-width:58px; text-align:center; line-height:1.4; white-space:nowrap; }
   .tb-sq:hover { background:rgba(255,255,255,.24); }
   .tb-sq.step-done { background:#2e7d32; border-color:#2e7d32; color:#fff; box-shadow:0 0 0 1px #2e7d32 inset; }
+  .tb-sq.tb-warn { background:rgba(229,57,53,.85); border-color:#e53935; color:#fff; box-shadow:0 0 0 2px rgba(229,57,53,.4); }
+  .tb-sq.tb-warn:hover { background:rgba(198,40,40,.9); }
+  .tb-hl { box-shadow:0 0 0 2px #fff, 0 0 0 5px #ffc107 !important; animation:tbPulse 1.2s ease-in-out infinite; }
+  @keyframes tbPulse { 0%,100%{ box-shadow:0 0 0 2px #fff, 0 0 0 5px #ffc107; } 50%{ box-shadow:0 0 0 2px #fff, 0 0 0 5px #fff3cd; } }
+  .tb-sep { width:1px; height:26px; background:rgba(255,255,255,.4); margin:0 8px; align-self:center; }
   .tb-arr { font-size:16px; font-weight:700; user-select:none; }
   .tb-time { position:absolute; right:14px; bottom:5px; font-size:12px; color:#cfe0f4; font-variant-numeric:tabular-nums; letter-spacing:.5px; white-space:nowrap; }
   .tb-right { display:flex; flex-direction:column; justify-content:center; gap:8px; min-width:150px; }
@@ -61,6 +66,7 @@
 
   /* ===== 主体三栏 ===== */
   #main { display: none; flex: 1; min-height: 0; }
+  #gradeWrap { flex: 1; display: flex; min-height: 0; }
   #left {
     width: 240px; min-width: 200px; background: #fff; border-right: 1px solid #dde1e6;
     display: flex; flex-direction: column; overflow: hidden; padding: 0;
@@ -177,11 +183,17 @@
   .pv-body { flex:1; display:flex; min-height:0; }
   .pv-left { flex:1; display:flex; flex-direction:column; min-width:0; }
   .pv-tblwrap { flex:1; overflow:auto; background:#fff; margin:10px 0 0 10px; border:1px solid #dde1e6; border-radius:8px; }
-  #prepTable { width:100%; border-collapse:collapse; font-size:13px; }
-  #prepTable th { position:sticky; top:0; background:#eef1f5; text-align:left; padding:7px 9px; border-bottom:1px solid #dde1e6; font-weight:600; white-space:nowrap; }
-  #prepTable td { padding:6px 9px; border-bottom:1px solid #f0f2f5; vertical-align:middle; white-space:nowrap; }
-  #prepTable tr:hover { background:#f7fafc; }
-  #prepTable .col-check { width:40px; text-align:center; }
+  #prepTable, #gradeScopeTable { width:100%; border-collapse:collapse; font-size:13px; }
+  #prepTable th, #gradeScopeTable th { position:sticky; top:0; background:#eef1f5; text-align:left; padding:7px 9px; border-bottom:1px solid #dde1e6; font-weight:600; white-space:nowrap; }
+  #prepTable td, #gradeScopeTable td { padding:6px 9px; border-bottom:1px solid #f0f2f5; vertical-align:middle; white-space:nowrap; }
+  #prepTable tr:hover, #gradeScopeTable tr:hover { background:#f7fafc; }
+  #prepTable .col-check, #gradeScopeTable .col-check { width:40px; text-align:center; }
+  #gradeSetup { flex:1; display:flex; flex-direction:column; gap:12px; padding:14px 16px; overflow:auto; }
+  #gradeSetup .gs-block { background:#fff; border:1px solid #dde1e6; border-radius:8px; padding:12px 14px; }
+  #gradeSetup .gs-block-tt { font-size:15px; font-weight:600; margin-bottom:10px; color:#20344c; }
+  #gradeSetup .gs-range .st-radio { display:block; margin:7px 0; font-size:14px; }
+  #gradeSetup .gs-range-ok { margin-top:12px; display:flex; }
+  #gradeSetup .gs-range-ok button { flex:0 0 auto; padding:9px 26px; }
   .tag { display:inline-block; font-size:11px; padding:1px 7px; border-radius:9px; }
   .tag.mat { background:#e6f7ec; color:#1b7a3d; }
   .tag.new { background:#fff3e6; color:#c2620a; }
@@ -654,7 +666,7 @@
     <div class="tb-left">
       <div class="tbt1">报告批阅</div>
       <div class="tbt2">系统</div>
-      <div class="tbver">v0.1.90</div>
+      <div class="tbver">v0.1.91</div>
       <button class="tbhlp" id="btnHelpTop">使用帮助</button>
     </div>
     <div class="tb-mid">
@@ -684,6 +696,24 @@
 
   <!-- 主体三栏 -->
   <div id="main">
+    <div id="gradeSetup" style="display:none">
+      <div class="gs-block">
+        <div class="gs-block-tt">核心数据表<span style="color:#888;font-size:12px">（勾选要批改的报告）</span></div>
+        <div class="pv-tblwrap"><table id="gradeScopeTable"><thead><tr>
+          <th class="col-check">勾选</th>
+          <th>学号</th><th>姓名</th><th>班级</th><th>报告名称</th><th>原始</th><th>改名</th><th>改名状态</th><th>已定位</th>
+          <th>匹配</th><th>批改</th><th>操作</th>
+        </tr></thead><tbody id="gradeScopeTbody"></tbody></table></div>
+      </div>
+      <div class="gs-block gs-range">
+        <div class="gs-block-tt">批改范围</div>
+        <label class="st-radio"><input type="radio" name="gradeRange" value="increment" checked> 增量批改（新增＋未打分）</label>
+        <label class="st-radio"><input type="radio" name="gradeRange" value="select"> 选择一部分（在上方核心表勾选）</label>
+        <label class="st-radio"><input type="radio" name="gradeRange" value="all"> 全部重新批改</label>
+        <div class="gs-range-ok"><button id="gradeScopeOk" class="btn-block primary">确定并开始批阅</button></div>
+      </div>
+    </div>
+    <div id="gradeWrap">
     <aside id="left">
       <div class="side-title">报告列表</div>
       <div id="reportListWrap">
@@ -728,6 +758,7 @@
       <div id="totalRow"><span class="lbl">总分</span><span class="val" id="totalVal">0 / 100</span></div>
       <button class="btn-block primary" id="btnSubmitNext">提交并下一份 <span style="font-weight:400;opacity:.85">(Ctrl+Enter)</span></button>
     </aside>
+    </div><!-- /gradeWrap -->
   </div>
 
 

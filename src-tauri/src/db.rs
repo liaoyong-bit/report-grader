@@ -117,6 +117,12 @@ pub fn open(folder: &str) -> Result<Connection, String> {
              page INTEGER DEFAULT 0,
              rect TEXT DEFAULT '{}',
              UNIQUE(batch_id, field_type)
+         );
+         CREATE TABLE IF NOT EXISTS batch_settings(
+             batch_id INTEGER NOT NULL,
+             s_key TEXT NOT NULL,
+             s_value TEXT DEFAULT '',
+             PRIMARY KEY(batch_id, s_key)
          );",
     )
     .map_err(|e| format!("建表失败: {e}"))?;
@@ -182,6 +188,46 @@ pub fn find_batch_by_folder(conn: &Connection) -> Result<Option<(i64, String)>, 
     )
     .optional()
     .map_err(|e| format!("查询批次失败: {e}"))
+}
+
+/* ---------------- 批次设置（批改范围持久化） ---------------- */
+/// 返回 (批改范围类型, select 模式勾选的报告 key 列表)
+pub fn get_scope(conn: &Connection, batch_id: i64) -> Result<(Option<String>, Vec<String>), String> {
+    let mut range: Option<String> = None;
+    let mut selected: Vec<String> = Vec::new();
+    {
+        let mut st = conn
+            .prepare("SELECT s_key, s_value FROM batch_settings WHERE batch_id=?1")
+            .map_err(|e| format!("读设置失败: {e}"))?;
+        let rows = st
+            .query_map(params![batch_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map_err(|e| format!("读设置失败: {e}"))?;
+        for row in rows {
+            let (k, v) = row.map_err(|e| format!("解析设置失败: {e}"))?;
+            if k == "grading_scope_range" {
+                range = if v.trim().is_empty() { None } else { Some(v) };
+            } else if k == "grading_scope_selected" && !v.trim().is_empty() {
+                if let Ok(arr) = serde_json::from_str::<Vec<String>>(&v) { selected = arr; }
+            }
+        }
+    }
+    Ok((range, selected))
+}
+
+/// 保存批改范围（类型 + select 勾选列表）到数据库，供下次进入批改直接复用
+pub fn save_scope(conn: &Connection, batch_id: i64, range: &str, selected: &[String]) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR REPLACE INTO batch_settings(batch_id, s_key, s_value) VALUES(?1,'grading_scope_range',?2)",
+        params![batch_id, range],
+    )
+    .map_err(|e| format!("保存批改范围类型失败: {e}"))?;
+    let js = serde_json::to_string(selected).unwrap_or_else(|_| "[]".into());
+    conn.execute(
+        "INSERT OR REPLACE INTO batch_settings(batch_id, s_key, s_value) VALUES(?1,'grading_scope_selected',?2)",
+        params![batch_id, js],
+    )
+    .map_err(|e| format!("保存批改范围选择失败: {e}"))?;
+    Ok(())
 }
 
 /* ---------------- 学生 ---------------- */

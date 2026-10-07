@@ -163,6 +163,8 @@
   window.__bridge.syncFolder = async (folder) => { return await invoke('sync_folder', { folder }); };
   window.__bridge.markExcluded = async (folder, reportKey) => { await invoke('mark_excluded', { folder, reportKey }); };
   window.__bridge.prepOverview = async (folder) => { return await invoke('prep_overview', { folder }); };
+  window.__bridge.getGradingScope = async (folder) => { return await invoke('get_grading_scope', { folder }); };
+  window.__bridge.saveGradingScope = async (folder, range, selected) => { await invoke('save_grading_scope', { folder, range, selected }); };
   window.__bridge.getRoster = async (folder) => { return await invoke('get_roster', { folder }); };
   window.__bridge.openExternal = async (folder, path) => { return await invoke('open_external', { folder, path }); };
 

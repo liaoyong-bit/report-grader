@@ -56,6 +56,7 @@ const el = {
   bbPrep: $('bbPrep'), bbGrade: $('bbGrade'), bbExport: $('bbExport'),
   btnPrepFolder: $('btnPrepFolder'), prepFolder: $('prepFolder'),
   pvSelbar: $('pvSelbar'), prepTable: $('prepTable'), prepTbody: $('prepTbody'), prepStats: $('prepStats'),
+  gradeSetup: $('gradeSetup'), gradeWrap: $('gradeWrap'), gradeScopeTbody: $('gradeScopeTbody'), gradeScopeOk: $('gradeScopeOk'),
   prepRoster: $('prepRoster'),
   expOptions: $('expOptions'), expOps: $('expOps'), btnExpClose: $('btnExpClose'),
   attachMask: $('attachMask'), attachBox: $('attachBox'), attachFile: $('attachFile'),
@@ -242,7 +243,7 @@ function initLibs(){
 /* ==================== 准备面板（第一块） ==================== */
 S.prepChecked = {}; S.prepFilter = null; S.prepRange = 'increment';
 function showPrep(){ switchPanel('prep'); }
-function hidePrep(){ switchPanel('grade'); }
+function hidePrep(){ enterGradePanel(); }
 /* 三大面板全屏切换：准备 / 批改 / 导出（底部大按钮直达） */
 function switchPanel(name){
   el.prepView.style.display = (name==='prep') ? 'flex' : 'none';
@@ -258,7 +259,7 @@ function switchPanel(name){
 function renderTbMid(name){
   var theme={
     prep:{c:'#d98d1f',nm:['准备','面板'],btns:[['名单管理',openPrepImport],['设置模板',openItemSetup],['核对原始报告',runSourceVerify],['定位批阅位置',runLocatePositions]],arr:true},
-    grade:{c:'#2f8f8f',nm:['批改','面板'],btns:[['批改范围',openRangeMask],['改分方式',openGradeModeMask],['快捷键设置',openKeysMask],['批阅概览',function(){showOverview();}],['标记交错',function(){el.btnMarkBad.onclick();}]],arr:false},
+    grade:{c:'#2f8f8f',nm:['批改','面板'],btns:[['批改范围',showGradeSetup],['改分方式',openGradeModeMask],['|'],['快捷键设置',openKeysMask],['批阅概览',function(){showOverview();}],['标记交错',function(){el.btnMarkBad.onclick();},true]],arr:false},
     export:{c:'#7a5fd0',nm:['导出','面板'],btns:[['开始导出',function(){setDetect('导出功能待接入');}]],arr:false}
   };
   var t=theme[name]||theme.prep;
@@ -267,10 +268,12 @@ function renderTbMid(name){
   if(mid){
     mid.innerHTML='';
     t.btns.forEach(function(b,i){
+      if(b[0]==='|'){ var sp=document.createElement('span'); sp.className='tb-sep'; mid.appendChild(sp); return; }
       if(i>0 && t.arr){ var a=document.createElement('span'); a.className='tb-arr'; a.textContent='→'; a.style.color=t.c; mid.appendChild(a); }
-      var btn=document.createElement('button'); btn.className='tb-sq';
+      var btn=document.createElement('button'); btn.className='tb-sq'+(b[2]?' tb-warn':'');
       var done=(name==='prep' && S.prepSteps) ? !!S.prepSteps[['roster','template','verify','locate'][i]] : false;
       paintPrepSq(btn, done, t.c);
+      if(b[2]){ btn.style.background='rgba(229,57,53,.85)'; btn.style.borderColor='#e53935'; btn.style.boxShadow='0 0 0 2px rgba(229,57,53,.4)'; }
       btn.textContent=b[0]; btn.onclick=b[1]; mid.appendChild(btn);
     });
   }
@@ -394,8 +397,8 @@ function openFile(path){ openReportPreview(path); }
 el.pvClose.onclick=()=>{ el.pvMask.style.display='none'; };
 el.pvMask.onclick=(e)=>{ if(e.target===el.pvMask){ el.pvMask.style.display='none'; } };
 document.addEventListener('keydown',(e)=>{ if(e.key==='Escape'){ el.pvMask.style.display='none'; } });
-function renderPrepTable(ov, roster){
-  const tbody = el.prepTbody; tbody.innerHTML='';
+function renderPrepTable(ov, roster, tbodyArg){
+  const tb = tbodyArg || el.prepTbody; tb.innerHTML='';
   const rows = (ov.rows||[]);
   const rosterL = roster || S.roster || [];
   const mkSrc=(r)=>{ const a=document.createElement('a'); a.className='filelink'; a.textContent=r.fname||'原始'; a.title=r.fname||r.path; a.href='#'; a.onclick=(e)=>{ e.preventDefault(); openFile(r.path); }; return a; };
@@ -424,7 +427,7 @@ function renderPrepTable(ov, roster){
         const tdM=document.createElement('td'); tdM.appendChild(tagSpan('new','未交')); tr.appendChild(tdM);
         const tdG=document.createElement('td'); tdG.appendChild(tagSpan('todo','待批')); tr.appendChild(tdG);
         const tdO=document.createElement('td'); tdO.textContent='—'; tr.appendChild(tdO);
-        tbody.appendChild(tr); return;
+      tb.appendChild(tr); return;
       }
       addNodes(tr,[mkSrc(r)]);
       addNodes(tr,[mkRnm(r)].filter(Boolean));
@@ -447,7 +450,7 @@ function renderPrepTable(ov, roster){
       const tdG=document.createElement('td'); tdG.appendChild(tagSpan(r.done?'done':'todo', r.done?'已批':(r.graded?'部分':'待批'))); tr.appendChild(tdG);
       const tdO=document.createElement('td');
       const ab=document.createElement('button'); ab.className='opbtn attached'; ab.textContent='已挂靠'; tdO.appendChild(ab); tr.appendChild(tdO);
-      tbody.appendChild(tr);
+      tb.appendChild(tr);
     });
   });
 
@@ -456,7 +459,7 @@ function renderPrepTable(ov, roster){
     const hr=document.createElement('tr'); const htd=document.createElement('td'); htd.colSpan=12;
     htd.style.cssText='padding:8px 10px;background:#fff6e5;color:#b45309;font-weight:600';
     htd.textContent='▼ 未匹配原始报告（OCR 后仍对不上名单，请手动挂靠或标记错误）';
-    hr.appendChild(htd); tbody.appendChild(hr);
+    hr.appendChild(htd); tb.appendChild(hr);
     unmatch.forEach((r)=>{
       const tr=document.createElement('tr');
       const tdC=document.createElement('td'); tdC.className='col-check'; tr.appendChild(tdC);
@@ -470,7 +473,7 @@ function renderPrepTable(ov, roster){
       const tdO=document.createElement('td');
       const ab=document.createElement('button'); ab.className='opbtn attach'; ab.textContent='挂靠';
       ab.onclick=()=>{ openAttachBatch(); }; tdO.appendChild(ab); tr.appendChild(tdO);
-      tbody.appendChild(tr);
+      tb.appendChild(tr);
     });
   }
 }
@@ -620,7 +623,7 @@ el.abBackBtn.onclick = ()=>{ el.attachBatchMask.style.display='none'; refreshPre
 // 顶部面板切换（第一行）
 el.bbPrep.onclick = ()=> switchPanel('prep');
 el.bbExport.onclick = ()=> switchPanel('export');
-el.bbGrade.onclick = ()=>{ if(!S.inPrep){ enterGrade(); } else { switchPanel('grade'); } };
+el.bbGrade.onclick = ()=> enterGradePanel();
 /* ==================== 导出面板（两栏：左项目 / 右选项+预览） ==================== */
 const EXP_ITEMS = [
   {id:'scores',     name:'学生成绩总表',  sub:'Excel · 美观表格',   icon:'📊'},
@@ -695,6 +698,83 @@ function previewAnnotated(){
     '<div style="border-top:1px solid #e3e8f0;margin-top:6px;padding-top:4px">总分：<b>86</b>/100　批阅教师：张老师　2026-10-07 15:30</div></div>';
 }
 el.btnPrepFolder.onclick=()=>{ if(el.btnLoadFolder.onclick) el.btnLoadFolder.onclick(); };
+/* —— 批改面板：进入流程（查库 → 有上次范围直接三栏 / 无则先设置） —— */
+function showGradeWrap(){ if(el.gradeWrap) el.gradeWrap.style.display='flex'; if(el.gradeSetup) el.gradeSetup.style.display='none'; }
+function showGradeSetup(){
+  if(el.gradeSetup) el.gradeSetup.style.display='flex';
+  if(el.gradeWrap) el.gradeWrap.style.display='none';
+  if(S.prepOv){ renderPrepTable(S.prepOv, S.roster||[], el.gradeScopeTbody); }
+  highlightTbSq(0);
+}
+function highlightTbSq(idx){
+  if(!el.tbMidBtns) return;
+  const sqs=el.tbMidBtns.querySelectorAll('.tb-sq');
+  if(sqs[idx]) sqs[idx].classList.add('tb-hl');
+}
+function renderGradeStats(){
+  const reps=S.reports||[];
+  const done=reps.filter(r=>r.done).length;
+  if(el.statTotal) el.statTotal.textContent=reps.length;
+  if(el.statDone) el.statDone.textContent=done;
+  if(el.statPending) el.statPending.textContent=reps.length-done;
+}
+function buildScopeFilter(range, selected){
+  const rows=(S.prepOv&&S.prepOv.rows)||[];
+  if(range==='select'){ return selected&&selected.length ? new Set(selected) : new Set(); }
+  if(range==='increment'){ return new Set(rows.filter(r=>!r.done).map(r=>r.key).filter(Boolean)); }
+  return null;
+}
+async function enterGradePanel(){
+  el.prepView.style.display='none';
+  el.exportView.style.display='none';
+  el.main.style.display='flex';
+  S.inPrep=false;
+  const active=el.bbGrade;
+  [el.bbPrep,el.bbGrade,el.bbExport].forEach(b=>b.classList.toggle('active', b===active));
+  renderTbMid('grade');
+  if(!S.folder){ showGradeSetup(); setDetect('请先选择报告文件夹'); return; }
+  if(window.__bridge && window.__bridge.prepOverview && S.folder){
+    try{ S.prepOv = await window.__bridge.prepOverview(S.folder); S.roster = await window.__bridge.getRoster(S.folder).catch(()=>[]); }catch(e){}
+  }
+  let scope=null;
+  try{ if(window.__bridge && window.__bridge.getGradingScope && S.folder){ scope=await window.__bridge.getGradingScope(S.folder); } }catch(e){}
+  const range=(scope && scope[0]) || null;
+  const selected=(scope && scope[1]) || [];
+  if(range){
+    S.prepRange=range;
+    S.prepFilter=buildScopeFilter(range, selected);
+    await loadReportsFromScope();
+    showGradeWrap();
+    renderGradeStats();
+    if(S.reports && S.reports.length){ selectReport(0); setDetect('已按上次批改范围进入，共 '+S.reports.length+' 份'); }
+    else setDetect('批改范围内没有可批改的报告');
+  } else {
+    showGradeSetup();
+    setDetect('请先设置批改范围');
+  }
+}
+async function applyGradingScope(){
+  const range=document.querySelector('input[name="gradeRange"]:checked');
+  const rv=range ? range.value : 'increment';
+  let selected=[];
+  if(rv==='select'){
+    const rows=(S.prepOv&&S.prepOv.rows)||[];
+    const checked=Object.keys(S.prepChecked||{}).filter(i=>S.prepChecked[i]).map(Number);
+    if(!checked.length){ setErr('请先在核心表勾选要批改的报告'); return; }
+    const selRows=checked.flatMap(i=>{ const s=(S.roster||[])[i]; return s?rows.filter(r=>r.matched&&r.stu_no===s.no):[]; });
+    selected=selRows.map(r=>r.key).filter(Boolean);
+    if(!selected.length){ setErr('勾选的报告没有匹配记录'); return; }
+    S.prepFilter=new Set(selected);
+  } else { S.prepFilter=buildScopeFilter(rv, []); }
+  S.prepRange=rv;
+  try{ if(window.__bridge && window.__bridge.saveGradingScope && S.folder){ await window.__bridge.saveGradingScope(S.folder, rv, selected); } }catch(e){ setErr('保存批改范围失败: '+e); }
+  await loadReportsFromScope();
+  showGradeWrap();
+  renderGradeStats();
+  if(S.reports && S.reports.length){ selectReport(0); setDetect('已进入批改，共 '+S.reports.length+' 份'); }
+  else setDetect('批改范围内没有可批改的报告');
+}
+el.gradeScopeOk.onclick = ()=> applyGradingScope();
 async function enterGrade(){
   const range=document.querySelector('input[name="prepRange"]:checked');
   const rv = range ? range.value : 'increment';

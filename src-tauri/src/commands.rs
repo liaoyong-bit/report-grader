@@ -98,6 +98,22 @@ pub fn prep_overview(folder: String) -> Result<db::PrepOverview, String> {
     db::prep_overview(&conn, bid)
 }
 
+/// 读取持久化的批改范围（进入批改面板时调用）
+#[tauri::command]
+pub fn get_grading_scope(folder: String) -> Result<(Option<String>, Vec<String>), String> {
+    let conn = db::open(&folder)?;
+    let bid = db::find_batch_by_folder(&conn)?.map(|b| b.0).ok_or("当前文件夹尚未初始化批次")?;
+    db::get_scope(&conn, bid)
+}
+
+/// 保存批改范围（批改范围确定时调用）
+#[tauri::command]
+pub fn save_grading_scope(folder: String, range: String, selected: Vec<String>) -> Result<(), String> {
+    let conn = db::open(&folder)?;
+    let bid = db::get_or_create_batch(&conn, "", "")?;
+    db::save_scope(&conn, bid, &range, &selected)
+}
+
 /// 名单列表（挂靠下拉用）
 #[tauri::command]
 pub fn get_roster(folder: String) -> Result<Vec<db::StudentIn>, String> {
