@@ -52,7 +52,7 @@ const el = {
   pwdOld: $('pwdOld'), pwdNew: $('pwdNew'), pwdNew2: $('pwdNew2'), pwdErr: $('pwdErr'),
   btnPwdSave: $('btnPwdSave'), btnPwdCancel: $('btnPwdCancel'),
   prepView: $('prepView'), main: $('main'), exportView: $('exportView'),
-  tbRow2: $('tbRow2'), tbPhName: $('tbPhName'), tbMidBtns: $('tbMidBtns'), tbClock: $('tbClock'), btnHelpTop: $('btnHelpTop'), helpTopMask: $('helpTopMask'), helpTopX: $('helpTopX'), helpTopOk: $('helpTopOk'),
+  tbRow2: $('tbRow2'), tbPhName: $('tbPhName'), tbMidBtns: $('tbMidBtns'), tbClock: $('tbClock'), btnHelpTop: $('btnHelpTop'), helpTopMask: $('helpTopMask'), helpTopX: $('helpTopX'), helpTopOk: $('helpTopOk'), verifyResultMask: $('verifyResultMask'), verifyResultX: $('verifyResultX'), verifyResultBody: $('verifyResultBody'), verifyResultOk: $('verifyResultOk'),
   bbPrep: $('bbPrep'), bbGrade: $('bbGrade'), bbExport: $('bbExport'),
   btnPrepFolder: $('btnPrepFolder'), prepFolder: $('prepFolder'),
   pvSelbar: $('pvSelbar'), prepTable: $('prepTable'), prepTbody: $('prepTbody'), prepStats: $('prepStats'),
@@ -269,7 +269,8 @@ function renderTbMid(name){
     t.btns.forEach(function(b,i){
       if(i>0 && t.arr){ var a=document.createElement('span'); a.className='tb-arr'; a.textContent='→'; a.style.color=t.c; mid.appendChild(a); }
       var btn=document.createElement('button'); btn.className='tb-sq';
-      btn.style.background=t.c+'44'; btn.style.borderColor=t.c+'88';
+      var done=(name==='prep' && S.prepSteps) ? !!S.prepSteps[['roster','template','verify','locate'][i]] : false;
+      paintPrepSq(btn, done, t.c);
       btn.textContent=b[0]; btn.onclick=b[1]; mid.appendChild(btn);
     });
   }
@@ -283,6 +284,10 @@ function closeHelpTop(){ el.helpTopMask.style.display='none'; }
 el.helpTopX.onclick = closeHelpTop;
 el.helpTopOk.onclick = closeHelpTop;
 el.helpTopMask.addEventListener('click', function(e){ if(e.target===el.helpTopMask) closeHelpTop(); });
+function closeVerifyResult(){ if(el.verifyResultMask) el.verifyResultMask.style.display='none'; }
+el.verifyResultX.onclick = closeVerifyResult;
+el.verifyResultOk.onclick = closeVerifyResult;
+el.verifyResultMask.addEventListener('click', function(e){ if(e.target===el.verifyResultMask) closeVerifyResult(); });
 /* 顶栏实时时钟 */
 function tickClock(){
   if(!el.tbClock) return;
@@ -345,13 +350,17 @@ async function updatePrepSteps(){
   S.prepSteps=steps;
   if(S.inPrep) applyPrepSteps(steps);
 }
-/* 顶栏 prep 四按钮：名单管理/设置模板/核对原始报告/定位批阅位置 按序加绿 */
+/* 顶栏 prep 四按钮：名单管理/设置模板/核对原始报告/定位批阅位置 按序着色（完成=绿，未完成=主题半透明） */
+function paintPrepSq(btn, done, themeColor){
+  if(done){ btn.classList.add('step-done'); btn.style.background='#2e7d32'; btn.style.borderColor='#2e7d32'; btn.style.color='#fff'; }
+  else { btn.classList.remove('step-done'); btn.style.background=themeColor+'44'; btn.style.borderColor=themeColor+'88'; btn.style.color='#fff'; }
+}
 function applyPrepSteps(steps){
   if(!steps || !el.tbMidBtns) return;
   const sqs=el.tbMidBtns.querySelectorAll('.tb-sq');
   if(sqs.length<4) return;
   const map=[steps.roster, steps.template, steps.verify, steps.locate];
-  sqs.forEach((b,i)=>{ if(i<map.length) b.classList.toggle('step-done', !!map[i]); });
+  sqs.forEach((b,i)=>{ if(i<map.length) paintPrepSq(b, !!map[i], '#d98d1f'); });
 }
 
 async function renderPdfPreview(container, path){
@@ -3264,16 +3273,18 @@ async function hasTextLayer(path){
   }catch(e){ return false; }
 }
 
+function showVerifyAlert(msg){ if(el.verifyResultBody) el.verifyResultBody.innerHTML=msg; if(el.verifyResultMask) el.verifyResultMask.style.display='flex'; }
 async function runSourceVerify(){
   const L=(m)=>{ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[核对] '+m); };
   L('入口 folder='+(S.folder||'<空>'));
   if(!S.folder){ setErr('请先选报告文件夹'); return; }
   if(!window.__bridge || !window.__bridge.syncFolder){ L('缺少同步接口'); setErr('环境异常：缺少同步接口'); return; }
   let bf=[]; try{ bf = await window.__bridge.getBasicFields(S.folder); }catch(e){ L('getBasicFields err '+e); }
-  if(!(bf&&bf.length)){ L('基本信息为空，中止'); setErr('请先点「设置模板（框选）」框选基本信息并保存，再核对原始报告'); return; }
+  if(!(bf&&bf.length)){ L('基本信息为空，中止'); showVerifyAlert('⚠ 请先点「设置模板（框选）」框选基本信息并保存，再核对原始报告。'); return; }
   setDetect('正在核对原始报告：扫描并 OCR 匹配...');
   L('开始，基本信息字段='+bf.length);
-  try{ const sync=await window.__bridge.syncFolder(S.folder); L('sync added='+(sync&&sync.added)+' unmatched='+(sync&&sync.unmatched&&sync.unmatched.length)); }
+  let syncRes=null;
+  try{ syncRes=await window.__bridge.syncFolder(S.folder); L('sync added='+(syncRes&&syncRes.added)+' unmatched='+(syncRes&&syncRes.unmatched&&syncRes.unmatched.length)); }
   catch(e){ L('sync FAIL '+e); setErr('同步失败: '+e); }
   refreshPrepOverview();
   const rows=(S.prepOv&&S.prepOv.rows)||[];
@@ -3305,7 +3316,18 @@ async function runSourceVerify(){
   let renamedN=0;
   try{ renamedN = await window.__bridge.applyRenames(S.folder); L('改名 '+renamedN+' 份'); }catch(e){ L('改名失败 '+e); }
   refreshPrepOverview();
+  const addedN=(syncRes&&syncRes.added)||0;
+  const unmatchN=(syncRes&&syncRes.unmatched&&syncRes.unmatched.length)||0;
   setDetect('✅ 核对完成'+(ok?('，自动挂靠 '+ok+' 份'):'')+(renamedN?('，改名 '+renamedN+' 份'):''));
+  let body='本次核对结果：\n';
+  body+='· 新增原始报告：'+addedN+' 份\n';
+  body+='· 自动挂靠：'+ok+' 份\n';
+  body+='· 改名：'+renamedN+' 份\n';
+  if(unmatchN>0) body+='· 待手动挂靠：'+unmatchN+' 份（姓名/学号未能自动识别，请在下表「待挂靠」中手动选择学生）\n';
+  else body+='· 待手动挂靠：0 份\n';
+  if(addedN===0 && ok===0 && renamedN===0) body+='\n未发现新增报告，核心数据表已是最新。';
+  if(el.verifyResultBody) el.verifyResultBody.innerHTML=body;
+  if(el.verifyResultMask) el.verifyResultMask.style.display='flex';
 }
 
 /* ---- 「定位批阅位置」按钮：只负责给已挂靠改名的报告定位打分框位置（纵向 titleY_pct），位置写库供批改直接复用 ----

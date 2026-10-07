@@ -528,6 +528,20 @@
     </div>
   </div>
 
+  <!-- 核对原始报告结果弹窗 -->
+  <div class="tbhelp-mask" id="verifyResultMask">
+    <div class="tbhelp-dlg">
+      <div class="tbhelp-hd">
+        <div class="t">核对原始报告 · 结果</div>
+        <button class="x" id="verifyResultX">×</button>
+      </div>
+      <div class="tbhelp-bd">
+        <div class="st" id="verifyResultBody" style="white-space:pre-line;line-height:1.9;font-size:14px"></div>
+        <button class="go" id="verifyResultOk">知道了</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 初始化向导弹窗（Tauri 模式下无数据库时弹出） -->
   <!-- 修改密码 -->
   <div id="pwdMask" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);align-items:center;justify-content:center;z-index:99">
@@ -640,7 +654,7 @@
     <div class="tb-left">
       <div class="tbt1">报告批阅</div>
       <div class="tbt2">系统</div>
-      <div class="tbver">v0.1.89</div>
+      <div class="tbver">v0.1.90</div>
       <button class="tbhlp" id="btnHelpTop">使用帮助</button>
     </div>
     <div class="tb-mid">
