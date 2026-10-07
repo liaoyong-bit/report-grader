@@ -78,7 +78,7 @@
   }
 
   /* 左栏 */
-  .side-title { font-size: 14px; font-weight: 700; color: #2b3a55; margin: 10px 0 8px; position: relative; }
+  .side-title { font-size: 14px; font-weight: 700; color: #2b3a55; margin: 6px 0 4px; position: relative; }
   /* 评分栏"提示"悬停气泡：列出常用快捷键，鼠标离开即消失 */
   .side-title .hint { cursor: help; color: #1a73e8; font-size: 12px; font-weight: 400; margin-left: 8px; border-bottom: 1px dashed #1a73e8; }
   .side-title .hint-pop { display: none; position: absolute; left: 0; top: 100%; margin-top: 6px; background: #fff; border: 1px solid #e3e8f0; border-radius: 8px; padding: 10px 14px; width: 300px; box-shadow: 0 6px 20px rgba(0,0,0,.16); z-index: 60; font-size: 12px; font-weight: 400; line-height: 1.9; color: #2b3a55; }
@@ -414,28 +414,28 @@
   }
   .field input:focus { border-color: #e07b39; outline: none; }
   /* 学生信息纯文本（来自准备阶段核心表） */
-  .info-line { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; }
+  .info-line { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 13px; }
   .info-line .k { color: #888; flex-shrink: 0; }
   .info-line .v { color: #2b3a55; font-weight: 600; word-break: break-all; }
   #scoreRows { margin-top: 6px; }
   .score-row {
-    display: flex; align-items: center; justify-content: space-between; padding: 8px 4px;
-    border-bottom: 1px dashed #eceff1; font-size: 13.5px;
+    display: flex; align-items: flex-start; justify-content: space-between; padding: 5px 4px;
+    border-bottom: 1px dashed #eceff1; font-size: 13px;
   }
-  .score-row .name { flex: 1; word-break: break-all; }
-  .score-row .max { margin-right: 8px; font-weight: 800; }   /* 满分：红=未批 / 绿=已批 */
+  .score-row .name { flex: 0 0 96px; width: 96px; word-break: break-all; }   /* 题目名宽度固定，不因撤销按钮出现而变化 */
+  .score-row .max { flex-shrink: 0; margin-right: 6px; font-weight: 800; }   /* 满分：红=未批 / 绿=已批 */
   .score-row .max.ungraded { color: #e0245e; }   /* 红：尚未批 */
   .score-row .max.graded { color: #2eaf5f; }      /* 绿：已批 */
-  .score-row .undo { background: #fff; border: 1px solid #e0245e; color: #e0245e; border-radius: 3px; font-size: 11px; line-height: 17px; padding: 0 5px; cursor: pointer; margin-right: 4px; vertical-align: middle; }
+  .score-row .undo { flex-shrink: 0; background: #fff; border: 1px solid #e0245e; color: #e0245e; border-radius: 3px; font-size: 11px; line-height: 16px; padding: 0 6px; cursor: pointer; margin-right: 6px; }
   .score-row .undo:hover { background: #fdecec; }
-  .score-row input { width: 92px; text-align: center; padding: 8px 6px; font-size: 18px; font-weight: 700; color: #e07b39; border: none; background: transparent; }
+  .score-row input { width: 84px; flex-shrink: 0; text-align: center; padding: 5px 4px; font-size: 17px; font-weight: 700; color: #e07b39; border: none; background: transparent; }
   .score-row input.ungraded { color: #e07b39; }   /* 去边框后字体同总分（橙色） */
   .score-row input.graded { color: #e07b39; }
-  .score-row .cur { width: 46px; text-align: right; color: #e07b39; font-weight: 700; font-size: 15px; }
+  .score-row .cur { display: none; }   /* 占位元素已无用处，隐藏 */
   .score-row.active { background: #fff2e3; border-radius: 5px; }   /* 当前正在评的题高亮 */
   #totalRow {
-    display: flex; justify-content: space-between; align-items: center; margin-top: 10px;
-    padding: 10px 4px; background: #f7f9fb; border-radius: 6px;
+    display: flex; justify-content: space-between; align-items: center; margin-top: 6px;
+    padding: 7px 4px; background: #f7f9fb; border-radius: 6px;
   }
   #totalRow .lbl { font-weight: 700; color: #2b3a55; }
   #totalRow .val { font-size: 20px; font-weight: 700; color: #e07b39; }
@@ -666,7 +666,7 @@
     <div class="tb-left">
       <div class="tbt1">报告批阅</div>
       <div class="tbt2">系统</div>
-      <div class="tbver">v0.1.91</div>
+      <div class="tbver">v0.1.92</div>
       <button class="tbhlp" id="btnHelpTop">使用帮助</button>
     </div>
     <div class="tb-mid">
