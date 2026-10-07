@@ -2692,22 +2692,20 @@ async function analyzePage(pdf, pageIdx, scale=2){
   if(!W||!H) return empty;
   const data=canvas.getContext('2d').getImageData(0,0,W,H).data;
   const isBg=(i)=>{ const r=data[i],g=data[i+1],b=data[i+2]; return r>242&&g>242&&b>242; };
-  // 深色(墨)判定：真黑/深色文字或横线。灰色背景不算墨，避免灰白黑相间的行被误判成表格横线而漏掉文字框选
-  const isInk=(i)=>{ const r=data[i],g=data[i+1],b=data[i+2]; return r<110&&g<110&&b<110; };
-  // 逐像素行：统计墨色(深色)占比 + 最大连续墨段（判断表格横线）
+  // 逐像素行：统计非背景占比 + 最大连续黑段（判断表格横线）
   const rowType=new Array(H).fill('blank');
   let maxRightPx=-1;   // 本页文字区最右黑像素（文字区右边界判定：该页顶到最右端的行）
   for(let y=0;y<H;y++){
     let cnt=0, maxSeg=0, seg=0, segStart=-1, segLeft=W, segRight=-1;
     const off=y*W;
     for(let x=0;x<W;x++){
-      if(isInk((off+x)*4)){
+      if(!isBg((off+x)*4)){
         cnt++; if(seg===0) segStart=x; seg++; if(seg>maxSeg) maxSeg=seg; segRight=x;
       } else { if(seg>0){ if(segStart<segLeft) segLeft=segStart; seg=0; } }
     }
     if(seg>0 && segStart<segLeft) segLeft=segStart;
     const ratio=cnt/W;
-    // 表格横线：墨色聚成一个覆盖中间的大连续段(段长>行宽一半)，且段左右都有空白
+    // 表格横线：黑像素聚成一个覆盖中间的大连续段(段长>行宽一半)，且段左右都有空白
     if(maxSeg> W*0.5 && segLeft> W*0.04 && segRight< W*0.96 && ratio>0.3){
       rowType[y]='hline';
     } else if(ratio>0.0012 && maxSeg < W*0.5){   // 文字行（黑白交替，含粗体大标题；用最大连续段<行宽一半防填充块）
@@ -2986,6 +2984,8 @@ async function locateReportTitlesScanDB(path, tpl, reportKey){
     const bytes=await window.__bridge.readPdf(S.folder, path);
     const pdf=await pdfjsLib.getDocument({data:bytes.slice(0)}).promise;
     const norm=(s)=>(s||'').replace(/\s+/g,'').replace(/[，。、；：（）()【】《》"'“”]/g,'');
+    // 截掉最前面的序号("一、""1."等)和顿号：OCR 常漏识别序号，去掉后题目与识别文本才能对上
+    const stripSeq=(s)=>(s||'').replace(/^\s*[一二三四五六七八九十]+[、．.\s]*/,'');
     const items=[]; let fully=true;
     const bandList=[]; let pageRight=null;
     for(let p=0;p<pdf.numPages;p++){
@@ -3024,13 +3024,13 @@ async function locateReportTitlesScanDB(path, tpl, reportKey){
       return false;
     };
     for(const it of tpl){
-      const tn=norm(locateTarget(it));
+      const tn=stripSeq(norm(locateTarget(it)));
       let hit=null;
       for(let i=0;i<rows.length;i++){
-        const nt1=norm(rows[i].text);
+        const nt1=stripSeq(norm(rows[i].text));
         if(nt1 && (nt1.includes(tn)||(tn.length>0&&longestContMatch(tn,nt1)/tn.length>=0.8)) && isBodyTitle(i,rows[i])){ hit=rows[i]; break; }
         if(i+1<rows.length){
-          const nt2=norm(rows[i].text+rows[i+1].text);
+          const nt2=stripSeq(norm(rows[i].text+rows[i+1].text));
           if(nt2 && (nt2.includes(tn)||(tn.length>0&&longestContMatch(tn,nt2)/tn.length>=0.8)) && isBodyTitle(i,rows[i])){ hit=rows[i]; break; }
         }
       }
