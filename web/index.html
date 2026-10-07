@@ -99,7 +99,13 @@
   #loginBox .hint a { color:#3b82f6; cursor:pointer; }
 
   /* ===== 准备面板 ===== */
-  #prepView { display:flex; flex-direction:column; height:100%; background:#f5f6f8; }
+  #prepView { display:flex; flex-direction:column; flex:1; min-height:0; background:#f5f6f8; }
+  #exportView { display:none; flex-direction:column; flex:1; min-height:0; background:#f5f6f8; }
+  /* 底部面板切换大按钮（准备/批阅/导出） */
+  #bottomBar { display:flex; background:#fff; border-top:1px solid #e3e8f0; padding:8px 12px; justify-content:center; gap:14px; }
+  #bottomBar .bb-btn { min-width:130px; padding:9px 18px; font-size:15px; font-weight:700; border:none; border-radius:8px; background:#eef1f5; color:#2b3a55; cursor:pointer; }
+  #bottomBar .bb-btn.active { background:#1a73e8; color:#fff; }
+  #bottomBar .bb-btn:hover:not(.active) { background:#e0e6ee; }
   .pv-head {
     display:flex; align-items:center; gap:10px; padding:10px 16px; flex:0 0 auto;
     background:#2b3a55; color:#fff; flex-wrap:wrap;
@@ -363,7 +369,7 @@
   .score-row .max { margin-right: 8px; font-weight: 800; }   /* 满分：红=未批 / 绿=已批 */
   .score-row .max.ungraded { color: #e0245e; }   /* 红：尚未批 */
   .score-row .max.graded { color: #2eaf5f; }      /* 绿：已批 */
-  .score-row .undo { background: #fff; border: 1px solid #e0245e; color: #e0245e; border-radius: 4px; font-size: 12px; padding: 1px 6px; cursor: pointer; margin-right: 4px; }
+  .score-row .undo { background: #fff; border: 1px solid #e0245e; color: #e0245e; border-radius: 3px; font-size: 11px; line-height: 17px; padding: 0 5px; cursor: pointer; margin-right: 4px; vertical-align: middle; }
   .score-row .undo:hover { background: #fdecec; }
   .score-row input { width: 92px; text-align: center; padding: 8px 6px; font-size: 18px; font-weight: 700; color: #e07b39; border: none; background: transparent; }
   .score-row input.ungraded { color: #e07b39; }   /* 去边框后字体同总分（橙色） */
@@ -651,6 +657,13 @@
     <span id="stErr"></span>
   </div>
 
+  <!-- 底部：三大面板全屏切换 -->
+  <div id="bottomBar">
+    <button class="bb-btn" id="bbPrep">📋 准备面板</button>
+    <button class="bb-btn" id="bbGrade">✍️ 批改面板</button>
+    <button class="bb-btn" id="bbExport">📤 导出面板</button>
+  </div>
+
   <input type="file" id="fileInput" accept="application/pdf,.pdf" style="display:none" multiple>
   <input type="file" id="dirInput" webkitdirectory style="display:none">
   <button id="btnLoadFolder" style="display:none"></button>
@@ -721,6 +734,25 @@
           <label class="pv-range"><input type="radio" name="prepRange" value="all"> 全部重新批改</label>
         </div>
         <button id="btnPrepStart" class="primary pv-start">进入批改</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 导出面板（第三块：布局待完善） -->
+  <div id="exportView" style="display:none">
+    <div class="pv-head">
+      <div class="pv-title">导出面板</div>
+      <div class="spacer"></div>
+      <button id="btnExpClose" class="ghost">返回</button>
+    </div>
+    <div class="pv-body" style="align-items:flex-start">
+      <div class="pv-card" style="width:560px">
+        <div class="pv-card-tt">导出数据（可勾选）</div>
+        <div id="expOptions"></div>
+      </div>
+      <div class="pv-card" style="width:460px">
+        <div class="pv-card-tt">导出操作</div>
+        <div id="expOps"></div>
       </div>
     </div>
   </div>

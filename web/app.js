@@ -51,9 +51,12 @@ const el = {
   btnChangePwd: $('btnChangePwd'), pwdMask: $('pwdMask'), pwdUser: $('pwdUser'),
   pwdOld: $('pwdOld'), pwdNew: $('pwdNew'), pwdNew2: $('pwdNew2'), pwdErr: $('pwdErr'),
   btnPwdSave: $('btnPwdSave'), btnPwdCancel: $('btnPwdCancel'),
-  prepView: $('prepView'), main: $('main'), btnPrepFolder: $('btnPrepFolder'), prepFolder: $('prepFolder'),
+  prepView: $('prepView'), main: $('main'), exportView: $('exportView'),
+  bbPrep: $('bbPrep'), bbGrade: $('bbGrade'), bbExport: $('bbExport'),
+  btnPrepFolder: $('btnPrepFolder'), prepFolder: $('prepFolder'),
   pvSelbar: $('pvSelbar'), prepTable: $('prepTable'), prepTbody: $('prepTbody'), prepStats: $('prepStats'),
   prepRoster: $('prepRoster'), btnPrepBack: $('btnPrepBack'), btnPrepStart: $('btnPrepStart'),
+  expOptions: $('expOptions'), expOps: $('expOps'), btnExpClose: $('btnExpClose'),
   attachMask: $('attachMask'), attachBox: $('attachBox'), attachFile: $('attachFile'),
   locateMask: $('locateMask'), locateBody: $('locateBody'), locateTitle: $('locateTitle'),
   locateSave: $('locateSave'), locateCancel: $('locateCancel'),
@@ -236,8 +239,18 @@ function initLibs(){
 }
 /* ==================== 准备面板（第一块） ==================== */
 S.prepChecked = {}; S.prepFilter = null; S.prepRange = 'increment';
-function showPrep(){ S.inPrep = true; el.prepView.style.display='flex'; el.main.style.display='none'; }
-function hidePrep(){ S.inPrep = false; el.prepView.style.display='none'; el.main.style.display='flex'; }
+function showPrep(){ switchPanel('prep'); }
+function hidePrep(){ switchPanel('grade'); }
+/* 三大面板全屏切换：准备 / 批改 / 导出（底部大按钮直达） */
+function switchPanel(name){
+  el.prepView.style.display = (name==='prep') ? 'flex' : 'none';
+  el.main.style.display = (name==='grade') ? 'flex' : 'none';
+  el.exportView.style.display = (name==='export') ? 'flex' : 'none';
+  S.inPrep = (name==='prep');
+  const active = {prep:el.bbPrep, grade:el.bbGrade, export:el.bbExport}[name];
+  [el.bbPrep, el.bbGrade, el.bbExport].forEach(b=>b.classList.toggle('active', b===active));
+  if(name==='export') renderExportPanel();
+}
 async function refreshPrepOverview(){
   if(!window.__bridge || !window.__bridge.prepOverview || !S.folder) return;
   try{
@@ -529,6 +542,25 @@ el.abCommitBtn.onclick = commitAttachBatch;
 el.abPrevBtn.onclick = ()=>{ if(S_ATTACH.idx>0){ S_ATTACH.idx--; refreshAttachBatch(); } };
 el.abNextBtn.onclick = ()=>{ if(S_ATTACH.idx<S_ATTACH.list.length-1){ S_ATTACH.idx++; refreshAttachBatch(); } };
 el.abBackBtn.onclick = ()=>{ el.attachBatchMask.style.display='none'; refreshPrepOverview(); };
+
+// 底部面板切换
+el.bbPrep.onclick = ()=> switchPanel('prep');
+el.bbGrade.onclick = ()=> switchPanel('grade');
+el.bbExport.onclick = ()=> switchPanel('export');
+el.btnExpClose.onclick = ()=> switchPanel('prep');
+/* 导出面板占位（布局/数据项待与用户敲定后完善） */
+function renderExportPanel(){
+  const opt = el.expOptions;
+  if(!opt) return;
+  opt.innerHTML =
+    '<label class="exp-opt"><input type="checkbox" checked> 学生成绩表（Excel / CSV）</label>' +
+    '<label class="exp-opt"><input type="checkbox" checked> 批阅报告（带分 PDF，逐份）</label>' +
+    '<label class="exp-opt"><input type="checkbox"> 批阅进度统计（已批/待批/平均分）</label>' +
+    '<label class="exp-opt"><input type="checkbox"> 批改明细（每题得分）</label>';
+  const ops = el.expOps;
+  if(ops) ops.innerHTML =
+    '<p style="color:#999;font-size:12px;margin:0 0 8px">导出面板详细布局与各导出项设计待与您确认后实现。</p>';
+}
 el.btnPrepFolder.onclick=()=>{ if(el.btnLoadFolder.onclick) el.btnLoadFolder.onclick(); };
 el.btnPrepBack.onclick=()=>{ hidePrep(); S.teacher=''; localStorage.removeItem('loginUser'); el.loginMask.style.display='flex'; showLogin(); };
 el.btnPrepStart.onclick=async()=>{
@@ -1247,7 +1279,7 @@ function buildScoreRows(r){
     const mx = document.createElement('span'); mx.className = 'max ' + (r.activated[i] ? 'graded' : 'ungraded'); mx.textContent = '满分'+max;
     // 撤销按钮：仅已确认(activated)时显示，点击回退重新打分
     const undo = document.createElement('button');
-    undo.className='undo'; undo.textContent='↩ 撤销'; undo.title='撤销确认，重新打分';
+    undo.className='undo'; undo.textContent='撤销'; undo.title='撤销确认，重新打分';
     undo.style.display = r.activated[i] ? 'inline-block' : 'none';
     undo.onclick = ()=>{ undoItemGraded(r, i); };
     const inp = document.createElement('input');
