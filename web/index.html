@@ -11,30 +11,28 @@
 
   /* ===== 顶部工具栏 ===== */
   #topbar {
-    display: flex; flex-direction: column; gap: 0; padding: 6px 16px;
-    background: #2b3a55; color: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.2); flex: 0 0 auto;
+    display:flex; align-items:center; gap:12px; padding:8px 16px;
+    background:#1e293b; color:#fff; box-shadow:0 2px 6px rgba(0,0,0,.25); flex:0 0 auto; flex-wrap:wrap;
   }
-  #topbar .tb-r1 { display: flex; align-items: center; gap: 12px; }
-  #topbar h1 { font-size: 18px; font-weight: 600; margin: 0; white-space: nowrap; }
-  #topbar .teacher { font-size: 13px; opacity: .92; background: rgba(255,255,255,.15); padding: 3px 10px; border-radius: 12px; }
-  #topbar button, #topbar select {
-    background: #3d5a80; color: #fff; border: none; padding: 6px 14px; border-radius: 6px;
-    cursor: pointer; font-size: 13px;
-  }
-  #topbar button:hover { background: #4d6d99; }
-  #topbar button.primary { background: #e07b39; }
-  #topbar button.primary:hover { background: #f08c4d; }
-  #topbar .spacer { flex: 1; }
-  /* 第一行：面板切换大按钮（当前高亮） */
-  #topbar .tb-panel { background:#3d5a80; font-weight:700; font-size:14px; padding:7px 18px; border-radius:8px; }
+  #topbar h1 { font-size:19px; font-weight:700; margin:0; white-space:nowrap; }
+  #topbar .tb-info { font-size:13px; opacity:.95; display:inline-flex; align-items:center; gap:5px; white-space:nowrap; }
+  #topbar .tb-info b { color:#ffd479; font-weight:700; }
+  #topbar button, #topbar select { background:#33465f; color:#fff; border:none; padding:5px 12px; border-radius:6px; cursor:pointer; font-size:13px; }
+  #topbar button:hover { background:#43597a; }
+  #topbar .spacer { flex:1; }
+  #topbar .tb-panel { background:#3d5a80; font-weight:700; font-size:14px; padding:7px 16px; border-radius:8px; }
   #topbar .tb-panel:hover { background:#4d6d99; }
   #topbar .tb-panel.active { background:#1a73e8; color:#fff; }
-  /* 第二行：当前面板操作按钮 */
-  #topbar .tb-r2 { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:5px 0 1px; margin-top:6px; border-top:1px solid rgba(255,255,255,.14); }
-  #topbar .tb-r2 .tb2-btn { background:#3d5a80; padding:5px 12px; font-size:13px; }
-  #topbar .tb-r2 .tb2-btn:hover { background:#4d6d99; }
-  #topbar .tb-r2 .tb2-btn.primary { background:#e07b39; }
-  #topbar .tb-r2 .tb2-label { font-size:12px; opacity:.9; background:rgba(255,255,255,.12); padding:3px 9px; border-radius:10px; }
+  /* 各面板自己的头部（淡蓝，层级低于顶栏） */
+  .panel-head { display:flex; align-items:center; gap:10px; padding:8px 16px; background:#dbe6f5; color:#2b3a55; border-bottom:1px solid #c3d3ea; flex:0 0 auto; flex-wrap:wrap; }
+  .panel-head .ph-title { font-size:15px; font-weight:700; color:#1f3a5f; margin-right:8px; white-space:nowrap; }
+  .panel-head button { background:#fff; color:#2b3a55; border:1px solid #c9d8ee; padding:5px 12px; border-radius:6px; cursor:pointer; font-size:13px; }
+  .panel-head button:hover { background:#f0f6ff; border-color:#1a73e8; }
+  #prepView .pv-head { display:flex; align-items:center; gap:8px; padding:8px 16px; background:#dbe6f5; color:#2b3a55; border-bottom:1px solid #c3d3ea; flex:0 0 auto; flex-wrap:wrap; }
+  #prepView .pv-title { font-size:15px; font-weight:700; color:#1f3a5f; margin-right:8px; }
+  #exportView .pv-head { display:flex; align-items:center; gap:8px; padding:8px 16px; background:#dbe6f5; color:#2b3a55; border-bottom:1px solid #c3d3ea; flex:0 0 auto; flex-wrap:wrap; }
+  #exportView .pv-title { font-size:15px; font-weight:700; color:#1f3a5f; margin-right:8px; }
+  #exportView .pv-head button { background:#fff; color:#2b3a55; border:1px solid #c9d8ee; }
 
   /* ===== 主体三栏 ===== */
   #main { display: flex; flex: 1; min-height: 0; }
@@ -493,6 +491,7 @@
         <div class="err" id="liErr"></div>
         <button id="btnLogin2" class="primary">登录</button>
         <div class="hint">没有账号？<a id="gotoCreate">创建账号</a></div>
+        <div class="hint"><a id="btnLoginChgPwd">修改密码</a></div>
       </div>
     </div>
   </div>
@@ -625,17 +624,16 @@
   <div id="topbar">
     <div class="tb-r1">
       <h1>实验报告批阅系统</h1>
-      <button id="btnPrepFolder">📁 选报告文件夹</button>
-      <span class="teacher" id="teacherLabel">未登录</span>
+      <span class="tb-info">批阅教师：<b id="teacherLabel">未登录</b></span>
       <button id="btnLogin">切换教师</button>
-      <button id="btnChangePwd">🔑 修改密码</button>
+      <span class="tb-info">操作文件夹：<b id="prepFolder">未选择</b></span>
+      <button id="btnPrepFolder">📁 选文件夹</button>
       <div class="spacer"></div>
       <button class="tb-panel" id="bbPrep">📋 准备面板</button>
       <button class="tb-panel" id="bbGrade">✍️ 批改面板</button>
       <button class="tb-panel" id="bbExport">📤 导出面板</button>
     </div>
-    <div class="tb-r2" id="tbRow2"></div>
-    <!-- 隐藏的原始按钮组（绑定保留，供第二行动态调用） -->
+    <!-- 隐藏：供各面板头部按钮调用的原始按钮（绑定保留） -->
     <div style="display:none" id="grpTb">
       <button id="btnOverview">📊 批阅概览</button>
       <button id="btnSettings">⚙ 设置</button>
@@ -643,10 +641,18 @@
       <button id="btnMarkBad" style="background:#fdf0f0;color:#c0392b">❌ 标记交错</button>
     </div>
     <div style="display:none" id="prepTb">
-      <span id="prepFolder">未选择文件夹</span>
       <span id="pvSelbar"></span>
-      <button id="btnPrepBack">退出登录</button>
     </div>
+  </div>
+
+  <!-- 批改面板头部（淡蓝，层级低于顶栏） -->
+  <div class="panel-head" id="gradeHead" style="display:none">
+    <div class="ph-title">批改面板</div>
+    <button id="btnGradeOverview">📊 批阅概览</button>
+    <button id="btnGradeSettings">⚙ 设置</button>
+    <button id="btnGradeHelp">❓ 帮助</button>
+    <button id="btnGradeMarkBad">❌ 标记交错</button>
+    <div class="spacer"></div>
   </div>
 
   <!-- 主体三栏 -->
@@ -697,11 +703,6 @@
     </aside>
   </div>
 
-  <div id="statusBar">
-    <span id="stFile">未打开报告</span>
-    <span id="stDetect"></span>
-    <span id="stErr"></span>
-  </div>
 
   <!-- 面板切换已移至顶部第一行，此处不再放置底部栏 -->
 
@@ -743,7 +744,12 @@
   <div id="prepView" style="display:none">
     <div class="pv-head">
       <div class="pv-title">准备面板</div>
+      <button id="btnRosterManage">📋 名单管理</button>
+      <button id="btnCheckRep">✅ 核对原始报告</button>
+      <button id="btnLocatePos">📍 定位批阅位置</button>
+      <button id="btnSetupItems">✏️ 设置模板（框选）</button>
       <div class="spacer"></div>
+      <button id="btnPrepBack" class="ghost">退出登录</button>
     </div>
     <div class="pv-body">
       <div class="pv-left">
@@ -779,6 +785,7 @@
   <div id="exportView" style="display:none">
     <div class="pv-head">
       <div class="pv-title">导出面板</div>
+      <button id="btnExportRun">开始导出</button>
       <div class="spacer"></div>
     </div>
     <div class="ex-body">
@@ -904,5 +911,11 @@
   <script src="lib/ocr/package/dist/tesseract.min.js"></script>
   <script src="app.js"></script>
   <script src="tauri-bridge.js"></script>
+  <div id="statusBar">
+    <span id="stFile">未打开报告</span>
+    <span id="stDetect"></span>
+    <span id="stErr"></span>
+  </div>
+
 </body>
 </html>

@@ -48,7 +48,7 @@ const el = {
   liUser: $('liUser'), liPwd: $('liPwd'), btnLogin2: $('btnLogin2'), liErr: $('liErr'),
   gotoLogin: $('gotoLogin'), gotoCreate: $('gotoCreate'), createPanel: $('createPanel'), loginPanel: $('loginPanel'),
   teacherLabel: $('teacherLabel'), btnLogin: $('btnLogin'),
-  btnChangePwd: $('btnChangePwd'), pwdMask: $('pwdMask'), pwdUser: $('pwdUser'),
+  gradeHead: $('gradeHead'), btnRosterManage: $('btnRosterManage'), btnCheckRep: $('btnCheckRep'), btnLocatePos: $('btnLocatePos'), btnSetupItems: $('btnSetupItems'), btnGradeOverview: $('btnGradeOverview'), btnGradeSettings: $('btnGradeSettings'), btnGradeHelp: $('btnGradeHelp'), btnGradeMarkBad: $('btnGradeMarkBad'), btnExportRun: $('btnExportRun'), btnLoginChgPwd: $('btnLoginChgPwd'), pwdMask: $('pwdMask'), pwdUser: $('pwdUser'),
   pwdOld: $('pwdOld'), pwdNew: $('pwdNew'), pwdNew2: $('pwdNew2'), pwdErr: $('pwdErr'),
   btnPwdSave: $('btnPwdSave'), btnPwdCancel: $('btnPwdCancel'),
   prepView: $('prepView'), main: $('main'), exportView: $('exportView'),
@@ -201,9 +201,10 @@ function initLoginGate(){
 }
 
 /* ==================== 修改密码 ==================== */
-el.btnChangePwd.onclick = () => {
-  if(!S.loginUser){ alert('请先登录'); return; }
-  el.pwdUser.textContent = S.loginUser;
+el.btnLoginChgPwd.onclick = () => {
+  const u = (el.liUser && el.liUser.value.trim()) || S.loginUser || '';
+  if(!u){ alert('请先在「用户名」输入框填写要修改密码的账号'); if(el.liUser) el.liUser.focus(); return; }
+  el.pwdUser.textContent = u;
   el.pwdOld.value=''; el.pwdNew.value=''; el.pwdNew2.value=''; el.pwdErr.textContent='';
   el.pwdMask.style.display='flex';
   el.pwdOld.focus();
@@ -217,7 +218,7 @@ async function doChangePwd(){
   if(nv.length < 4){ el.pwdErr.textContent='新密码至少 4 位'; return; }
   el.pwdErr.textContent='';
   try{
-    await window.__bridge.changePassword(S.loginUser, oldv, nv);
+    await window.__bridge.changePassword(el.pwdUser.textContent, oldv, nv);
     alert('密码修改成功');
     closePwd();
   }catch(e){ el.pwdErr.textContent='修改失败：' + e; }
@@ -250,7 +251,7 @@ function switchPanel(name){
   S.inPrep = (name==='prep');
   const active = {prep:el.bbPrep, grade:el.bbGrade, export:el.bbExport}[name];
   [el.bbPrep, el.bbGrade, el.bbExport].forEach(b=>b.classList.toggle('active', b===active));
-  renderTb2(name);
+  el.gradeHead.style.display = (name==='grade') ? 'flex' : 'none';
   if(name==='export') renderExportPanel();
 }
 /* 顶部第二行：渲染当前面板的操作按钮 */
@@ -570,6 +571,15 @@ el.abBackBtn.onclick = ()=>{ el.attachBatchMask.style.display='none'; refreshPre
 // 顶部面板切换（第一行）
 el.bbPrep.onclick = ()=> switchPanel('prep');
 el.bbExport.onclick = ()=> switchPanel('export');
+el.btnRosterManage.onclick = ()=> openPrepImport();
+el.btnCheckRep.onclick = ()=> runSourceVerify();
+el.btnLocatePos.onclick = ()=> runLocatePositions();
+el.btnSetupItems.onclick = ()=> openItemSetup();
+el.btnGradeOverview.onclick = ()=> showOverview();
+el.btnGradeSettings.onclick = ()=> el.btnSettings.onclick();
+el.btnGradeHelp.onclick = ()=> toggleHelp();
+el.btnGradeMarkBad.onclick = ()=> el.btnMarkBad.onclick();
+el.btnExportRun.onclick = ()=> setDetect('导出功能待接入');
 el.bbGrade.onclick = ()=>{ if(!S.inPrep){ if(el.btnPrepStart.onclick) el.btnPrepStart.onclick(); } else { switchPanel('grade'); } };
 /* ==================== 导出面板（两栏：左项目 / 右选项+预览） ==================== */
 const EXP_ITEMS = [
