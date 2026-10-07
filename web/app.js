@@ -48,15 +48,15 @@ const el = {
   liUser: $('liUser'), liPwd: $('liPwd'), btnLogin2: $('btnLogin2'), liErr: $('liErr'),
   gotoLogin: $('gotoLogin'), gotoCreate: $('gotoCreate'), createPanel: $('createPanel'), loginPanel: $('loginPanel'),
   teacherLabel: $('teacherLabel'), btnLogin: $('btnLogin'),
-  gradeHead: $('gradeHead'), btnRosterManage: $('btnRosterManage'), btnCheckRep: $('btnCheckRep'), btnLocatePos: $('btnLocatePos'), btnSetupItems: $('btnSetupItems'), btnGradeOverview: $('btnGradeOverview'), btnGradeSettings: $('btnGradeSettings'), btnGradeHelp: $('btnGradeHelp'), btnGradeMarkBad: $('btnGradeMarkBad'), btnExportRun: $('btnExportRun'), btnLoginChgPwd: $('btnLoginChgPwd'), pwdMask: $('pwdMask'), pwdUser: $('pwdUser'),
+  btnLoginChgPwd: $('btnLoginChgPwd'), pwdMask: $('pwdMask'), pwdUser: $('pwdUser'),
   pwdOld: $('pwdOld'), pwdNew: $('pwdNew'), pwdNew2: $('pwdNew2'), pwdErr: $('pwdErr'),
   btnPwdSave: $('btnPwdSave'), btnPwdCancel: $('btnPwdCancel'),
   prepView: $('prepView'), main: $('main'), exportView: $('exportView'),
-  tbRow2: $('tbRow2'),
+  tbRow2: $('tbRow2'), tbPhName: $('tbPhName'), tbMidBtns: $('tbMidBtns'), tbClock: $('tbClock'), btnHelpTop: $('btnHelpTop'), helpTopMask: $('helpTopMask'), helpTopX: $('helpTopX'), helpTopOk: $('helpTopOk'),
   bbPrep: $('bbPrep'), bbGrade: $('bbGrade'), bbExport: $('bbExport'),
   btnPrepFolder: $('btnPrepFolder'), prepFolder: $('prepFolder'),
   pvSelbar: $('pvSelbar'), prepTable: $('prepTable'), prepTbody: $('prepTbody'), prepStats: $('prepStats'),
-  prepRoster: $('prepRoster'), btnPrepBack: $('btnPrepBack'), btnPrepStart: $('btnPrepStart'),
+  prepRoster: $('prepRoster'), btnPrepStart: $('btnPrepStart'),
   expOptions: $('expOptions'), expOps: $('expOps'), btnExpClose: $('btnExpClose'),
   attachMask: $('attachMask'), attachBox: $('attachBox'), attachFile: $('attachFile'),
   locateMask: $('locateMask'), locateBody: $('locateBody'), locateTitle: $('locateTitle'),
@@ -251,9 +251,44 @@ function switchPanel(name){
   S.inPrep = (name==='prep');
   const active = {prep:el.bbPrep, grade:el.bbGrade, export:el.bbExport}[name];
   [el.bbPrep, el.bbGrade, el.bbExport].forEach(b=>b.classList.toggle('active', b===active));
-  el.gradeHead.style.display = (name==='grade') ? 'flex' : 'none';
+  renderTbMid(name);
   if(name==='export') renderExportPanel();
 }
+
+function renderTbMid(name){
+  var theme={
+    prep:{c:'#d98d1f',nm:['准备','面板'],btns:[['名单管理',openPrepImport],['设置模板',openItemSetup],['核对原始报告',runSourceVerify],['定位批阅位置',runLocatePositions]],arr:true},
+    grade:{c:'#2f8f8f',nm:['批改','面板'],btns:[['批阅概览',function(){showOverview();}],['设置',function(){el.btnSettings.onclick();}],['帮助',function(){toggleHelp();}],['标记交错',function(){el.btnMarkBad.onclick();}]],arr:false},
+    export:{c:'#7a5fd0',nm:['导出','面板'],btns:[['开始导出',function(){setDetect('导出功能待接入');}]],arr:false}
+  };
+  var t=theme[name]||theme.prep;
+  if(el.tbPhName){ el.tbPhName.innerHTML='<span>'+t.nm[0]+'</span><span>'+t.nm[1]+'</span>'; el.tbPhName.style.color=t.c; }
+  var mid=el.tbMidBtns;
+  if(mid){
+    mid.innerHTML='';
+    t.btns.forEach(function(b,i){
+      if(i>0 && t.arr){ var a=document.createElement('span'); a.className='tb-arr'; a.textContent='→'; a.style.color=t.c; mid.appendChild(a); }
+      var btn=document.createElement('button'); btn.className='tb-sq';
+      btn.style.background=t.c+'44'; btn.style.borderColor=t.c+'88';
+      btn.textContent=b[0]; btn.onclick=b[1]; mid.appendChild(btn);
+    });
+  }
+  var cur = name==='prep' ? el.bbPrep : (name==='grade' ? el.bbGrade : el.bbExport);
+  [el.bbPrep, el.bbGrade, el.bbExport].forEach(function(x){ x.classList.toggle('on', x===cur); });
+}
+/* 使用帮助（带×流程说明） */
+el.btnHelpTop.onclick = function(){ el.helpTopMask.style.display='flex'; };
+function closeHelpTop(){ el.helpTopMask.style.display='none'; }
+el.helpTopX.onclick = closeHelpTop;
+el.helpTopOk.onclick = closeHelpTop;
+el.helpTopMask.addEventListener('click', function(e){ if(e.target===el.helpTopMask) closeHelpTop(); });
+/* 顶栏实时时钟 */
+function tickClock(){
+  if(!el.tbClock) return;
+  var d=new Date(), p=function(n){ return String(n).padStart(2,'0'); };
+  el.tbClock.textContent = d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
+}
+tickClock(); setInterval(tickClock,1000);
 /* 顶部第二行：渲染当前面板的操作按钮 */
 function renderTb2(name){
   const c = el.tbRow2; if(!c) return;
@@ -571,15 +606,6 @@ el.abBackBtn.onclick = ()=>{ el.attachBatchMask.style.display='none'; refreshPre
 // 顶部面板切换（第一行）
 el.bbPrep.onclick = ()=> switchPanel('prep');
 el.bbExport.onclick = ()=> switchPanel('export');
-el.btnRosterManage.onclick = ()=> openPrepImport();
-el.btnCheckRep.onclick = ()=> runSourceVerify();
-el.btnLocatePos.onclick = ()=> runLocatePositions();
-el.btnSetupItems.onclick = ()=> openItemSetup();
-el.btnGradeOverview.onclick = ()=> showOverview();
-el.btnGradeSettings.onclick = ()=> el.btnSettings.onclick();
-el.btnGradeHelp.onclick = ()=> toggleHelp();
-el.btnGradeMarkBad.onclick = ()=> el.btnMarkBad.onclick();
-el.btnExportRun.onclick = ()=> setDetect('导出功能待接入');
 el.bbGrade.onclick = ()=>{ if(!S.inPrep){ if(el.btnPrepStart.onclick) el.btnPrepStart.onclick(); } else { switchPanel('grade'); } };
 /* ==================== 导出面板（两栏：左项目 / 右选项+预览） ==================== */
 const EXP_ITEMS = [
@@ -655,7 +681,6 @@ function previewAnnotated(){
     '<div style="border-top:1px solid #e3e8f0;margin-top:6px;padding-top:4px">总分：<b>86</b>/100　批阅教师：张老师　2026-10-07 15:30</div></div>';
 }
 el.btnPrepFolder.onclick=()=>{ if(el.btnLoadFolder.onclick) el.btnLoadFolder.onclick(); };
-el.btnPrepBack.onclick=()=>{ hidePrep(); S.teacher=''; localStorage.removeItem('loginUser'); el.loginMask.style.display='flex'; showLogin(); };
 el.btnPrepStart.onclick=async()=>{
   const range=document.querySelector('input[name="prepRange"]:checked');
   const rv = range ? range.value : 'increment';

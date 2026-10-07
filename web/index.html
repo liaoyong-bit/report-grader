@@ -11,20 +11,42 @@
 
   /* ===== 顶部工具栏 ===== */
   #topbar {
-    display:flex; flex-direction:column; gap:0; padding:5px 14px;
-    background:#2f4b76; color:#fff; box-shadow:0 2px 6px rgba(0,0,0,.18); flex:0 0 auto;
+    display:flex; align-items:stretch; gap:14px; padding:10px 14px;
+    background:linear-gradient(135deg,#2b4a6b,#3b6d8a 60%,#4a8a94); color:#fff; box-shadow:0 2px 6px rgba(0,0,0,.18); flex:0 0 auto;
   }
-  #topbar .tb-row { display:flex; align-items:center; gap:10px; min-height:30px; }
-  #topbar .tb-row + .tb-row { margin-top:4px; padding-top:5px; border-top:1px solid rgba(255,255,255,.15); }
-  #topbar h1 { font-size:22px; font-weight:700; margin:0; white-space:nowrap; letter-spacing:1px; }
-  #topbar .tb-lab { font-size:13px; opacity:.95; white-space:nowrap; color:#cfe0f4; }
-  #topbar .tb-box { display:inline-block; width:72px; background:rgba(255,255,255,.16); color:#fff; font-size:13px; padding:3px 8px; border-radius:5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:center; box-sizing:border-box; }
-  #topbar button, #topbar select { background:#3d5a80; color:#fff; border:none; padding:5px 12px; border-radius:6px; cursor:pointer; font-size:13px; }
-  #topbar button:hover { background:#4d6d99; }
-  #topbar .spacer { flex:1; }
-  #topbar .tb-panel { background:#3d5a80; font-weight:700; font-size:14px; padding:6px 12px; border-radius:8px; min-width:96px; text-align:center; }
-  #topbar .tb-panel:hover { background:#4d6d99; }
-  #topbar .tb-panel.active { background:#1a73e8; color:#fff; }
+  .tb-left { display:flex; flex-direction:column; justify-content:center; align-items:center; min-width:96px; padding:2px 4px; }
+  .tb-left .tbt1, .tb-left .tbt2 { font-size:18px; font-weight:800; letter-spacing:1px; line-height:1.05; white-space:nowrap; text-align:center; }
+  .tb-left .tbver { font-size:11px; color:#ffd479; opacity:.9; text-align:center; margin-top:2px; }
+  .tb-left .tbhlp { font-size:12px; color:#ffd479; background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.25); padding:3px 12px; border-radius:6px; cursor:pointer; margin-top:6px; }
+  .tb-mid { flex:1; display:flex; align-items:center; gap:12px; border-left:1px solid rgba(255,255,255,.18); border-right:1px solid rgba(255,255,255,.18); padding:0 16px; position:relative; }
+  .tb-ph { display:flex; flex-direction:column; justify-content:center; text-align:center; line-height:1.15; font-size:17px; font-weight:800; letter-spacing:1px; white-space:nowrap; }
+  .tb-btns { display:flex; align-items:center; gap:6px; }
+  .tb-sq { background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.28); color:#fff; font-size:14px; font-weight:600; padding:6px 9px; border-radius:7px; cursor:pointer; min-width:58px; text-align:center; line-height:1.4; white-space:nowrap; }
+  .tb-sq:hover { background:rgba(255,255,255,.24); }
+  .tb-arr { font-size:16px; font-weight:700; user-select:none; }
+  .tb-time { position:absolute; right:14px; bottom:5px; font-size:12px; color:#cfe0f4; font-variant-numeric:tabular-nums; letter-spacing:.5px; white-space:nowrap; }
+  .tb-right { display:flex; flex-direction:column; justify-content:center; gap:8px; min-width:150px; }
+  .tb-panels { display:flex; align-items:center; }
+  .tb-pbtn { border:none; color:#fff; font-size:14px; font-weight:700; padding:7px 12px; border-radius:7px; cursor:pointer; flex:1; white-space:nowrap; }
+  .tb-pbtn + .tb-pbtn { margin-left:8px; }
+  .tb-pbtn:hover { filter:brightness(1.1); }
+  .tb-info { display:flex; align-items:center; gap:6px; white-space:nowrap; font-size:12.5px; }
+  .tb-info .tb-k { color:#cfe0f4; width:52px; text-align:right; flex:0 0 52px; }
+  .tb-info .tb-v { background:rgba(0,0,0,.16); padding:3px 10px; border-radius:5px; flex:1; text-align:left; color:#ffd479; min-width:90px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .tb-info .tb-ic { width:24px; height:24px; border-radius:6px; background:rgba(255,255,255,.18); border:none; color:#fff; cursor:pointer; font-size:12px; display:inline-flex; align-items:center; justify-content:center; flex:0 0 24px; position:relative; }
+  .tb-info .tb-ic:hover { background:rgba(255,255,255,.3); }
+  .tb-info .tb-ic:hover::after { content:attr(data-tip); position:absolute; top:115%; left:0; background:#223; color:#fff; font-size:12px; padding:3px 8px; border-radius:4px; white-space:nowrap; z-index:6; }
+  .tb-pbtn.on { box-shadow:0 0 0 2px rgba(255,255,255,.4) inset; filter:brightness(1.15); }
+  .tbhelp-mask { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:center; justify-content:center; z-index:60; }
+  .tbhelp-dlg { background:#fff; border-radius:12px; width:520px; max-width:92vw; box-shadow:0 8px 30px rgba(0,0,0,.28); overflow:hidden; }
+  .tbhelp-hd { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; background:linear-gradient(90deg,#2f4b76,#3b6d8a); color:#fff; }
+  .tbhelp-hd .t { font-size:15px; font-weight:700; }
+  .tbhelp-hd .x { background:rgba(255,255,255,.2); border:none; color:#fff; font-size:18px; width:28px; height:28px; border-radius:6px; cursor:pointer; line-height:1; }
+  .tbhelp-bd { padding:16px 18px; font-size:13.5px; color:#33465f; line-height:1.8; }
+  .tbhelp-bd b { color:#2f4b76; }
+  .tbhelp-bd .st { display:flex; gap:8px; align-items:flex-start; margin-bottom:10px; }
+  .tbhelp-bd .num { background:#1a73e8; color:#fff; border-radius:50%; width:20px; height:20px; min-width:20px; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; margin-top:2px; }
+  .tbhelp-bd .go { margin-top:6px; background:#e07b39; color:#fff; border:none; padding:8px 22px; border-radius:7px; font-size:13px; font-weight:600; cursor:pointer; }
   /* 各面板自己的头部（淡蓝，层级低于顶栏） */
   .panel-head { display:flex; align-items:center; gap:10px; padding:8px 16px; background:#dbe6f5; color:#2b3a55; border-bottom:1px solid #c3d3ea; flex:0 0 auto; flex-wrap:wrap; }
   .panel-head .ph-title { font-size:15px; font-weight:700; color:#1f3a5f; margin-right:8px; white-space:nowrap; }
@@ -622,23 +644,27 @@
     </div>
   </div>
   <div id="topbar">
-    <div class="tb-row">
-      <h1>实验报告批阅系统</h1>
-      <div class="spacer"></div>
-      <span class="tb-lab">批阅教师</span>
-      <span class="tb-box" id="teacherLabel" title="未登录">未登录</span>
-      <button id="btnLogin">切换教师</button>
-      <span class="tb-lab">文件夹</span>
-      <span class="tb-box" id="prepFolder" title="未选择">未选择</span>
-      <button id="btnPrepFolder">选文件夹</button>
+    <div class="tb-left">
+      <div class="tbt1">报告批阅</div>
+      <div class="tbt2">系统</div>
+      <div class="tbver">v0.1.87</div>
+      <button class="tbhlp" id="btnHelpTop">使用帮助</button>
     </div>
-    <div class="tb-row">
-      <div class="spacer"></div>
-      <button class="tb-panel" id="bbPrep">准备面板</button>
-      <button class="tb-panel" id="bbGrade">批改面板</button>
-      <button class="tb-panel" id="bbExport">导出面板</button>
+    <div class="tb-mid">
+      <div class="tb-ph" id="tbPhName"><span>准备</span><span>面板</span></div>
+      <div class="tb-btns" id="tbMidBtns"></div>
+      <div class="tb-time" id="tbClock"></div>
     </div>
-    <!-- 隐藏：供各面板头部按钮调用的原始按钮（绑定保留） -->
+    <div class="tb-right">
+      <div class="tb-panels">
+        <button class="tb-pbtn" id="bbPrep" data-p="prep" style="background:#d98d1f">准备</button>
+        <button class="tb-pbtn" id="bbGrade" data-p="grade" style="background:#2f8f8f">批改</button>
+        <button class="tb-pbtn" id="bbExport" data-p="export" style="background:#7a5fd0">导出</button>
+      </div>
+      <div class="tb-info"><span class="tb-k">批阅教师</span><span class="tb-v" id="teacherLabel" title="未设置">未设置</span><button class="tb-ic" id="btnLogin" data-tip="切换教师">⟳</button></div>
+      <div class="tb-info"><span class="tb-k">文件夹</span><span class="tb-v" id="prepFolder" title="未选择">未选择</span><button class="tb-ic" id="btnPrepFolder" data-tip="选文件夹">📁</button></div>
+    </div>
+    <!-- 隐藏：供中间区/面板头部按钮调用的原始按钮（绑定保留） -->
     <div style="display:none" id="grpTb">
       <button id="btnOverview">📊 批阅概览</button>
       <button id="btnSettings">⚙ 设置</button>
@@ -648,16 +674,6 @@
     <div style="display:none" id="prepTb">
       <span id="pvSelbar"></span>
     </div>
-  </div>
-
-  <!-- 批改面板头部（淡蓝，层级低于顶栏） -->
-  <div class="panel-head" id="gradeHead" style="display:none">
-    <div class="ph-title">批改面板</div>
-    <button id="btnGradeOverview">📊 批阅概览</button>
-    <button id="btnGradeSettings">⚙ 设置</button>
-    <button id="btnGradeHelp">❓ 帮助</button>
-    <button id="btnGradeMarkBad">❌ 标记交错</button>
-    <div class="spacer"></div>
   </div>
 
   <!-- 主体三栏 -->
@@ -747,15 +763,6 @@
   </script>
   <!-- 准备面板（第一块：登录后进入） -->
   <div id="prepView" style="display:none">
-    <div class="pv-head">
-      <div class="pv-title">准备面板</div>
-      <button id="btnRosterManage">📋 名单管理</button>
-      <button id="btnCheckRep">✅ 核对原始报告</button>
-      <button id="btnLocatePos">📍 定位批阅位置</button>
-      <button id="btnSetupItems">✏️ 设置模板（框选）</button>
-      <div class="spacer"></div>
-      <button id="btnPrepBack" class="ghost">退出登录</button>
-    </div>
     <div class="pv-body">
       <div class="pv-left">
         <div class="pv-tblwrap">
@@ -788,11 +795,6 @@
 
   <!-- 导出面板（两栏：左=可导出项目，右=上选项/下预览） -->
   <div id="exportView" style="display:none">
-    <div class="pv-head">
-      <div class="pv-title">导出面板</div>
-      <button id="btnExportRun">开始导出</button>
-      <div class="spacer"></div>
-    </div>
     <div class="ex-body">
       <div class="ex-left" id="expList"></div>
       <div class="ex-right">
@@ -920,6 +922,23 @@
     <span id="stFile">未打开报告</span>
     <span id="stDetect"></span>
     <span id="stErr"></span>
+  </div>
+
+
+  <!-- 使用帮助：流程说明（带×） -->
+  <div class="tbhelp-mask" id="helpTopMask">
+    <div class="tbhelp-dlg">
+      <div class="tbhelp-hd">
+        <div class="t">使用帮助 · 报告批阅系统</div>
+        <button class="x" id="helpTopX">×</button>
+      </div>
+      <div class="tbhelp-bd">
+        <div class="st"><div class="num">1</div><div><b>准备</b>：选文件夹 → 名单管理 → 设置模板(框选题/分位置) → 核对原始报告(OCR+挂靠+改名) → 定位批阅位置。</div></div>
+        <div class="st"><div class="num">2</div><div><b>批改</b>：按卷/按题改分，支持快捷键、批阅概览统计、标记交错，成绩与批阅痕迹自动入库。</div></div>
+        <div class="st"><div class="num">3</div><div><b>导出</b>：学生成绩总表(Excel)、批阅报告(PDF)、改名文件包、带批阅痕迹PDF。</div></div>
+        <button class="go" id="helpTopOk">知道了</button>
+      </div>
+    </div>
   </div>
 
 </body>
