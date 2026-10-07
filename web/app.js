@@ -56,7 +56,7 @@ const el = {
   bbPrep: $('bbPrep'), bbGrade: $('bbGrade'), bbExport: $('bbExport'),
   btnPrepFolder: $('btnPrepFolder'), prepFolder: $('prepFolder'),
   pvSelbar: $('pvSelbar'), prepTable: $('prepTable'), prepTbody: $('prepTbody'), prepStats: $('prepStats'),
-  prepRoster: $('prepRoster'), btnPrepStart: $('btnPrepStart'),
+  prepRoster: $('prepRoster'),
   expOptions: $('expOptions'), expOps: $('expOps'), btnExpClose: $('btnExpClose'),
   attachMask: $('attachMask'), attachBox: $('attachBox'), attachFile: $('attachFile'),
   locateMask: $('locateMask'), locateBody: $('locateBody'), locateTitle: $('locateTitle'),
@@ -81,14 +81,14 @@ const el = {
   btnWizardStart: $('btnWizardStart'), btnWizardCancel: $('btnWizardCancel'),
   rosterInput: $('rosterInput'),
   unmatchMask: $('unmatchMask'), unmatchList: $('unmatchList'), btnUnmatchDone: $('btnUnmatchDone'),
-  btnOverview: $('btnOverview'), btnHelp: $('btnHelp'),
-  helpPanel: $('helpPanel'),
+  btnOverview: $('btnOverview'),
+
   overviewMask: $('overviewMask'), overviewBody: $('overviewBody'), btnOverviewClose: $('btnOverviewClose'),
   itemMask: $('itemMask'), tplPreview: $('tplPreview'), itemList: $('itemList'), btnItems: $('btnItems'),
   btnItemAdd: $('btnItemAdd'), btnItemSave: $('btnItemSave'), btnItemCancel: $('btnItemCancel'),
   btnTotalMode: $('btnTotalMode'), btnTitleMode: $('btnTitleMode'), btnBasicMode: $('btnBasicMode'), totalInfo: $('totalInfo'), irState: $('irState'), irTpl: $('irTpl'),
   btnSettings: $('btnSettings'), btnMarkBad: $('btnMarkBad'), btnDetail: $('btnDetail'),
-  settingsMask: $('settingsMask'), stOk: $('stOk'), stClose: $('stClose'),
+  gradeModeMask: $('gradeModeMask'), gmOk: $('gmOk'), gmClose: $('gmClose'), keysMask: $('keysMask'), keysOk: $('keysOk'), keysClose: $('keysClose'), rangeMask: $('rangeMask'), rangeOk: $('rangeOk'), rangeClose: $('rangeClose'),
   detailMask: $('detailMask'), detailTableWrap: $('dtTableWrap'), dtExport: $('dtExport'), dtOk: $('dtOk'), dtClose: $('dtClose'),
   statAvg: $('statAvg'),
 };
@@ -258,7 +258,7 @@ function switchPanel(name){
 function renderTbMid(name){
   var theme={
     prep:{c:'#d98d1f',nm:['准备','面板'],btns:[['名单管理',openPrepImport],['设置模板',openItemSetup],['核对原始报告',runSourceVerify],['定位批阅位置',runLocatePositions]],arr:true},
-    grade:{c:'#2f8f8f',nm:['批改','面板'],btns:[['批阅概览',function(){showOverview();}],['设置',function(){el.btnSettings.onclick();}],['帮助',function(){toggleHelp();}],['标记交错',function(){el.btnMarkBad.onclick();}]],arr:false},
+    grade:{c:'#2f8f8f',nm:['批改','面板'],btns:[['批改范围',openRangeMask],['改分方式',openGradeModeMask],['快捷键设置',openKeysMask],['批阅概览',function(){showOverview();}],['标记交错',function(){el.btnMarkBad.onclick();}]],arr:false},
     export:{c:'#7a5fd0',nm:['导出','面板'],btns:[['开始导出',function(){setDetect('导出功能待接入');}]],arr:false}
   };
   var t=theme[name]||theme.prep;
@@ -290,27 +290,6 @@ function tickClock(){
 }
 tickClock(); setInterval(tickClock,1000);
 /* 顶部第二行：渲染当前面板的操作按钮 */
-function renderTb2(name){
-  const c = el.tbRow2; if(!c) return;
-  c.innerHTML='';
-  if(name==='prep'){
-    c.appendChild(tbBtn('名单管理', ()=>openPrepImport()));
-    c.appendChild(tbBtn('核对原始报告', ()=>runSourceVerify()));
-    c.appendChild(tbBtn('定位批阅位置', ()=>runLocatePositions()));
-    c.appendChild(tbBtn('设置模板（框选）', ()=>openItemSetup()));
-    c.appendChild(tbBtn('退出登录', ()=>{ S.teacher=''; localStorage.removeItem('loginUser'); el.loginMask.style.display='flex'; showLogin(); }));
-  } else if(name==='grade'){
-    c.appendChild(tbBtn('📊 批阅概览', ()=>showOverview()));
-    c.appendChild(tbBtn('设置', ()=>el.btnSettings.onclick()));
-    c.appendChild(tbBtn('帮助', ()=>toggleHelp()));
-    c.appendChild(tbBtn('标记交错', ()=>el.btnMarkBad.onclick()));
-  } else if(name==='export'){
-    c.appendChild(tbBtn('开始导出', ()=>setDetect('导出功能待接入')));
-  }
-}
-function tbBtn(txt, fn){
-  const b=document.createElement('button'); b.className='tb2-btn'; b.textContent=txt; b.onclick=fn; return b;
-}
 async function refreshPrepOverview(){
   if(!window.__bridge || !window.__bridge.prepOverview || !S.folder) return;
   try{
@@ -340,7 +319,7 @@ async function refreshPrepOverview(){
       el.prepFolder.textContent = S.folder; el.prepFolder.title = S.folder;
       el.prepTbody.innerHTML = '<tr><td colspan="9" style="color:#c62828;padding:24px;text-align:center">该文件夹尚未初始化。<br>请在右侧「名单管理」中导入学生名单完成初始化。</td></tr>';
       el.prepStats.innerHTML = '未初始化';
-      el.prepRoster.innerHTML = '<div style="color:#c62828;font-size:13px;margin-bottom:6px">尚未导入学生名单</div>'+
+      if(el.prepRoster) el.prepRoster.innerHTML = '<div style="color:#c62828;font-size:13px;margin-bottom:6px">尚未导入学生名单</div>'+
         '<button onclick="window.__app.openPrepImport()">📋 导入学生名单（初始化）</button>';
       el.pvSelbar.innerHTML='';
     } else {
@@ -471,7 +450,7 @@ function renderPrepStats(ov){
     '　待批 <b class="s-todo">'+todo+'</b>';
 }
 async function renderPrepRoster(){
-  const box=el.prepRoster;
+  const box=el.prepRoster; if(!box) return;
   if(!window.__bridge || !window.__bridge.getRoster || !S.folder){ box.innerHTML='<div style="color:#888;font-size:13px">请先选择报告文件夹</div>'; return; }
   try{
     const list=await window.__bridge.getRoster(S.folder);
@@ -606,7 +585,7 @@ el.abBackBtn.onclick = ()=>{ el.attachBatchMask.style.display='none'; refreshPre
 // 顶部面板切换（第一行）
 el.bbPrep.onclick = ()=> switchPanel('prep');
 el.bbExport.onclick = ()=> switchPanel('export');
-el.bbGrade.onclick = ()=>{ if(!S.inPrep){ if(el.btnPrepStart.onclick) el.btnPrepStart.onclick(); } else { switchPanel('grade'); } };
+el.bbGrade.onclick = ()=>{ if(!S.inPrep){ enterGrade(); } else { switchPanel('grade'); } };
 /* ==================== 导出面板（两栏：左项目 / 右选项+预览） ==================== */
 const EXP_ITEMS = [
   {id:'scores',     name:'学生成绩总表',  sub:'Excel · 美观表格',   icon:'📊'},
@@ -681,7 +660,7 @@ function previewAnnotated(){
     '<div style="border-top:1px solid #e3e8f0;margin-top:6px;padding-top:4px">总分：<b>86</b>/100　批阅教师：张老师　2026-10-07 15:30</div></div>';
 }
 el.btnPrepFolder.onclick=()=>{ if(el.btnLoadFolder.onclick) el.btnLoadFolder.onclick(); };
-el.btnPrepStart.onclick=async()=>{
+async function enterGrade(){
   const range=document.querySelector('input[name="prepRange"]:checked');
   const rv = range ? range.value : 'increment';
   S.prepRange = rv;
@@ -699,7 +678,7 @@ el.btnPrepStart.onclick=async()=>{
   await loadReportsFromScope();
   if(S.reports && S.reports.length){ selectReport(0); setDetect('已进入批改，共 '+S.reports.length+' 份'); }
   else setDetect('批改范围内没有可批改的报告');
-};
+}
 
 // —— 批改报告列表 = 准备阶段选定的批改范围（不多不少）
 async function loadReportsFromScope(){
@@ -731,15 +710,21 @@ function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;
 
 // —— 设置面板：改分方式 + 快捷键说明
 S.gradeMode = 'byPaper';
-el.btnSettings.onclick=()=>{ el.settingsMask.style.display='flex'; };
-const closeSettings=()=>{ el.settingsMask.style.display='none'; };
-el.stClose.onclick=closeSettings;
-el.stOk.onclick=()=>{
+function openGradeModeMask(){ el.gradeModeMask.style.display='flex'; }
+const closeGradeMode=()=>{ el.gradeModeMask.style.display='none'; };
+el.gmClose.onclick=closeGradeMode;
+el.gmOk.onclick=()=>{
   const m=document.querySelector('input[name="gradeMode"]:checked');
   S.gradeMode = m ? m.value : 'byPaper';
-  closeSettings();
+  closeGradeMode();
   setDetect('改分方式：'+(S.gradeMode==='byItem'?'按题改':'按卷改'));
 };
+function openKeysMask(){ el.keysMask.style.display='flex'; }
+el.keysClose.onclick=()=>{ el.keysMask.style.display='none'; };
+el.keysOk.onclick=()=>{ el.keysMask.style.display='none'; };
+function openRangeMask(){ el.rangeMask.style.display='flex'; }
+el.rangeClose.onclick=()=>{ el.rangeMask.style.display='none'; };
+el.rangeOk.onclick=()=>{ el.rangeMask.style.display='none'; };
 
 // —— 标记错误报告（交错）：两次点击确认，回退 excluded 并从列表移除
 el.btnMarkBad.onclick=async()=>{
@@ -1811,18 +1796,6 @@ el.btnOverviewClose.onclick = ()=> { el.overviewMask.style.display = 'none'; };
 // 点概览弹窗以外的遮罩区域即关闭（关闭按钮保留）
 el.overviewMask.addEventListener('click', (e)=>{ if(e.target === el.overviewMask) el.overviewMask.style.display='none'; });
 
-function toggleHelp(){
-  const p = el.helpPanel;
-  p.style.display = (p.style.display === 'none' || !p.style.display) ? 'block' : 'none';
-}
-el.btnHelp.onclick = toggleHelp;
-// 点帮助面板以外的任意位置即关闭
-document.addEventListener('click', (e)=>{
-  const p = el.helpPanel;
-  if(p && p.style.display === 'block' && !p.contains(e.target) && e.target !== el.btnHelp){
-    p.style.display = 'none';
-  }
-});
 
 async function exportJson(){
   const r = S.current; if(!r){ setErr('请先打开报告'); return; }

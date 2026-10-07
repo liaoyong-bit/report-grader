@@ -365,15 +365,6 @@
   .ov-detail td:first-child { text-align: left; }
   .ov-total-row td { font-weight: 600; background: #fff3e8 !important; }
 
-  /* 帮助下拉面板 */
-  #helpPanel {
-    position: fixed; top: 58px; right: 16px; width: 380px; max-width: 92vw; max-height: 72vh; overflow: auto;
-    background: #fff; border-radius: 10px; padding: 16px 18px; box-shadow: 0 8px 30px rgba(0,0,0,.3);
-    z-index: 99; font-size: 13px; line-height: 1.6;
-  }
-  #helpPanel h3 { font-size: 15px; color: #2b3a55; margin-bottom: 8px; }
-  #helpPanel p { margin: 4px 0; }
-  #helpPanel hr { border: none; border-top: 1px solid #eef1f5; margin: 10px 0; }
   .help-steps p { color: #444; }
   #wizardBox h2, #unmatchBox h2 { font-size: 16px; margin-bottom: 14px; color: #2b3a55; }
   #unmatchBox .urow { display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px dashed #eceff1; font-size:13px; }
@@ -644,30 +635,15 @@
   </div>
 
   <!-- 帮助下拉面板 -->
-  <div id="helpPanel" style="display:none">
-    <h3>帮助</h3>
-    <p><b>版本：</b>0.1.8</p>
-    <p><b>作者：</b>利奥</p>
-    <hr>
-    <div class="help-steps">
-      <p><b>① 开始批阅：</b>点「载入报告文件夹」选择存放报告的文件夹。若该文件夹尚未建库，会弹出向导：填报告名称 → 下载并填好名单模板 → 导入名单 → 开始。</p>
-      <p><b>② 批阅：</b>在中间预览区查看报告，右侧为自动识别的学生信息和评分项。在评分框输入分数，<b>Enter</b> 确认当前分数并移到下一项。</p>
-      <p><b>③ 提交：</b>点「提交并下一份」或按 <b>Ctrl+Enter</b> 提交当前报告并切到下一份（提交前需所有评分项都已批）。</p>
-      <p><b>④ 复查：</b>已批报告仍可点击左侧列表重新打开查看。</p>
-      <p><b>⑤ 导出：</b>「导出带分PDF」把分数写入报告并保存到所选文件夹的 output/ 目录；「保存批阅记录(CSV)」导出全部学生成绩表；「导出记录JSON」导出当前报告明细。</p>
-      <p><b>⑥ 概览：</b>点「批阅概览」查看全部学生成绩表格。</p>
-      <p><b>⑦ 数据安全：</b>所有批阅进度实时保存到所选文件夹的 data/ 数据库，关闭重开不丢失；改名版 PDF 在 source_files/ 目录。</p>
-    </div>
-  </div>
   <div id="topbar">
     <div class="tb-left">
       <div class="tbt1">报告批阅</div>
       <div class="tbt2">系统</div>
-      <div class="tbver">v0.1.87</div>
+      <div class="tbver">v0.1.88</div>
       <button class="tbhlp" id="btnHelpTop">使用帮助</button>
     </div>
     <div class="tb-mid">
-      <div class="tb-ph" id="tbPhName"><span>准备</span><span>面板</span></div>
+      <div class="tb-ph" id="tbPhName"></div>
       <div class="tb-btns" id="tbMidBtns"></div>
       <div class="tb-time" id="tbClock"></div>
     </div>
@@ -684,7 +660,6 @@
     <div style="display:none" id="grpTb">
       <button id="btnOverview">📊 批阅概览</button>
       <button id="btnSettings">⚙ 设置</button>
-      <button id="btnHelp">❓ 帮助</button>
       <button id="btnMarkBad" style="background:#fdf0f0;color:#c0392b">❌ 标记交错</button>
     </div>
     <div style="display:none" id="prepTb">
@@ -793,19 +768,6 @@
         </div>
         <div id="prepStats" class="pv-stats"></div>
       </div>
-      <div class="pv-right">
-        <div class="pv-card">
-          <div class="pv-card-tt">名单管理</div>
-          <div id="prepRoster"></div>
-        </div>
-        <div class="pv-card">
-          <div class="pv-card-tt">批改范围</div>
-          <label class="pv-range"><input type="radio" name="prepRange" value="increment" checked> 增量批改（新增＋未打分）</label>
-          <label class="pv-range"><input type="radio" name="prepRange" value="select"> 选择一部分（请在左侧表中勾选）</label>
-          <label class="pv-range"><input type="radio" name="prepRange" value="all"> 全部重新批改</label>
-        </div>
-        <button id="btnPrepStart" class="primary pv-start" style="display:none">进入批改</button>
-      </div>
     </div>
   </div>
 
@@ -879,34 +841,52 @@
   </div>
 
   <!-- 设置面板 -->
-  <div id="settingsMask" style="display:none">
-    <div id="settingsBox">
-      <div class="st-head"><h2>⚙ 批阅设置</h2><button id="stClose" class="st-close">×</button></div>
-      <div class="st-body">
-        <div class="st-sec">
-          <div class="st-sec-tt">改分方式</div>
-          <label class="st-radio"><input type="radio" name="gradeMode" value="byPaper" checked> 按卷改（一份卷打完全部题再下一份）</label>
-          <label class="st-radio"><input type="radio" name="gradeMode" value="byItem"> 按题改（同一题改完全部卷再下一题）</label>
-        </div>
-        <div class="st-sec">
-          <div class="st-sec-tt">快捷键（单手，方向键区）</div>
-          <table class="st-keys">
-            <tr><td>报告下翻整页</td><td><kbd>PageDown</kbd></td></tr>
-            <tr><td>报告上翻整页</td><td><kbd>PageUp</kbd></td></tr>
-            <tr><td>报告向下五行</td><td><kbd>↓</kbd></td></tr>
-            <tr><td>报告向上五行</td><td><kbd>↑</kbd></td></tr>
-            <tr><td>上一题</td><td><kbd>←</kbd></td></tr>
-            <tr><td>下一题</td><td><kbd>→</kbd></td></tr>
-            <tr><td>确认当前题并进入下一项</td><td><kbd>Enter</kbd></td></tr>
-            <tr><td>提交当前卷并下一份</td><td><kbd>Ctrl+Enter</kbd></td></tr>
-            <tr><td>关闭预览/弹窗</td><td><kbd>Esc</kbd></td></tr>
-          </table>
-        </div>
-        <div class="st-hint">打分框定位：在预览区点选某个框 → 点预览新位置快速放置，或拖动框上下微调。只影响当前份报告。</div>
-      </div>
-      <div class="st-foot"><button id="stOk" class="primary">确定</button></div>
+<div id="gradeModeMask" style="display:none">
+  <div id="gradeModeBox">
+    <div class="st-head"><h2>✏ 改分方式</h2><button id="gmClose" class="st-close">×</button></div>
+    <div class="st-body">
+      <div class="st-sec-tt">改分方式</div>
+      <label class="st-radio"><input type="radio" name="gradeMode" value="byPaper" checked> 按卷改（一份卷打完全部题再下一份）</label>
+      <label class="st-radio"><input type="radio" name="gradeMode" value="byItem"> 按题改（同一题改完全部卷再下一题）</label>
+      <div class="st-hint">打分框定位：在预览区点选某个框 → 点预览新位置快速放置，或拖动框上下微调。只影响当前份报告。</div>
     </div>
+    <div class="st-foot"><button id="gmOk" class="primary">确定</button></div>
   </div>
+</div>
+
+<div id="keysMask" style="display:none">
+  <div id="keysBox">
+    <div class="st-head"><h2>⌨ 快捷键设置</h2><button id="keysClose" class="st-close">×</button></div>
+    <div class="st-body">
+      <div class="st-sec-tt">快捷键（单手，方向键区）</div>
+      <table class="st-keys">
+        <tr><td>报告下翻整页</td><td><kbd>PageDown</kbd></td></tr>
+        <tr><td>报告上翻整页</td><td><kbd>PageUp</kbd></td></tr>
+        <tr><td>报告向下五行</td><td><kbd>↓</kbd></td></tr>
+        <tr><td>报告向上五行</td><td><kbd>↑</kbd></td></tr>
+        <tr><td>上一题</td><td><kbd>←</kbd></td></tr>
+        <tr><td>下一题</td><td><kbd>→</kbd></td></tr>
+        <tr><td>确认当前题并进入下一项</td><td><kbd>Enter</kbd></td></tr>
+        <tr><td>提交当前卷并下一份</td><td><kbd>Ctrl+Enter</kbd></td></tr>
+        <tr><td>关闭预览/弹窗</td><td><kbd>Esc</kbd></td></tr>
+      </table>
+    </div>
+    <div class="st-foot"><button id="keysOk" class="primary">确定</button></div>
+  </div>
+</div>
+
+<div id="rangeMask" style="display:none">
+  <div id="rangeBox">
+    <div class="st-head"><h2>🎯 批改范围</h2><button id="rangeClose" class="st-close">×</button></div>
+    <div class="st-body">
+      <div class="st-sec-tt">选择本次批改的报告范围</div>
+      <label class="st-radio"><input type="radio" name="prepRange" value="increment" checked> 增量批改（新增＋未打分）</label>
+      <label class="st-radio"><input type="radio" name="prepRange" value="select"> 选择一部分（请在准备面板左侧表中勾选）</label>
+      <label class="st-radio"><input type="radio" name="prepRange" value="all"> 全部重新批改</label>
+    </div>
+    <div class="st-foot"><button id="rangeOk" class="primary">确定</button></div>
+  </div>
+</div>
 
   <!-- 成绩明细弹窗 -->
   <div id="detailMask" style="display:none">
