@@ -363,6 +363,8 @@
   .score-row .max { margin-right: 8px; font-weight: 800; }   /* 满分：红=未批 / 绿=已批 */
   .score-row .max.ungraded { color: #e0245e; }   /* 红：尚未批 */
   .score-row .max.graded { color: #2eaf5f; }      /* 绿：已批 */
+  .score-row .undo { background: #fff; border: 1px solid #e0245e; color: #e0245e; border-radius: 4px; font-size: 12px; padding: 1px 6px; cursor: pointer; margin-right: 4px; }
+  .score-row .undo:hover { background: #fdecec; }
   .score-row input { width: 92px; text-align: center; padding: 8px 6px; font-size: 18px; font-weight: 700; color: #e07b39; border: none; background: transparent; }
   .score-row input.ungraded { color: #e07b39; }   /* 去边框后字体同总分（橙色） */
   .score-row input.graded { color: #e07b39; }
@@ -625,14 +627,15 @@
       <div class="info-line"><span class="k">姓名</span><span class="v" id="inpName"></span></div>
       <div class="info-line"><span class="k">班级</span><span class="v" id="inpClass"></span></div>
       <div class="info-line"><span class="k">实验名称</span><span class="v" id="inpExp"></span></div>
-      <div class="side-title">评分（统分区）<span class="hint">提示
+      <div class="side-title">评分（统分区）<span class="hint">批阅方式提示
         <span class="hint-pop">
-          <b>快捷键</b><br>
-          · Enter：确认当前分数并标记已批（变绿）<br>
-          · Ctrl+Enter：提交本卷并切换下一份<br>
-          · ← / →：切换评分项<br>
-          · ↑ / ↓：预览微调五行<br>
-          · PgUp / PgDn：预览翻页<br>
+          <b>批阅方式</b><br>
+          · 输入分数后按 <b>Enter</b> 确认 → 标记已批（变绿、入数据库、上预览）<br>
+          · 已确认的分数被锁定，可点「↩ 撤销」回退重新打分（满分变回红）<br>
+          · 未确认的分数不作数：离开即还原为库中数值<br>
+          · <b>Ctrl+Enter</b>：提交本卷并切换下一份<br>
+          · ← / →：切换评分项　↑ / ↓：预览微调五行<br>
+          · PgUp / PgDn：预览翻页（全局，仅作用于预览区）<br>
           <span style="color:#999">满分：<b style="color:#e0245e">红</b>=未批　<b style="color:#2eaf5f">绿</b>=已批</span>
         </span>
       </span></div>

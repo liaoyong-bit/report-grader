@@ -1188,17 +1188,46 @@ function refreshOverlays(r){
 }
 
 /* ==================== 评分面板 ==================== */
-/* 已批标记（P0-3 修订）：仅在评分框内按 Enter 确认时才置为已批并变绿；
- * 单纯聚焦或输入数字不改变已批状态。 */
+function maxOf(r, i){
+  const tpl=(S.itemsFull||[]).filter(x=>x.item_index>=0).sort((a,b)=>a.item_index-b.item_index);
+  if(tpl[i] && tpl[i].max_score!=null) return tpl[i].max_score;
+  if(r.maxs && r.maxs[i]!=null) return r.maxs[i];
+  return 0;
+}
+function rowElOf(i){ return el.scoreRows && el.scoreRows.children[(S.gradeMode==='byItem')?0:i]; }
+/* 已批标记：仅在评分框内按 Enter 确认时才置为已批并变绿；确认时把分数写入库、锁定、上预览、显示撤销 */
 function markItemGraded(r, i){
   if(!r || !r.activated || r.activated[i]) return;
   r.activated[i] = true;
-  const inp = S.scoreInputs && S.scoreInputs[i];
-  if(inp){ inp.classList.remove('ungraded'); inp.classList.add('graded'); }
-  // 该行满分同步变绿（已批）
-  const rowEl = el.scoreRows && el.scoreRows.children[i];
+  const inp = (S.scoreInputs && S.scoreInputs[i]) || (S.gradeMode==='byItem' && S.scoreInputs && S.scoreInputs[0]) || null;
+  let n = 0;
+  if(inp){
+    n = Math.max(0, Math.min(parseInt(inp.value.replace(/[^0-9]/g,''),10)||0, maxOf(r,i)));
+    inp.value = n;
+    inp.disabled = true;
+    inp.classList.remove('ungraded'); inp.classList.add('graded');
+  }
+  r.scores[i] = n;
+  updateTotal(r); refreshOverlays(r); saveState(r);
+  const rowEl = rowElOf(i);
   const mxEl = rowEl && rowEl.querySelector('.max');
-  if(mxEl){ mxEl.className = 'max graded'; }
+  if(mxEl) mxEl.className = 'max graded';
+  const undoEl = rowEl && rowEl.querySelector('.undo');
+  if(undoEl) undoEl.style.display = 'inline-block';
+}
+/* 撤销确认：回退到未批(红)，分数清0、可重打、隐藏撤销按钮 */
+function undoItemGraded(r, i){
+  if(!r || !r.activated || !r.activated[i]) return;
+  r.activated[i] = false;
+  r.scores[i] = 0;
+  updateTotal(r); refreshOverlays(r); saveState(r);
+  const inp = (S.scoreInputs && S.scoreInputs[i]) || (S.gradeMode==='byItem' && S.scoreInputs && S.scoreInputs[0]) || null;
+  if(inp){ inp.value = 0; inp.disabled = false; inp.classList.remove('graded'); inp.classList.add('ungraded'); inp.focus(); }
+  const rowEl = rowElOf(i);
+  const mxEl = rowEl && rowEl.querySelector('.max');
+  if(mxEl) mxEl.className = 'max ungraded';
+  const undoEl = rowEl && rowEl.querySelector('.undo');
+  if(undoEl) undoEl.style.display = 'none';
 }
 function buildScoreRows(r){
   el.scoreRows.innerHTML = '';
@@ -1216,17 +1245,32 @@ function buildScoreRows(r){
     row.className = 'score-row' + (i===activeIdx ? ' active' : '');   // 当前题高亮（同报告列表）
     const nm = document.createElement('span'); nm.className='name'; nm.textContent = it.name;   // 只显示题名，不带序号
     const mx = document.createElement('span'); mx.className = 'max ' + (r.activated[i] ? 'graded' : 'ungraded'); mx.textContent = '满分'+max;
+    // 撤销按钮：仅已确认(activated)时显示，点击回退重新打分
+    const undo = document.createElement('button');
+    undo.className='undo'; undo.textContent='↩ 撤销'; undo.title='撤销确认，重新打分';
+    undo.style.display = r.activated[i] ? 'inline-block' : 'none';
+    undo.onclick = ()=>{ undoItemGraded(r, i); };
     const inp = document.createElement('input');
     inp.type='number'; inp.min=0; inp.max=max; inp.inputMode='numeric';
     inp.value = (r.scores[i]!=null ? r.scores[i] : 0);
     inp.classList.add(r.activated[i] ? 'graded' : 'ungraded');   // 恢复时保留已批阅样式
-    // 输入/聚焦都不算"已批"：只有在该评分框内按 Enter 确认后才标记已批并变绿（见 markItemGraded）
+    inp.disabled = !!r.activated[i];   // 已确认则锁定，禁止再改
+    // 只允许数字键（阻止 "1+1" "abc" 等非数字输入）
+    inp.addEventListener('keydown', (e)=>{
+      if(e.key.length===1 && !/[0-9]/.test(e.key) && !e.ctrlKey && !e.metaKey) e.preventDefault();
+    });
+    // 未确认：仅临时显示，不更新库、不上预览；已确认锁定还原
     inp.addEventListener('input', ()=>{
+      if(r.activated[i]){ inp.value = (r.scores[i]!=null?r.scores[i]:0); return; }
       const clean = inp.value.replace(/[^0-9]/g,'');
       if(clean !== inp.value) inp.value = clean;
       let n = clean==='' ? 0 : parseInt(clean,10);
       if(n>max){ n=max; inp.value=n; }
-      r.scores[i]=n; updateTotal(r); refreshOverlays(r); saveState(r);
+    });
+    // 失焦：未确认分数不作数，还原为库中数值（未确认即0）
+    inp.addEventListener('blur', ()=>{
+      if(r.activated[i]) return;
+      inp.value = (r.scores[i]!=null?r.scores[i]:0);
     });
     // 聚焦 → 记录当前项、立即全选已有分数以便直接输入（P0-2），不视为已批；同时高亮当前题
     inp.addEventListener('focus', ()=>{
@@ -1237,7 +1281,7 @@ function buildScoreRows(r){
       jumpToItem(i);
     });
     const cur = document.createElement('span'); cur.className='cur'; cur.textContent = '';
-    row.appendChild(nm); row.appendChild(mx); row.appendChild(cur); row.appendChild(inp);
+    row.appendChild(nm); row.appendChild(mx); row.appendChild(undo); row.appendChild(cur); row.appendChild(inp);
     el.scoreRows.appendChild(row);
     inputs.push(inp);
   });
@@ -1303,11 +1347,8 @@ function submitItemAndNext(){
   const i = S.itemCursor!=null ? S.itemCursor : 0;
   const r = S.current;
   if(!r || !r.activated || r.activated[i]===true){ gotoNextByItem(i); return; }
-  r.activated[i] = true;
-  const inp = S.scoreInputs && S.scoreInputs[0];
-  if(inp){ inp.classList.remove('ungraded'); inp.classList.add('graded'); }
-  if(allItemsGraded(r)){ r.done=true; r.submitted=true; r.submittedAt=Date.now(); }   // 整卷全部题完成才算已批
-  saveState(r);
+  markItemGraded(r, i);   // 确认当前题：分数入库、锁定、上预览、显示撤销
+  if(allItemsGraded(r)){ r.done=true; r.submitted=true; r.submittedAt=Date.now(); }
   renderReportList();
   gotoNextByItem(i);
 }
@@ -1393,8 +1434,8 @@ document.addEventListener('keydown', (e)=>{
   if(e.key === 'ArrowUp' || e.key === 'ArrowDown'){
     if(!isInput){ e.preventDefault(); nudgePreview(e.key==='ArrowDown'?75:-75); }
   }
-  // PgUp / PgDn：焦点不在输入框时翻整页
-  if((e.key==='PageUp'||e.key==='PageDown') && !isInput){
+  // PgUp / PgDn：全局作用于预览区翻页（无论焦点在左/中/右哪一栏）
+  if(e.key==='PageUp'||e.key==='PageDown'){
     e.preventDefault(); pagePreview(e.key==='PageDown'?1:-1);
   }
 });
