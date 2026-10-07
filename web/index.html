@@ -106,6 +106,26 @@
   #bottomBar .bb-btn { min-width:130px; padding:9px 18px; font-size:15px; font-weight:700; border:none; border-radius:8px; background:#eef1f5; color:#2b3a55; cursor:pointer; }
   #bottomBar .bb-btn.active { background:#1a73e8; color:#fff; }
   #bottomBar .bb-btn:hover:not(.active) { background:#e0e6ee; }
+  /* ===== 导出面板两栏 ===== */
+  .ex-body { display:flex; flex:1; min-height:0; padding:14px; gap:14px; }
+  .ex-left { width:270px; flex-shrink:0; display:flex; flex-direction:column; gap:8px; overflow:auto; }
+  .ex-item { background:#fff; border:1px solid #e3e8f0; border-radius:8px; padding:10px 12px; cursor:pointer; display:flex; align-items:center; gap:10px; }
+  .ex-item:hover { border-color:#1a73e8; }
+  .ex-item.active { border-color:#1a73e8; background:#f0f6ff; box-shadow:0 0 0 1px #1a73e8; }
+  .ex-item .ex-ck { width:16px; height:16px; flex-shrink:0; }
+  .ex-item .ex-nm { font-weight:700; font-size:14px; color:#2b3a55; }
+  .ex-item .ex-sub { font-size:11px; color:#999; }
+  .ex-right { flex:1; min-width:0; display:flex; flex-direction:column; gap:12px; }
+  .ex-options { background:#fff; border:1px solid #e3e8f0; border-radius:8px; padding:12px 16px; flex-shrink:0; }
+  .ex-options .ex-tt { font-weight:700; color:#1a73e8; margin-bottom:8px; }
+  .ex-opt-line { display:flex; flex-wrap:wrap; gap:8px 16px; font-size:13px; line-height:2; }
+  .ex-opt-line label { display:inline-flex; align-items:center; gap:4px; }
+  .ex-preview { flex:1; min-height:0; background:#fff; border:1px solid #e3e8f0; border-radius:8px; padding:12px 16px; overflow:auto; }
+  .ex-preview .ex-ptt { font-weight:700; color:#2b3a55; margin-bottom:10px; }
+  .ex-tbl { border-collapse:collapse; width:100%; font-size:12px; }
+  .ex-tbl th, .ex-tbl td { border:1px solid #e3e8f0; padding:5px 8px; text-align:center; }
+  .ex-tbl th { background:#f0f4fa; color:#2b3a55; }
+  .ex-tag { display:inline-block; background:#fff; border:1px solid #e3e8f0; border-radius:6px; padding:6px 10px; margin:3px 4px 3px 0; font-size:12px; color:#2b3a55; }
   .pv-head {
     display:flex; align-items:center; gap:10px; padding:10px 16px; flex:0 0 auto;
     background:#2b3a55; color:#fff; flex-wrap:wrap;
@@ -738,21 +758,18 @@
     </div>
   </div>
 
-  <!-- 导出面板（第三块：布局待完善） -->
+  <!-- 导出面板（两栏：左=可导出项目，右=上选项/下预览） -->
   <div id="exportView" style="display:none">
     <div class="pv-head">
       <div class="pv-title">导出面板</div>
       <div class="spacer"></div>
       <button id="btnExpClose" class="ghost">返回</button>
     </div>
-    <div class="pv-body" style="align-items:flex-start">
-      <div class="pv-card" style="width:560px">
-        <div class="pv-card-tt">导出数据（可勾选）</div>
-        <div id="expOptions"></div>
-      </div>
-      <div class="pv-card" style="width:460px">
-        <div class="pv-card-tt">导出操作</div>
-        <div id="expOps"></div>
+    <div class="ex-body">
+      <div class="ex-left" id="expList"></div>
+      <div class="ex-right">
+        <div class="ex-options" id="expOptions"></div>
+        <div class="ex-preview" id="expPreview"></div>
       </div>
     </div>
   </div>

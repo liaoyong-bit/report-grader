@@ -548,18 +548,78 @@ el.bbPrep.onclick = ()=> switchPanel('prep');
 el.bbGrade.onclick = ()=> switchPanel('grade');
 el.bbExport.onclick = ()=> switchPanel('export');
 el.btnExpClose.onclick = ()=> switchPanel('prep');
-/* 导出面板占位（布局/数据项待与用户敲定后完善） */
+/* ==================== 导出面板（两栏：左项目 / 右选项+预览） ==================== */
+const EXP_ITEMS = [
+  {id:'scores',     name:'学生成绩总表',  sub:'Excel · 美观表格',   icon:'📊'},
+  {id:'report',     name:'批阅报告',      sub:'PDF · 逐份美观',      icon:'📄'},
+  {id:'renamed',    name:'改名后的原始文件', sub:'ZIP · 打包导出',   icon:'🗂'},
+  {id:'annotated',  name:'带批阅痕迹的原始文件', sub:'PDF · 含批改信息', icon:'✏️'},
+];
+let EXP_SEL = 'scores';
+let EXP_CHECKED = {scores:true, report:true, renamed:false, annotated:false};
+let EXP_OPTS = {};   // 每项目勾选项
 function renderExportPanel(){
-  const opt = el.expOptions;
-  if(!opt) return;
-  opt.innerHTML =
-    '<label class="exp-opt"><input type="checkbox" checked> 学生成绩表（Excel / CSV）</label>' +
-    '<label class="exp-opt"><input type="checkbox" checked> 批阅报告（带分 PDF，逐份）</label>' +
-    '<label class="exp-opt"><input type="checkbox"> 批阅进度统计（已批/待批/平均分）</label>' +
-    '<label class="exp-opt"><input type="checkbox"> 批改明细（每题得分）</label>';
-  const ops = el.expOps;
-  if(ops) ops.innerHTML =
-    '<p style="color:#999;font-size:12px;margin:0 0 8px">导出面板详细布局与各导出项设计待与您确认后实现。</p>';
+  const list = el.expList; if(!list) return;
+  list.innerHTML = '';
+  EXP_ITEMS.forEach(it=>{
+    const item = document.createElement('div');
+    item.className = 'ex-item' + (it.id===EXP_SEL ? ' active' : '');
+    const ck = document.createElement('input'); ck.type='checkbox'; ck.className='ex-ck';
+    ck.checked = !!EXP_CHECKED[it.id];
+    ck.onclick = (e)=>{ e.stopPropagation(); EXP_CHECKED[it.id] = ck.checked; };
+    const box = document.createElement('div');
+    box.innerHTML = '<div class="ex-nm">'+it.icon+' '+esc(it.name)+'</div><div class="ex-sub">'+esc(it.sub)+'</div>';
+    item.appendChild(ck); item.appendChild(box);
+    item.onclick = ()=>{ EXP_SEL = it.id; renderExportPanel(); };
+    list.appendChild(item);
+  });
+  renderExpDetail(EXP_SEL);
+}
+function renderExpDetail(id){
+  const opt = el.expOptions, pre = el.expPreview;
+  if(id==='scores'){ opt.innerHTML = esc_m('学生成绩总表选项') + expOptLines(['学号','姓名','班级','实验名称','各题得分','总分','满分','状态','批阅教师','时间戳'], '列选择') + '<div style="font-size:12px;color:#999;margin-top:6px">默认包含核心成绩列；勾选即加入列。</div>'; pre.innerHTML = previewScores(); }
+  else if(id==='report'){ opt.innerHTML = esc_m('批阅报告选项') + expOptLines(['学生信息','评分表','统分区','总分与总评','批阅教师','批阅时间戳'], '报告包含内容') + '<div style="font-size:12px;color:#999;margin-top:6px">PDF 逐份导出，页眉含学校/课程名与报告名称。</div>'; pre.innerHTML = previewReport(); }
+  else if(id==='renamed'){ opt.innerHTML = esc_m('改名文件打包选项') + expOptLines(['ZIP 打包','含子目录结构','只打包已改名'], '打包设置') + '<div style="font-size:12px;color:#999;margin-top:6px">将改名文件夹中的报告打包为一个 ZIP。</div>'; pre.innerHTML = previewRenamed(); }
+  else if(id==='annotated'){ opt.innerHTML = esc_m('批阅痕迹选项') + expOptLines(['大题旁显示分数','显示批阅教师','显示批阅时间戳','显示总分'], '痕迹信息') + '<div style="font-size:12px;color:#999;margin-top:6px">在原始报告上叠加批阅痕迹后导出 PDF。</div>'; pre.innerHTML = previewAnnotated(); }
+}
+function expOptLines(items, tt){
+  return '<div class="ex-tt">'+tt+'</div><div class="ex-opt-line">'+items.map(s=>'<label><input type="checkbox" checked> '+s+'</label>').join('')+'</div>';
+}
+function esc_m(s){ return '<div class="ex-tt">'+esc(s)+'</div>'; }
+/* —— 各项目预览示意（真实导出样式后续接入） —— */
+function previewScores(){
+  return '<div class="ex-ptt">学生成绩总表 · 预览</div>'+
+    '<table class="ex-tbl"><tr><th>学号</th><th>姓名</th><th>班级</th><th>报告名称</th><th>题1</th><th>题2</th><th>题3</th><th>题4</th><th>题5</th><th>总分</th><th>满分</th><th>状态</th></tr>'+
+    '<tr><td>2025112701</td><td>张三</td><td>2025级临床1班</td><td>游标卡尺实验</td><td>24</td><td>18</td><td>16</td><td>20</td><td>8</td><td>86</td><td>100</td><td style="color:#2eaf5f">已批</td></tr>'+
+    '<tr><td>2025112702</td><td>李四</td><td>2025级临床2班</td><td>螺旋测微计</td><td>20</td><td>15</td><td>20</td><td>0</td><td>0</td><td>55</td><td>100</td><td style="color:#e0245e">待批</td></tr></table>';
+}
+function previewReport(){
+  return '<div class="ex-ptt">批阅报告 · 预览（PDF 版式）</div>'+
+    '<div style="border:1px solid #e3e8f0;border-radius:6px;padding:10px;font-size:12px;background:#fff;max-width:420px">'+
+    '<div style="text-align:center;font-weight:700;font-size:14px;margin-bottom:6px">《游标卡尺与螺旋测微计的使用》批阅报告</div>'+
+    '<div style="color:#555;margin-bottom:6px">学号：2025112701　姓名：张三　班级：2025级临床1班</div>'+
+    '<table class="ex-tbl"><tr><th>题项</th><th>满分</th><th>得分</th></tr>'+
+    '<tr><td>一、实验目的与原理</td><td>30</td><td>24</td></tr>'+
+    '<tr><td>二、实验仪器与装置</td><td>20</td><td>18</td></tr>'+
+    '<tr><td>五、实验结果与分析讨论</td><td>10</td><td>8</td></tr>'+
+    '<tr style="font-weight:700"><td>总分</td><td>100</td><td>86</td></tr></table>'+
+    '<div style="margin-top:6px;color:#999">批阅教师：张老师　时间戳：2026-10-07 15:30</div></div>';
+}
+function previewRenamed(){
+  return '<div class="ex-ptt">改名后的原始文件 · 打包预览</div>'+
+    '<div class="ex-tag">2025112701_张三_2025级临床1班_游标卡尺实验.pdf</div>'+
+    '<div class="ex-tag">2025112702_李四_2025级临床2班_螺旋测微计.pdf</div>'+
+    '<div style="margin-top:8px;font-size:12px;color:#999">共 2 份 · 打包为 report_renamed.zip</div>';
+}
+function previewAnnotated(){
+  return '<div class="ex-ptt">带批阅痕迹 · 预览（PDF）</div>'+
+    '<div style="border:1px solid #e3e8f0;border-radius:6px;padding:10px;font-size:12px;max-width:420px">'+
+    '<div>一、实验目的与原理（30分）<span style="float:right;color:#e0245e;font-weight:700">24分</span></div>'+
+    '<div style="border-top:1px dashed #e3e8f0;margin:4px 0"></div>'+
+    '<div>二、实验仪器与装置（仿真平台）（20分）<span style="float:right;color:#e0245e;font-weight:700">18分</span></div>'+
+    '<div style="border-top:1px dashed #e3e8f0;margin:4px 0"></div>'+
+    '<div>五、实验结果与分析讨论（10分）<span style="float:right;color:#e0245e;font-weight:700">8分</span></div>'+
+    '<div style="border-top:1px solid #e3e8f0;margin-top:6px;padding-top:4px">总分：<b>86</b>/100　批阅教师：张老师　2026-10-07 15:30</div></div>';
 }
 el.btnPrepFolder.onclick=()=>{ if(el.btnLoadFolder.onclick) el.btnLoadFolder.onclick(); };
 el.btnPrepBack.onclick=()=>{ hidePrep(); S.teacher=''; localStorage.removeItem('loginUser'); el.loginMask.style.display='flex'; showLogin(); };
