@@ -209,6 +209,17 @@ pub fn pack_renamed_zip(folder: String) -> Result<String, String> {
     Ok(format!("已打包 {} 份 → {}", count, out_path.to_string_lossy()))
 }
 
+/// 保存一份报告的扫描结构数据（扫描版→文字版 PDF 还原基础），重扫覆盖旧数据
+#[tauri::command]
+pub fn scan_save_struct(folder: String, report_key: String, pages: Vec<db::ScanPage>) -> Result<i64, String> {
+    let conn = db::open(&folder)?;
+    let bid = db::find_batch_by_folder(&conn)?.map(|b| b.0).ok_or("未找到批次")?;
+    let rid = db::report_id_by_key(&conn, bid, &report_key)?.ok_or("未找到报告")?;
+    let n = db::save_pdf_scan(&conn, bid, rid, &report_key, &pages)?;
+    dbglog(&format!("scan_save_struct report={} pages={} scan_id={}", report_key, pages.len(), n));
+    Ok(n)
+}
+
 /// 全量成绩清单（所有学生），供"保存全部成绩 CSV / 批阅概览表格"
 #[tauri::command]
 pub fn list_all_grading(folder: String) -> Result<Vec<db::GradeRow>, String> {

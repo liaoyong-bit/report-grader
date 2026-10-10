@@ -215,6 +215,11 @@
     return await invoke('pack_renamed_zip', { folder: app.S.folder });
   };
 
+  // —— 保存一份报告的扫描结构（扫描版→文字版还原基础数据）
+  window.__bridge.scanSaveStruct = async (reportKey, pages) => {
+    return await invoke('scan_save_struct', { folder: app.S.folder, reportKey, pages });
+  };
+
   // —— 导出产物写入 output/（替代浏览器下载）
   window.__bridge.saveToOutput = async (name, bytes) => {
     await invoke('save_to_output', { folder: app.S.folder, name, data: Array.from(bytes) });

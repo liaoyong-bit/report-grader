@@ -15,6 +15,7 @@ pub fn run() {
             commands::save_grading_state,
             commands::save_to_output,
             commands::pack_renamed_zip,
+            commands::scan_save_struct,
             commands::save_template,
             commands::append_log,
             commands::pick_template,

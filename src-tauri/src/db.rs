@@ -123,6 +123,63 @@ pub fn open(folder: &str) -> Result<Connection, String> {
              s_key TEXT NOT NULL,
              s_value TEXT DEFAULT '',
              PRIMARY KEY(batch_id, s_key)
+         );
+         CREATE TABLE IF NOT EXISTS pdf_scan(
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             batch_id INTEGER NOT NULL,
+             report_id INTEGER NOT NULL,
+             report_key TEXT DEFAULT '',
+             created_at TEXT DEFAULT (datetime('now','localtime'))
+         );
+         CREATE TABLE IF NOT EXISTS pdf_page(
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             scan_id INTEGER NOT NULL,
+             page_idx INTEGER NOT NULL,
+             page_w INTEGER DEFAULT 0,
+             page_h INTEGER DEFAULT 0
+         );
+         CREATE TABLE IF NOT EXISTS pdf_hline(
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             scan_id INTEGER NOT NULL,
+             page_idx INTEGER NOT NULL,
+             y REAL NOT NULL,
+             x0 REAL NOT NULL,
+             x1 REAL NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS pdf_vline(
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             scan_id INTEGER NOT NULL,
+             page_idx INTEGER NOT NULL,
+             x REAL NOT NULL,
+             y0 REAL NOT NULL,
+             y1 REAL NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS pdf_cell(
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             scan_id INTEGER NOT NULL,
+             page_idx INTEGER NOT NULL,
+             grid_idx INTEGER DEFAULT 0,
+             row INTEGER DEFAULT 0,
+             col INTEGER DEFAULT 0,
+             top REAL NOT NULL,
+             bottom REAL NOT NULL,
+             left REAL NOT NULL,
+             right REAL NOT NULL,
+             text TEXT DEFAULT ''
+         );
+         CREATE TABLE IF NOT EXISTS pdf_tline(
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             scan_id INTEGER NOT NULL,
+             page_idx INTEGER NOT NULL,
+             top REAL NOT NULL,
+             bottom REAL NOT NULL,
+             left REAL DEFAULT 0,
+             right REAL DEFAULT 1,
+             text TEXT DEFAULT '',
+             pt REAL DEFAULT 0,
+             grid_idx INTEGER DEFAULT -1,
+             cell_row INTEGER DEFAULT -1,
+             cell_col INTEGER DEFAULT -1
          );",
     )
     .map_err(|e| format!("建表失败: {e}"))?;
@@ -863,4 +920,66 @@ pub fn locate_reset(conn: &Connection) -> Result<(), String> {
     )
     .map_err(|e| format!("重置定位库失败: {e}"))?;
     Ok(())
+}
+
+// ============ 扫描结构（扫描版→文字版 PDF 还原的基础数据） ============
+#[derive(serde::Deserialize)]
+pub struct ScanHLine { pub y: f64, pub x0: f64, pub x1: f64 }
+#[derive(serde::Deserialize)]
+pub struct ScanVLine { pub x: f64, pub y0: f64, pub y1: f64 }
+#[derive(serde::Deserialize)]
+pub struct ScanCell { pub grid_idx: i64, pub row: i64, pub col: i64, pub top: f64, pub bottom: f64, pub left: f64, pub right: f64, pub text: String }
+#[derive(serde::Deserialize)]
+pub struct ScanTLine { pub top: f64, pub bottom: f64, pub left: f64, pub right: f64, pub text: String, pub pt: f64, pub grid_idx: i64, pub cell_row: i64, pub cell_col: i64 }
+#[derive(serde::Deserialize)]
+pub struct ScanPage {
+    pub page_idx: i64, pub page_w: i64, pub page_h: i64,
+    pub hlines: Vec<ScanHLine>, pub vlines: Vec<ScanVLine>,
+    pub cells: Vec<ScanCell>, pub tlines: Vec<ScanTLine>,
+}
+
+/// 保存一份报告扫描的结构数据（重扫时覆盖旧数据，事务写入）
+pub fn save_pdf_scan(
+    conn: &Connection, batch_id: i64, report_id: i64, report_key: &str, pages: &[ScanPage],
+) -> Result<i64, String> {
+    let tx = conn.unchecked_transaction().map_err(|e| format!("开事务失败: {e}"))?;
+    tx.execute("DELETE FROM pdf_scan WHERE report_id=?1", params![report_id])
+        .map_err(|e| format!("删旧扫描失败: {e}"))?;
+    tx.execute(
+        "INSERT INTO pdf_scan(batch_id, report_id, report_key) VALUES(?1,?2,?3)",
+        params![batch_id, report_id, report_key],
+    ).map_err(|e| format!("插扫描根失败: {e}"))?;
+    let scan_id = tx.last_insert_rowid();
+    for pg in pages {
+        tx.execute(
+            "INSERT INTO pdf_page(scan_id, page_idx, page_w, page_h) VALUES(?1,?2,?3,?4)",
+            params![scan_id, pg.page_idx, pg.page_w, pg.page_h],
+        ).map_err(|e| format!("插页失败: {e}"))?;
+        for h in &pg.hlines {
+            tx.execute(
+                "INSERT INTO pdf_hline(scan_id, page_idx, y, x0, x1) VALUES(?1,?2,?3,?4,?5)",
+                params![scan_id, pg.page_idx, h.y, h.x0, h.x1],
+            ).map_err(|e| format!("插横线失败: {e}"))?;
+        }
+        for v in &pg.vlines {
+            tx.execute(
+                "INSERT INTO pdf_vline(scan_id, page_idx, x, y0, y1) VALUES(?1,?2,?3,?4,?5)",
+                params![scan_id, pg.page_idx, v.x, v.y0, v.y1],
+            ).map_err(|e| format!("插竖线失败: {e}"))?;
+        }
+        for c in &pg.cells {
+            tx.execute(
+                "INSERT INTO pdf_cell(scan_id, page_idx, grid_idx, row, col, top, bottom, left, right, text) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+                params![scan_id, pg.page_idx, c.grid_idx, c.row, c.col, c.top, c.bottom, c.left, c.right, c.text],
+            ).map_err(|e| format!("插格子失败: {e}"))?;
+        }
+        for t in &pg.tlines {
+            tx.execute(
+                "INSERT INTO pdf_tline(scan_id, page_idx, top, bottom, left, right, text, pt, grid_idx, cell_row, cell_col) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+                params![scan_id, pg.page_idx, t.top, t.bottom, t.left, t.right, t.text, t.pt, t.grid_idx, t.cell_row, t.cell_col],
+            ).map_err(|e| format!("插文字行失败: {e}"))?;
+        }
+    }
+    tx.commit().map_err(|e| format!("提交扫描失败: {e}"))?;
+    Ok(scan_id)
 }

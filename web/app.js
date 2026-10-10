@@ -3183,6 +3183,11 @@ function washShading(data, W, H, opt){
     }
   }
 }
+// 合并水平黑段区间（相邻/重叠合并）：横线支持多段（合并单元格使一行/一条横线可能是多段）
+function mergeSegs(arr){
+  const a=(arr||[]).slice().sort((p,q)=>p.l-q.l);
+  const out=[]; for(const s of a){ const last=out[out.length-1]; if(last && s.l<=last.r+1){ last.r=Math.max(last.r,s.r); } else out.push({l:s.l,r:s.r}); } return out;
+}
 // 渲染页面上一个比例区域（左/上/宽/高均为0-1比例），返回该区域b64 —— 供逐段聚焦OCR
 async function renderAreaB64(pdf, pageIdx, leftPct, topPct, wPct, hPct, scale){
   const page=await pdf.getPage(pageIdx+1);
@@ -3235,37 +3240,41 @@ async function analyzePage(pdf, pageIdx, scale=2){
   const isBg=(i)=>{ const r=data[i],g=data[i+1],b=data[i+2]; return r>242&&g>242&&b>242; };
   // 逐像素行：统计非背景占比 + 最大连续黑段（判断表格横线）
   const rowType=new Array(H).fill('blank');
+  const rowSegs=new Array(H);   // 每横线行记录所有黑段 [{l,r}]（合并单元格使横线可能多段）
+  const segMin=Math.max(3, Math.round(W*0.004));   // 段最小长度（滤噪点）
   let maxRightPx=-1;   // 本页文字区最右黑像素（文字区右边界判定：该页顶到最右端的行）
   for(let y=0;y<H;y++){
     let cnt=0, maxSeg=0, seg=0, segStart=-1, segLeft=W, segRight=-1;
+    const segs=[];
     const off=y*W;
     for(let x=0;x<W;x++){
       if(!isBg((off+x)*4)){
         cnt++; if(seg===0) segStart=x; seg++; if(seg>maxSeg) maxSeg=seg; segRight=x;
-      } else { if(seg>0){ if(segStart<segLeft) segLeft=segStart; seg=0; } }
+      } else { if(seg>0){ if(segStart<segLeft) segLeft=segStart; if(seg>=segMin) segs.push({l:segStart,r:x-1}); seg=0; } }
     }
-    if(seg>0 && segStart<segLeft) segLeft=segStart;
+    if(seg>0){ if(segStart<segLeft) segLeft=segStart; if(seg>=segMin) segs.push({l:segStart,r:W-1}); }
     const ratio=cnt/W;
     // 表格横线：黑像素聚成一个覆盖中间的大连续段(段长>行宽一半)，且段左右都有空白
     if(maxSeg> W*0.5 && segLeft> W*0.04 && segRight< W*0.96 && ratio>0.3){
-      rowType[y]='hline';
+      rowType[y]='hline'; rowSegs[y]=mergeSegs(segs);   // 记录该横线行所有黑段
     } else if(ratio>0.0012 && maxSeg < W*0.5){   // 文字行（黑白交替，含粗体大标题；用最大连续段<行宽一半防填充块）
       rowType[y]='text';
       if(segRight>maxRightPx) maxRightPx=segRight;
     }
   }
-  // 连续同类行 → 文字行带 / 表格横杠（连续横线行合并为同一根横杠）
+  // 连续同类行 → 文字行带 / 表格横杠（连续横线行合并为同一根横杠，段=跨行所有黑段并集，支持合并单元格多段）
   const textBands=[], hlines=[];
-  let tStart=-1, hStart=-1;
+  let tStart=-1, hStart=-1, hSegs=[];
   for(let y=0;y<H;y++){
     const ty=rowType[y];
     if(ty==='text' && tStart<0) tStart=y;
     if(ty!=='text' && tStart>=0){ textBands.push({top:tStart,bottom:y-1}); tStart=-1; }
-    if(ty==='hline' && hStart<0) hStart=y;
-    if(ty!=='hline' && hStart>=0){ hlines.push({top:hStart,bottom:y-1}); hStart=-1; }
+    if(ty==='hline' && hStart<0){ hStart=y; hSegs=[]; }
+    if(ty==='hline'){ if(rowSegs[y]&&rowSegs[y].length) hSegs=hSegs.concat(rowSegs[y]); }
+    if(ty!=='hline' && hStart>=0){ hlines.push({top:hStart,bottom:y-1,segs:mergeSegs(hSegs)}); hStart=-1; }
   }
   if(tStart>=0) textBands.push({top:tStart,bottom:H-1});
-  if(hStart>=0) hlines.push({top:hStart,bottom:H-1});
+  if(hStart>=0) hlines.push({top:hStart,bottom:H-1,segs:mergeSegs(hSegs)});
   // 文字行带（单行，不做段落合并——定位时逐行送OCR）
   const blocks=textBands.slice();
   // 字号换算：行带高 → A4(297mm) → pt（行距系数1.4）
@@ -3282,10 +3291,12 @@ async function analyzePage(pdf, pageIdx, scale=2){
     }
   }
   if(cur.length) tGroups.push(cur);
-  // 竖线检测：每组表格内相邻横杠之间找"垂直连续黑"列，并与上/下横杠同x(±容差)确认
-  // 区域从横杠下方过约3像素开始、到下一横杠上方3像素为止，避开横杠上下阴影
+  // 竖线检测：每组表格内相邻横杠之间找"垂直黑列"，并确认该 x 落在上、下两条横杠的某段区间内（上下位置对上）才成立
+  // 合并单元格 → 横杠是多段，竖线只在两段对上的位置产生；区域从横杠下方过约3像素开始、到下一横杠上方3像素为止
   const vlines=[];
   const skip=Math.max(2, Math.round(H*0.0015));   // 约3px阴影带
+  const n=Math.max(1, Math.round(W*0.0015));      // 容差
+  const inSeg=(h,x)=>{ if(!h||!h.segs) return false; for(const s of h.segs){ if(x>=s.l-n && x<=s.r+n) return true; } return false; };
   for(const grp of tGroups){
     if(grp.length<2) continue;
     for(let hi=0; hi<grp.length-1; hi++){
@@ -3294,15 +3305,8 @@ async function analyzePage(pdf, pageIdx, scale=2){
       for(let x=1;x<W-1;x++){
         let c=0;
         for(let y=top;y<=bot;y++){ if(!isBg((y*W+x)*4)) c++; }
-        if(c/(bot-top+1)>0.85){   // 该列垂直连续黑 → 竖线候选
-          const n=Math.max(1, Math.round(W*0.0015));   // 容差：与横杠像素 x 差在 n 内
-          let up=false, down=false;
-          for(let dx=-n;dx<=n;dx++){
-            const xx=x+dx; if(xx<0||xx>=W) continue;
-            if(!isBg((grp[hi].top*W+xx)*4)) up=true;
-            if(!isBg((grp[hi+1].bottom*W+xx)*4)) down=true;
-          }
-          if(up && down){ vlines.push({x, top:grp[hi].top, bottom:grp[hi+1].bottom}); x++; }
+        if(c/(bot-top+1)>0.7){   // 该列垂直黑比例（允许少量断点）→ 竖线候选
+          if(inSeg(grp[hi],x) && inSeg(grp[hi+1],x)){ vlines.push({x, top:grp[hi].top, bottom:grp[hi+1].bottom}); x++; }
         }
       }
     }
@@ -3353,7 +3357,7 @@ async function analyzePage(pdf, pageIdx, scale=2){
   textLines.sort((a,b)=>a.top-b.top);
   return {
     textLines: textLines.map(b=>({top:Math.round(b.top/H*10000)/10000, bottom:Math.round((b.bottom+1)/H*10000)/10000, left:Math.round(b.left*10000)/10000, right:Math.round(b.right*10000)/10000, pt:b.pt, cell:b.cell})),
-    hlines: hlines.map(h=>({top:Math.round(h.top/H*10000)/10000, bottom:Math.round((h.bottom+1)/H*10000)/10000})),
+    hlines: hlines.map(h=>({top:Math.round(h.top/H*10000)/10000, bottom:Math.round((h.bottom+1)/H*10000)/10000, segs:(h.segs||[]).map(s=>({x0:Math.round(s.l/W*10000)/10000, x1:Math.round(s.r/W*10000)/10000}))})),
     vlines: vlines.map(v=>({x:Math.round(v.x/W*10000)/10000, top:Math.round(v.top/H*10000)/10000, bottom:Math.round((v.bottom+1)/H*10000)/10000})),
     grid,
     pageRight: maxRightPx>0 ? Math.round(maxRightPx/W*10000)/10000 : null
@@ -3529,8 +3533,10 @@ async function locateReportTitlesScanDB(path, tpl, reportKey){
     const stripSeq=(s)=>(s||'').replace(/^\s*[一二三四五六七八九十]+[、．.\s]*/,'');
     const items=[]; let fully=true;
     const bandList=[]; let pageRight=null;
+    const pageStruct=[];
     for(let p=0;p<pdf.numPages;p++){
       let ana=null; try{ ana=await analyzePage(pdf,p,2); }catch(e){ LD('analyzePage p'+p+' err '+e); }
+      pageStruct[p]=ana||null;
       if(ana && ana.pageRight!=null && (pageRight==null || ana.pageRight>pageRight)) pageRight=ana.pageRight;
       const lines=(ana&&ana.textLines)||[];
       for(const ln of lines){
@@ -3593,6 +3599,32 @@ async function locateReportTitlesScanDB(path, tpl, reportKey){
     const renderRows=await window.__bridge.locateGetRows(S.folder, reportKey).catch(e=>{ LD('final getRows ERR '+e); return []; })||[];
     LD('final rows='+renderRows.length+' items='+items.length+' fully='+fully);
     const fullText=(renderRows||[]).map(r=>r.text).join('\n');
+    // 5) 落库整份报告的扫描结构（横线/竖线/格子/文字行+OCR+位置），供"扫描版→文字版 PDF"还原
+    try{
+      const pages=[];
+      for(let p=0;p<pdf.numPages;p++){
+        const ana=pageStruct[p]||{};
+        const hlines=(ana.hlines||[]).flatMap(h=>(h.segs||[]).map(s=>({y:h.top, x0:s.x0, x1:s.x1})));
+        const vlines=(ana.vlines||[]).map(v=>({x:v.x, y0:v.top, y1:v.bottom}));
+        const cells=[];
+        if(ana.grid && ana.grid.rows && ana.grid.rows.length>=2 && ana.grid.cols && ana.grid.cols.length>=2){
+          const gR=ana.grid.rows, gC=ana.grid.cols;
+          for(let ri=0;ri<gR.length-1;ri++) for(let ci=0;ci<gC.length-1;ci++)
+            cells.push({grid_idx:0, row:ri, col:ci, top:gR[ri].top, bottom:gR[ri+1].top, left:gC[ci], right:gC[ci+1], text:''});
+        }
+        const tlines=(renderRows||[]).filter(r=>r.page_index===p).map(r=>{
+          let cj=null; try{ cj=JSON.parse(r.cell||'{}'); }catch(e){}
+          return { top:r.top, bottom:r.bottom,
+            left:r.left!=null?r.left:0, right:r.right!=null?r.right:1,
+            text:r.text||'', pt:0,
+            grid_idx:(cj&&cj.grid!=null)?cj.grid:-1,
+            cell_row:(cj&&cj.row!=null)?cj.row:-1,
+            cell_col:(cj&&cj.col!=null)?cj.col:-1 };
+        });
+        pages.push({page_idx:p, page_w:0, page_h:0, hlines, vlines, cells, tlines});
+      }
+      if(window.__bridge.scanSaveStruct){ const sid=await window.__bridge.scanSaveStruct(reportKey, pages); LD('scanSaveStruct ok scan_id='+sid+' pages='+pages.length); }
+    }catch(e){ LD('scanSaveStruct ERR '+e); }
     return {items, fully, fullText, rows: renderRows};
   }catch(e){ LD('locateReportTitlesScanDB CATCH '+e); return {items:[], fully:false, fullText:'', rows:[]}; }
 }
