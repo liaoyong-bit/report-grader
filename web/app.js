@@ -634,6 +634,7 @@ const EXP_ITEMS = [
 let EXP_SEL = 'scores';
 let EXP_CHECKED = {scores:true, report:true, renamed:false, annotated:false};
 let EXP_OPTS = {};   // 每项目勾选项
+let EXP_CHECKS = {}; // 每项目列/内容勾选状态 {id:{index:bool}}
 function renderExportPanel(){
   const list = el.expList; if(!list) return;
   list.innerHTML = '';
@@ -664,10 +665,13 @@ function renderExpDetail(id){
       rows:['大题旁显示分数','显示批阅教师','显示批阅时间戳','显示总分'] }
   }[id] || {tt:'',note:'',rows:[]};
   const nm = (EXP_ITEMS.find(x=>x.id===id)||{}).name || '';
-  opt.innerHTML = esc_m(nm+'选项') + expOptLines(meta.rows, meta.tt) +
+  opt.innerHTML = esc_m(nm+'选项') + expOptLines(id, meta.rows, meta.tt) +
     '<div style="font-size:12px;color:#999;margin-top:6px">'+meta.note+'</div>' +
     '<div style="margin-top:12px;display:flex;align-items:center;gap:10px"><button id="expRunBtn" class="primary">导出</button><span id="expRunStat" style="font-size:12px;color:#888"></span></div>';
   const b=document.getElementById('expRunBtn'); if(b) b.onclick=()=>runExport(id);
+  opt.querySelectorAll('input[type=checkbox][data-exid]').forEach(cb=>{
+    cb.onchange = ()=>{ EXP_CHECKS[id]=EXP_CHECKS[id]||{}; EXP_CHECKS[id][Number(cb.dataset.exk)]=cb.checked; renderExpPreview(id); };
+  });
   renderExpPreview(id);
 }
 async function renderExpPreview(id){
@@ -689,8 +693,12 @@ async function runExport(id){
     else if(id==='annotated'){ mark('导出中…'); await exportScoredPdf(); mark(''); }
   }catch(e){ mark(''); setErr('导出失败: '+esc(e&&e.message?e.message:e)); }
 }
-function expOptLines(items, tt){
-  return '<div class="ex-tt">'+tt+'</div><div class="ex-opt-line">'+items.map(s=>'<label><input type="checkbox" checked> '+s+'</label>').join('')+'</div>';
+function expOptLines(id, items, tt){
+  const cur = EXP_CHECKS[id]||{};
+  return '<div class="ex-tt">'+tt+'</div><div class="ex-opt-line">'+items.map((s,k)=>{
+    const on = cur[k]!==undefined ? cur[k] : true;
+    return '<label><input type="checkbox" data-exid="'+id+'" data-exk="'+k+'"'+(on?' checked':'')+'> '+s+'</label>';
+  }).join('')+'</div>';
 }
 function esc_m(s){ return '<div class="ex-tt">'+esc(s)+'</div>'; }
 async function ensurePrepOv(){ if(!S.prepOv && window.__bridge && window.__bridge.prepOverview && S.folder){ try{ S.prepOv=await window.__bridge.prepOverview(S.folder); }catch(e){} } }
@@ -699,14 +707,30 @@ async function loadTpl(){ try{ if(!S.itemsFull && window.__bridge && window.__br
 async function previewScores(){
   let items=[]; try{ const rows=await fetchAllGrades(); items=gradesToTable(rows); }catch(e){}
   if(!items.length) return '<div class="ex-ptt">学生成绩总表 · 暂无成绩数据</div><div style="color:#999;font-size:12px">请先在批改面板完成批阅，或确认已选报告文件夹。</div>';
-  let h='<div class="ex-ptt">学生成绩总表 · 预览（前 8 行）</div><table class="ex-tbl"><tr><th>学号</th><th>姓名</th><th>班级</th><th>报告名称</th>';
+  const cols=EXP_CHECKS['scores']||{};
+  const show=(k)=> cols[k]===undefined ? true : cols[k];
+  let h='<div class="ex-ptt">学生成绩总表 · 预览（前 8 行，随列勾选动态显示）</div><table class="ex-tbl"><tr>';
+  if(show(0)) h+='<th>学号</th>';
+  if(show(1)) h+='<th>姓名</th>';
+  if(show(2)) h+='<th>班级</th>';
+  if(show(3)) h+='<th>实验名称</th>';
   const n=Math.max(0,...items.map(it=>it.scores.length));
-  for(let i=0;i<n;i++) h+='<th>第'+(i+1)+'项</th>';
-  h+='<th>总分</th><th>满分</th><th>状态</th></tr>';
+  for(let i=0;i<n;i++) if(show(4)) h+='<th>第'+(i+1)+'项</th>';
+  if(show(5)) h+='<th>总分</th>';
+  if(show(6)) h+='<th>满分</th>';
+  if(show(7)) h+='<th>状态</th>';
+  h+='</tr>';
   items.slice(0,8).forEach(it=>{
-    h+='<tr><td>'+(it.no||'')+'</td><td>'+(it.name||'')+'</td><td>'+(it.cls||'')+'</td><td style="text-align:left">'+(it.fname||'')+'</td>';
-    for(let i=0;i<n;i++) h+='<td>'+(it.scores[i]!=null?it.scores[i]:'')+'</td>';
-    h+='<td><b>'+it.total+'</b></td><td>'+it.maxTotal+'</td><td class="stc-'+it.status+'">'+it.status+'</td></tr>';
+    h+='<tr>';
+    if(show(0)) h+='<td>'+(it.no||'')+'</td>';
+    if(show(1)) h+='<td>'+(it.name||'')+'</td>';
+    if(show(2)) h+='<td>'+(it.cls||'')+'</td>';
+    if(show(3)) h+='<td style="text-align:left">'+(it.report_name||'')+'</td>';
+    for(let i=0;i<n;i++) if(show(4)) h+='<td>'+(it.scores[i]!=null?it.scores[i]:'')+'</td>';
+    if(show(5)) h+='<td><b>'+it.total+'</b></td>';
+    if(show(6)) h+='<td>'+it.maxTotal+'</td>';
+    if(show(7)) h+='<td class="stc-'+it.status+'">'+it.status+'</td>';
+    h+='</tr>';
   });
   return h+'</table>';
 }
@@ -2047,7 +2071,7 @@ function gradesToTable(rows){
     const total = (scores||[]).reduce((x,y)=>x+(Number(y)||0),0)||0;
     const maxTotal = (maxs||[]).reduce((x,y)=>x+(Number(y)||0),0)||0;
     return {
-      no: g.no||'', name: g.name||'', cls: g.cls||'',
+      no: g.no||'', name: g.name||'', cls: g.cls||'', report_name: g.report_name||'',
       scores, maxs, total, maxTotal,
       status: g.status==='submitted' ? '已批' : (g.status==='missing' ? '待提交' : '待批'),
       fname: g.fname||''

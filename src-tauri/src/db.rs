@@ -546,6 +546,7 @@ pub struct GradeRow {
     pub no: String,
     pub name: String,
     pub cls: String,
+    pub report_name: String,
     pub status: String,   // submitted / pending / missing
     pub draft: Option<String>,
     pub fname: String,
@@ -554,7 +555,7 @@ pub struct GradeRow {
 pub fn list_all_grading(conn: &Connection, batch_id: i64) -> Result<Vec<GradeRow>, String> {
     let mut st = conn
         .prepare(
-            "SELECT s.student_no, s.name, s.class,
+            "SELECT s.student_no, s.name, s.class, s.report_name,
                COALESCE((SELECT r.submit_status FROM reports r
                          WHERE r.batch_id=?1 AND r.student_id=s.id AND r.match_status='matched'
                          ORDER BY r.id DESC LIMIT 1),'missing'),
@@ -574,9 +575,10 @@ pub fn list_all_grading(conn: &Connection, batch_id: i64) -> Result<Vec<GradeRow
                 no: r.get(0)?,
                 name: r.get(1)?,
                 cls: r.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                status: r.get(3)?,
-                draft: r.get(4)?,
-                fname: r.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                report_name: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                status: r.get(4)?,
+                draft: r.get(5)?,
+                fname: r.get::<_, Option<String>>(6)?.unwrap_or_default(),
             })
         })
         .map_err(|e| format!("查询成绩失败: {e}"))?;
