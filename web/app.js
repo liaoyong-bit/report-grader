@@ -3166,6 +3166,23 @@ async function renderPageB64(pdf, pageIdx, scale){
   await page.render({canvasContext:canvas.getContext('2d'), viewport:vp}).promise;
   return canvas.toDataURL('image/png').split(',')[1];
 }
+
+// 浅灰底纹置白：逐行统计灰度众数，若某行众数占比高且为中等灰度(浅灰)，视为底色并置纯白，使文字从底纹中浮现供 OCR 识别。
+// 参数（可调）：F_MIN 众数占比下限、G_LO/G_HI 众数灰度窗口(避开纯黑文字/纯白背景)、TOL 同底纹容差。
+// 判据依据：浅灰底纹在整行内灰度均一、占比大、值不高；真正的深色文字不会大面积占据同一灰度。
+function washShading(data, W, H, opt){
+  const F_MIN=(opt&&opt.F_MIN)||0.25, G_LO=(opt&&opt.G_LO)||100, G_HI=(opt&&opt.G_HI)||245, TOL=(opt&&opt.TOL)||8;
+  const BUF=new Uint32Array(256);
+  for(let y=0;y<H;y++){
+    const off=y*W*4; BUF.fill(0);
+    for(let x=0;x<W;x++){ const i=off+x*4; const g=(data[i]*299+data[i+1]*587+data[i+2]*114+500)|0; BUF[(g/1000)|0]++; }
+    let gm=255, gf=0; for(let k=0;k<256;k++){ if(BUF[k]>gf){ gf=BUF[k]; gm=k; } }
+    if(gf>=W*F_MIN && gm>=G_LO && gm<=G_HI){
+      const lo=Math.max(0,gm-TOL), hi=Math.min(255,gm+TOL);
+      for(let x=0;x<W;x++){ const i=off+x*4; const g=(data[i]*299+data[i+1]*587+data[i+2]*114+500)|0; const gk=(g/1000)|0; if(gk>=lo&&gk<=hi){ data[i]=data[i+1]=data[i+2]=255; } }
+    }
+  }
+}
 // 渲染页面上一个比例区域（左/上/宽/高均为0-1比例），返回该区域b64 —— 供逐段聚焦OCR
 async function renderAreaB64(pdf, pageIdx, leftPct, topPct, wPct, hPct, scale){
   const page=await pdf.getPage(pageIdx+1);
@@ -3178,6 +3195,7 @@ async function renderAreaB64(pdf, pageIdx, leftPct, topPct, wPct, hPct, scale){
   const pw=Math.max(8,Math.min(Math.floor(vp.width)-px,Math.ceil(wPct*vp.width)));
   const ph=Math.max(8,Math.min(Math.floor(vp.height)-py,Math.ceil(hPct*vp.height)));
   const img=ctx.getImageData(px,py,pw,ph);
+  try{ washShading(img.data, pw, ph); }catch(e){}   // 浅灰底纹置白，提升该行 OCR 识别率
   const c2=document.createElement('canvas'); c2.width=pw; c2.height=ph;
   c2.getContext('2d').putImageData(img,0,0);
   return c2.toDataURL('image/png').split(',')[1];
@@ -3213,6 +3231,7 @@ async function analyzePage(pdf, pageIdx, scale=2){
   const empty={textBands:[], hlines:[], vlines:[], grid:null};
   if(!W||!H) return empty;
   const data=canvas.getContext('2d').getImageData(0,0,W,H).data;
+  try{ washShading(data, W, H); }catch(e){}   // 浅灰底纹置白，避免底纹污染行统计/表格判定
   const isBg=(i)=>{ const r=data[i],g=data[i+1],b=data[i+2]; return r>242&&g>242&&b>242; };
   // 逐像素行：统计非背景占比 + 最大连续黑段（判断表格横线）
   const rowType=new Array(H).fill('blank');
