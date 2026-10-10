@@ -3311,9 +3311,17 @@ async function analyzePage(pdf, pageIdx, scale=2){
       }
     }
   }
-  // 去重竖线（合并相邻 x）
-  const vx=[];
-  for(const v of vlines){ if(!vx.length || v.x-vx[vx.length-1].x>2) vx.push(v.x); }
+  // 合并竖线：同一 x 的多段竖线合并为贯穿竖线(top=首段最小, bottom=末段最大)
+  // 修复：原按"相邻横线对"逐段 push，导致中间横线与竖线的交叉点因 y 超出该竖线段的上下界而漏检
+  const vmap=new Map();
+  for(const v of vlines){
+    let key=null;
+    for(const k of vmap.keys()){ if(Math.abs(k-v.x)<=2){ key=k; break; } }
+    if(key==null) vmap.set(v.x,{x:v.x, top:v.top, bottom:v.bottom});
+    else { const e=vmap.get(key); if(v.top<e.top)e.top=v.top; if(v.bottom>e.bottom)e.bottom=v.bottom; }
+  }
+  const vlines2=Array.from(vmap.values()).sort((a,b)=>a.x-b.x);
+  const vx=vlines2.map(v=>v.x);
   // 网格：每张表的横杠 y 为行边界，竖线 x 为列边界
   const grids=[];
   for(const grp of tGroups){
@@ -3358,7 +3366,7 @@ async function analyzePage(pdf, pageIdx, scale=2){
   return {
     textLines: textLines.map(b=>({top:Math.round(b.top/H*10000)/10000, bottom:Math.round((b.bottom+1)/H*10000)/10000, left:Math.round(b.left*10000)/10000, right:Math.round(b.right*10000)/10000, pt:b.pt, cell:b.cell})),
     hlines: hlines.map(h=>({top:Math.round(h.top/H*10000)/10000, bottom:Math.round((h.bottom+1)/H*10000)/10000, segs:(h.segs||[]).map(s=>({x0:Math.round(s.l/W*10000)/10000, x1:Math.round(s.r/W*10000)/10000}))})),
-    vlines: vlines.map(v=>({x:Math.round(v.x/W*10000)/10000, top:Math.round(v.top/H*10000)/10000, bottom:Math.round((v.bottom+1)/H*10000)/10000})),
+    vlines: vlines2.map(v=>({x:Math.round(v.x/W*10000)/10000, top:Math.round(v.top/H*10000)/10000, bottom:Math.round((v.bottom+1)/H*10000)/10000})),
     grid,
     pageRight: maxRightPx>0 ? Math.round(maxRightPx/W*10000)/10000 : null
   };
