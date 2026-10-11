@@ -3204,6 +3204,57 @@ function floodTextRegion(data,W,H,isBg){
   // 微扩 2px 包容封闭白，避免裁剪表内格线
   return {T:Math.max(0,minY-2), B:Math.min(H-1,maxY+2), L:Math.max(0,minX-2), R:Math.min(W-1,maxX+2)};
 }
+// 定表区域(flood白贯通)：从文字区域顶部、底部各 flood 一次白色，
+// 白像素既连不到顶部也连不到底部 = 被表框线封闭 → 属表格内部；每块封闭白 = 一个格子(或合并格)。
+// 返回 tables:[{top,bottom,left,right, grid, cells:[{top,bottom,left,right,grid,row}]}]
+function findTableRegions(data,W,H,isBg,region){
+  const floodFrom=(yRow)=>{
+    const seen=new Uint8Array(W*H); const st=new Int32Array(W*H); let sp=0;
+    const push=(i)=>{ if(!seen[i]&&isBg(i*4)){ seen[i]=1; st[sp++]=i; } };
+    for(let x=region.L;x<=region.R;x++) push(yRow*W+x);
+    while(sp>0){ const i=st[--sp]; const x=i%W,y=(i/W)|0;
+      if(x>region.L)push(i-1); if(x<region.R)push(i+1);
+      if(y>region.T)push(i-W); if(y<region.B)push(i+W);
+    }
+    return seen;
+  };
+  const topR=floodFrom(region.T), botR=floodFrom(region.B);
+  const closed=new Uint8Array(W*H);
+  for(let y=region.T;y<=region.B;y++)for(let x=region.L;x<=region.R;x++){ const i=y*W+x; if(isBg(i*4)&&!topR[i]&&!botR[i]) closed[i]=1; }
+  // 聚类封闭白 → 连通块(格子)
+  const cells=[]; const st=new Int32Array(W*H);
+  for(let y=region.T;y<=region.B;y++)for(let x=region.L;x<=region.R;x++){
+    const i=y*W+x; if(!closed[i]) continue;
+    let sp=0; closed[i]=0; st[sp++]=i;
+    let minX=x,maxX=x,minY=y,maxY=y;
+    while(sp>0){ const j=st[--sp]; const cx=j%W,cy=(j/W)|0;
+      if(cx<minX)minX=cx; if(cx>maxX)maxX=cx; if(cy<minY)minY=cy; if(cy>maxY)maxY=cy;
+      if(cx>region.L&&closed[j-1]){closed[j-1]=0;st[sp++]=j-1;}
+      if(cx<region.R&&closed[j+1]){closed[j+1]=0;st[sp++]=j+1;}
+      if(cy>region.T&&closed[j-W]){closed[j-W]=0;st[sp++]=j-W;}
+      if(cy<region.B&&closed[j+W]){closed[j+W]=0;st[sp++]=j+W;}
+    }
+    if(maxX-minX>=3 && maxY-minY>=3) cells.push({top:minY,bottom:maxY,left:minX,right:maxX});
+  }
+  // 格子聚类成表：横向相邻或纵向相邻(被一条黑线隔开，间距≤sep)的格子 → 同一张表（并查集连通分量）
+  const n=cells.length; const sep=Math.max(3, Math.round(W*0.002));   // 相邻格黑线间隔容差
+  const parent=new Array(n); for(let i=0;i<n;i++) parent[i]=i;
+  const find=(i)=>{ while(parent[i]!==i){ parent[i]=parent[parent[i]]; i=parent[i]; } return i; };
+  for(let i=0;i<n;i++) for(let j=i+1;j<n;j++){
+    const a=cells[i], b=cells[j];
+    const xAdj=(Math.abs(a.left-b.right)<=sep||Math.abs(b.left-a.right)<=sep) && (Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top)>=-sep);
+    const yAdj=(Math.abs(a.top-b.bottom)<=sep||Math.abs(b.top-a.bottom)<=sep) && (Math.min(a.right,b.right)-Math.max(a.left,b.left)>=-sep);
+    if(xAdj||yAdj){ const ri=find(i), rj=find(j); if(ri!==rj) parent[ri]=rj; }
+  }
+  const groups={}; cells.forEach((c,i)=>{ const r=find(i); (groups[r]=groups[r]||[]).push(c); });
+  const tables=Object.values(groups).map((grp)=>{ grp.sort((a,b)=>a.top-b.top||a.left-b.left); return grp; });
+  return tables.map((grp,gi)=>{
+    let top=1e9,bottom=-1,left=1e9,right=-1;
+    grp.forEach(c=>{ if(c.top<top)top=c.top; if(c.bottom>bottom)bottom=c.bottom; if(c.left<left)left=c.left; if(c.right>right)right=c.right; });
+    grp.sort((a,b)=>a.top-b.top||a.left-b.left);
+    return {top,bottom,left,right, grid:gi, cells:grp.map((c,ci)=>({top:c.top,bottom:c.bottom,left:c.left,right:c.right,grid:gi,row:ci}))};
+  });
+}
 
 // 只用于"定位/表格判定"的像素分析层；送 OCR 始终从原图渲染，故此处改写 data 不影响识别
 function enhanceHLine(data, W, H, isBg, k=3, minLen){
@@ -3367,35 +3418,18 @@ async function analyzePage(pdf, pageIdx, scale=2){
     }
   }
   const grid = grids.length? grids[0] : null;
-  // —— 表格格内文字扫描：先重建网格，再在格内逐像素行（左右限于格列、上下限于格行）——
-  const tableYRanges = tGroups.map(grp=>({a:grp[0].top, b:grp[grp.length-1].bottom}));
-  const inTable=(y)=>{ for(const r of tableYRanges){ if(y>=r.a && y<=r.b) return true; } return false; };
-  const freeBlocks = blocks.filter(b=>!inTable((b.top+b.bottom)>>1));
+  // —— 定表区域(flood白贯通)：表格=白色既连不到文字区域顶部也连不到底部；一格=一块 ——
+  const tables=findTableRegions(data,W,H,isBg,region);
+  const inAnyTable=(y)=>{ for(const tb of tables){ if(y>=tb.top&&y<=tb.bottom) return true; } return false; };
+  const freeBlocks = blocks.filter(b=>!inAnyTable((b.top+b.bottom)>>1));
   const cellLines=[];
-  const colEdges=[0].concat(vx, W);
   const mmPerPx2=297/H;
-  for(let gi=0; gi<tGroups.length; gi++){
-    const grp=tGroups[gi];
-    for(let ri=0; ri<grp.length-1; ri++){
-      const rowTop=grp[ri].bottom+1, rowBot=grp[ri+1].top-1;
-      if(rowBot-rowTop<1) continue;
-      for(let ci=0; ci<colEdges.length-1; ci++){
-        const cLeft=colEdges[ci]+1, cRight=colEdges[ci+1]-1;
-        if(cRight-cLeft<1) continue;
-        let gStart=-1;
-        for(let y=rowTop;y<=rowBot;y++){
-          let cnt=0; const off=y*W;
-          for(let x=cLeft;x<=cRight;x++){ if(!isBg((off+x)*4)) cnt++; }
-          const gRatio=cnt/(cRight-cLeft+1);
-          const isGText = gRatio>0.0012 && gRatio<0.6;   // 格内文字行
-          if(isGText && gStart<0) gStart=y;
-          if(!isGText && gStart>=0){ cellLines.push({top:gStart,bottom:y-1,left:cLeft/W,right:cRight/W,cell:{grid:gi,row:ri,col:ci},pt:Math.round((y-gStart)*mmPerPx2/0.3528/1.4*10)/10}); gStart=-1; }
-        }
-        if(gStart>=0){ cellLines.push({top:gStart,bottom:rowBot,left:cLeft/W,right:cRight/W,cell:{grid:gi,row:ri,col:ci},pt:Math.round((rowBot-gStart+1)*mmPerPx2/0.3528/1.4*10)/10}); }
-      }
+  for(const tb of tables){
+    for(const c of tb.cells){
+      cellLines.push({top:c.top,bottom:c.bottom,left:c.left/W,right:c.right/W,cell:{grid:tb.grid,row:c.row},pt:Math.round((c.bottom-c.top+1)*mmPerPx2/0.3528/1.4*10)/10});
     }
   }
-  // 汇总：非表格行带(整页宽) + 格内行带，按纵向排序
+  // 汇总：非表格行带(整行=一块) + 表内格子(一格=一块)，按纵向排序
   const textLines=[];
   freeBlocks.forEach(b=>{ textLines.push({top:b.top,bottom:b.bottom,left:0.02,right:0.98,pt:b.pt,cell:null}); });
   cellLines.forEach(c=>{ textLines.push({top:c.top,bottom:c.bottom,left:c.left,right:c.right,pt:c.pt,cell:c.cell}); });
@@ -3859,9 +3893,7 @@ async function openScanPreview(list){
       let cj=null; try{ cj=JSON.parse(b.cell||'{}'); }catch(e){}
       const inT = cj && cj.grid!=null;
       const area = inT ? ('表'+(cj.grid+1)) : '整页行';
-      const pg2=(r.pages&&r.pages[b.page_index])||null;
-      const cols = (inT && pg2 && pg2.grid && pg2.grid.cols) ? (pg2.grid.cols.length-1) : 0;
-      const cellNo = inT ? ((cj.row!=null&&cj.col!=null) ? (cj.row*cols+cj.col+1) : '') : '';
+      const cellNo = inT ? ((cj.row!=null) ? (cj.row+1) : '') : '';
       tbl.innerHTML+='<tr>'+
         '<td style="padding:4px;border:1px solid #e2e8f0;text-align:center">'+seq+'</td>'+
         '<td style="padding:4px;border:1px solid #e2e8f0;text-align:center">'+(b.page_index+1)+'</td>'+
