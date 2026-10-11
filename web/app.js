@@ -3204,40 +3204,44 @@ function floodTextRegion(data,W,H,isBg){
   // 微扩 2px 包容封闭白，避免裁剪表内格线
   return {T:Math.max(0,minY-2), B:Math.min(H-1,maxY+2), L:Math.max(0,minX-2), R:Math.min(W-1,maxX+2)};
 }
-// 定表区域(flood白贯通)：从文字区域顶部、底部各 flood 一次白色，
-// 白像素既连不到顶部也连不到底部 = 被表框线封闭 → 属表格内部；每块封闭白 = 一个格子(或合并格)。
+// 定表区域(受限左右探测flood)：从文字区域顶部、底部各 flood 一次白色，但白色横向位移累计不超过 maxW(≈页宽1/21,约1cm)。
+// 普通文字段横向绕过字块只需小位移 → 顶/底 flood 都能贯通(非表)；表格封闭需横向大位移(>maxW)才能绕过 → 表内白顶/底都不可达。
+// 表内不可达白聚类=格子，并查集横向/纵向相邻聚成表。
 // 返回 tables:[{top,bottom,left,right, grid, cells:[{top,bottom,left,right,grid,row}]}]
 function findTableRegions(data,W,H,isBg,region){
-  const floodFrom=(yRow)=>{
-    const seen=new Uint8Array(W*H); const st=new Int32Array(W*H); let sp=0;
-    const push=(i)=>{ if(!seen[i]&&isBg(i*4)){ seen[i]=1; st[sp++]=i; } };
-    for(let x=region.L;x<=region.R;x++) push(yRow*W+x);
-    while(sp>0){ const i=st[--sp]; const x=i%W,y=(i/W)|0;
-      if(x>region.L)push(i-1); if(x<region.R)push(i+1);
-      if(y>region.T)push(i-W); if(y<region.B)push(i+W);
+  const L=region.L,R=region.R,T=region.T,B=region.B;
+  const maxW=Math.max(4, Math.round(W/21));   // 左右探测距离 ≈ 页宽1/21(≈1cm)
+  const floodLimited=(yRow)=>{
+    const dist=new Int32Array(W*H).fill(2e9); const st=new Int32Array(W*H); let sp=0;
+    for(let x=L;x<=R;x++){ const i=yRow*W+x; if(isBg(i*4)){ dist[i]=0; st[sp++]=i; } }
+    while(sp>0){ const i=st[--sp]; const x=i%W,y=(i/W)|0,d=dist[i];
+      if(x>L){ const j=i-1; if(isBg(j*4)&&d+1<=maxW&&d+1<dist[j]){ dist[j]=d+1; st[sp++]=j; } }
+      if(x<R){ const j=i+1; if(isBg(j*4)&&d+1<=maxW&&d+1<dist[j]){ dist[j]=d+1; st[sp++]=j; } }
+      if(y>T){ const j=i-W; if(isBg(j*4)&&d<dist[j]){ dist[j]=d; st[sp++]=j; } }
+      if(y<B){ const j=i+W; if(isBg(j*4)&&d<dist[j]){ dist[j]=d; st[sp++]=j; } }
     }
-    return seen;
+    return dist;
   };
-  const topR=floodFrom(region.T), botR=floodFrom(region.B);
+  const topR=floodLimited(T), botR=floodLimited(B);
+  // 封闭白 = 白色且顶/底 flood 都不可达 → 表格内部
   const closed=new Uint8Array(W*H);
-  for(let y=region.T;y<=region.B;y++)for(let x=region.L;x<=region.R;x++){ const i=y*W+x; if(isBg(i*4)&&!topR[i]&&!botR[i]) closed[i]=1; }
+  for(let y=T;y<=B;y++)for(let x=L;x<=R;x++){ const i=y*W+x; if(isBg(i*4)&&topR[i]>=2e9&&botR[i]>=2e9) closed[i]=1; }
   // 聚类封闭白 → 连通块(格子)
   const cells=[]; const st=new Int32Array(W*H);
-  for(let y=region.T;y<=region.B;y++)for(let x=region.L;x<=region.R;x++){
-    const i=y*W+x; if(!closed[i]) continue;
-    let sp=0; closed[i]=0; st[sp++]=i;
+  for(let y=T;y<=B;y++)for(let x=L;x<=R;x++){
+    const i=y*W+x; if(!closed[i]) continue; closed[i]=0; let sp=0; st[sp++]=i;
     let minX=x,maxX=x,minY=y,maxY=y;
     while(sp>0){ const j=st[--sp]; const cx=j%W,cy=(j/W)|0;
       if(cx<minX)minX=cx; if(cx>maxX)maxX=cx; if(cy<minY)minY=cy; if(cy>maxY)maxY=cy;
-      if(cx>region.L&&closed[j-1]){closed[j-1]=0;st[sp++]=j-1;}
-      if(cx<region.R&&closed[j+1]){closed[j+1]=0;st[sp++]=j+1;}
-      if(cy>region.T&&closed[j-W]){closed[j-W]=0;st[sp++]=j-W;}
-      if(cy<region.B&&closed[j+W]){closed[j+W]=0;st[sp++]=j+W;}
+      if(cx>L&&closed[j-1]){ closed[j-1]=0; st[sp++]=j-1; }
+      if(cx<R&&closed[j+1]){ closed[j+1]=0; st[sp++]=j+1; }
+      if(cy>T&&closed[j-W]){ closed[j-W]=0; st[sp++]=j-W; }
+      if(cy<B&&closed[j+W]){ closed[j+W]=0; st[sp++]=j+W; }
     }
     if(maxX-minX>=3 && maxY-minY>=3) cells.push({top:minY,bottom:maxY,left:minX,right:maxX});
   }
-  // 格子聚类成表：横向相邻或纵向相邻(被一条黑线隔开，间距≤sep)的格子 → 同一张表（并查集连通分量）
-  const n=cells.length; const sep=Math.max(3, Math.round(W*0.002));   // 相邻格黑线间隔容差
+  // 并查集聚表：横向相邻或纵向相邻(被一条黑线隔开) → 同一张表
+  const n=cells.length; const sep=Math.max(3, Math.round(W*0.002));
   const parent=new Array(n); for(let i=0;i<n;i++) parent[i]=i;
   const find=(i)=>{ while(parent[i]!==i){ parent[i]=parent[parent[i]]; i=parent[i]; } return i; };
   for(let i=0;i<n;i++) for(let j=i+1;j<n;j++){
@@ -3439,6 +3443,7 @@ async function analyzePage(pdf, pageIdx, scale=2){
     hlines: hlines.map(h=>({top:Math.round(h.top/H*10000)/10000, bottom:Math.round((h.bottom+1)/H*10000)/10000, segs:(h.segs||[]).map(s=>({x0:Math.round(s.l/W*10000)/10000, x1:Math.round(s.r/W*10000)/10000}))})),
     vlines: vlines2.map(v=>({x:Math.round(v.x/W*10000)/10000, top:Math.round(v.top/H*10000)/10000, bottom:Math.round((v.bottom+1)/H*10000)/10000})),
     grid,
+    tables: tables.map(t=>({top:Math.round(t.top/H*10000)/10000, bottom:Math.round((t.bottom+1)/H*10000)/10000, left:Math.round(t.left/W*10000)/10000, right:Math.round(t.right/W*10000)/10000})),
     region: { T:Math.round(region.T/H*10000)/10000, B:Math.round(region.B/H*10000)/10000, L:Math.round(region.L/W*10000)/10000, R:Math.round(region.R/W*10000)/10000 },
     pageRight: maxRightPx>0 ? Math.round(maxRightPx/W*10000)/10000 : null
   };
@@ -3687,7 +3692,7 @@ async function locateReportTitlesScanDB(path, tpl, reportKey){
         const ana=pageStruct[p]||{};
         const hlines=(ana.hlines||[]).flatMap(h=>(h.segs||[]).map(s=>({y:h.top, x0:s.x0, x1:s.x1})));
         const vlines=(ana.vlines||[]).map(v=>({x:v.x, y0:v.top, y1:v.bottom}));
-        pgOut.push({hlines, vlines, grid:(ana&&ana.grid)||null, region:(ana&&ana.region)||null});
+        pgOut.push({hlines, vlines, grid:(ana&&ana.grid)||null, region:(ana&&ana.region)||null, tables:(ana&&ana.tables)||[]});
         const cells=[];
         if(ana.grid && ana.grid.rows && ana.grid.rows.length>=2 && ana.grid.cols && ana.grid.cols.length>=2){
           const gR=ana.grid.rows, gC=ana.grid.cols;
@@ -3933,6 +3938,14 @@ async function openScanPreview(list){
         rf.title='文字区域 L'+(rg.L*100).toFixed(1)+'%~R'+(rg.R*100).toFixed(1)+'%, T'+(rg.T*100).toFixed(1)+'%~B'+(rg.B*100).toFixed(1)+'%';
         img.parentNode.appendChild(rf);
       }
+      // 表格区域框(绿色实线)：受限左右探测定出的每块表
+      (pg.tables||[]).forEach((tb,i)=>{
+        const tf=document.createElement('div');
+        tf.style.cssText='position:absolute;left:'+(tb.left*100).toFixed(2)+'%;top:'+(tb.top*100).toFixed(2)+'%;width:'+Math.max(0.5,((tb.right-tb.left)*100)).toFixed(2)+'%;height:'+Math.max(0.5,((tb.bottom-tb.top)*100)).toFixed(2)+'%;border:2px solid #22c55e;box-sizing:border-box;pointer-events:none;z-index:1;';
+        tf.innerHTML='<span style="position:absolute;top:-14px;left:0;background:#22c55e;color:#fff;font-size:10px;padding:0 4px;border-radius:3px">表'+(i+1)+'</span>';
+        tf.title='表'+(i+1)+' T'+(tb.top*100).toFixed(1)+'%~B'+(tb.bottom*100).toFixed(1)+'%';
+        img.parentNode.appendChild(tf);
+      });
       const pts=[]; const key=(x,y)=>Math.round(x*2000)+','+Math.round(y*2000); const seen={};
       const add=(x,y)=>{ const k=key(x,y); if(seen[k]) return; seen[k]=1; pts.push([x,y]); };
       (pg.hlines||[]).forEach(h=>{ add(h.x0,h.y); add(h.x1,h.y); });
