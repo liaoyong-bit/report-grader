@@ -3188,6 +3188,25 @@ function mergeSegs(arr){
   const a=(arr||[]).slice().sort((p,q)=>p.l-q.l);
   const out=[]; for(const s of a){ const last=out[out.length-1]; if(last && s.l<=last.r+1){ last.r=Math.max(last.r,s.r); } else out.push({l:s.l,r:s.r}); } return out;
 }
+// 水平形态学闭运算(1×k)：连接横线断点、补细线断缝，使边界特征更连续（仅作用于疑似横线的长黑段附近，不影响文字/OCR送图）
+// 只用于"定位/表格判定"的像素分析层；送 OCR 始终从原图渲染，故此处改写 data 不影响识别
+function enhanceHLine(data, W, H, isBg, k=3, minLen){
+  for(let y=0;y<H;y++){
+    const off=y*W;
+    const segs=[]; let s=-1;
+    for(let x=0;x<W;x++){ if(!isBg((off+x)*4)){ if(s<0)s=x; } else if(s>=0){ segs.push([s,x-1]); s=-1; } }
+    if(s>=0) segs.push([s,W-1]);
+    for(let i=1;i<segs.length;i++){
+      const prev=segs[i-1], cur=segs[i];
+      const prevLong=(prev[1]-prev[0])>=minLen, curLong=(cur[1]-cur[0])>=minLen;
+      const gap=cur[0]-prev[1]-1;
+      if((prevLong||curLong) && gap>0 && gap<=k){
+        for(let x=prev[1]+1; x<cur[0]; x++){ const ii=(off+x)*4; data[ii]=data[ii+1]=data[ii+2]=0; }
+        prev[1]=cur[1];
+      }
+    }
+  }
+}
 // 渲染页面上一个比例区域（左/上/宽/高均为0-1比例），返回该区域b64 —— 供逐段聚焦OCR
 async function renderAreaB64(pdf, pageIdx, leftPct, topPct, wPct, hPct, scale){
   const page=await pdf.getPage(pageIdx+1);
@@ -3238,6 +3257,8 @@ async function analyzePage(pdf, pageIdx, scale=2){
   const data=canvas.getContext('2d').getImageData(0,0,W,H).data;
   try{ washShading(data, W, H); }catch(e){}   // 浅灰底纹置白，避免底纹污染行统计/表格判定
   const isBg=(i)=>{ const r=data[i],g=data[i+1],b=data[i+2]; return r>242&&g>242&&b>242; };
+  try{ enhanceHLine(data, W, H, isBg, 3, Math.max(12, Math.round(W*0.15))); }catch(e){}   // 水平闭运算：连接横线断点，防纯黑白二值化吞掉浅/细横线
+  try{ enhanceHLine(data, W, H, isBg, 3, Math.max(12, Math.round(W*0.15))); }catch(e){}   // 水平闭运算：连接横线断点，防纯黑白二值化吞掉浅/细横线
   // 逐像素行：统计非背景占比 + 最大连续黑段（判断表格横线）
   const rowType=new Array(H).fill('blank');
   const rowSegs=new Array(H);   // 每横线行记录所有黑段 [{l,r}]（合并单元格使横线可能多段）
@@ -3255,7 +3276,7 @@ async function analyzePage(pdf, pageIdx, scale=2){
     if(seg>0){ if(segStart<segLeft) segLeft=segStart; if(seg>=segMin) segs.push({l:segStart,r:W-1}); }
     const ratio=cnt/W;
     // 表格横线：黑像素聚成一个覆盖中间的大连续段(段长>行宽一半)，且段左右都有空白
-    if(maxSeg> W*0.5 && segLeft> W*0.04 && segRight< W*0.96 && ratio>0.3){
+    if(maxSeg> W*0.4 && segLeft> W*0.02 && segRight< W*0.98 && ratio>0.2){
       rowType[y]='hline'; rowSegs[y]=mergeSegs(segs);   // 记录该横线行所有黑段
     } else if(ratio>0.0012 && maxSeg < W*0.5){   // 文字行（黑白交替，含粗体大标题；用最大连续段<行宽一半防填充块）
       rowType[y]='text';
