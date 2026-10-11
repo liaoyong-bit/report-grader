@@ -3204,59 +3204,72 @@ function floodTextRegion(data,W,H,isBg){
   // 微扩 2px 包容封闭白，避免裁剪表内格线
   return {T:Math.max(0,minY-2), B:Math.min(H-1,maxY+2), L:Math.max(0,minX-2), R:Math.min(W-1,maxX+2)};
 }
-// 定表区域(受限左右探测flood)：从文字区域顶部、底部各 flood 一次白色，但白色横向位移累计不超过 maxW(≈页宽1/21,约1cm)。
-// 普通文字段横向绕过字块只需小位移 → 顶/底 flood 都能贯通(非表)；表格封闭需横向大位移(>maxW)才能绕过 → 表内白顶/底都不可达。
-// 表内不可达白聚类=格子，并查集横向/纵向相邻聚成表。
+// 定表区域(黑色flood连框线)：文字区域内找"整行绝大多数黑"的贯通行=横线，
+// 以每根横线的黑色像素为种子做黑色4-连通flood，沿真实边框线把相连的横线+竖线勾成黑色连通块；
+// 每个黑连通块的外接矩形 = 一张表的区域；表内被黑线分割出的白色连通块 = 格子(或合并格)。
+// 纯文字段落无整行横线，不会成为种子 → 不会被误判成表。
 // 返回 tables:[{top,bottom,left,right, grid, cells:[{top,bottom,left,right,grid,row}]}]
 function findTableRegions(data,W,H,isBg,region){
   const L=region.L,R=region.R,T=region.T,B=region.B;
-  const maxW=Math.max(4, Math.round(W/21));   // 左右探测距离 ≈ 页宽1/21(≈1cm)
-  const floodLimited=(yRow)=>{
-    const dist=new Int32Array(W*H).fill(2e9); const st=new Int32Array(W*H); let sp=0;
-    for(let x=L;x<=R;x++){ const i=yRow*W+x; if(isBg(i*4)){ dist[i]=0; st[sp++]=i; } }
-    while(sp>0){ const i=st[--sp]; const x=i%W,y=(i/W)|0,d=dist[i];
-      if(x>L){ const j=i-1; if(isBg(j*4)&&d+1<=maxW&&d+1<dist[j]){ dist[j]=d+1; st[sp++]=j; } }
-      if(x<R){ const j=i+1; if(isBg(j*4)&&d+1<=maxW&&d+1<dist[j]){ dist[j]=d+1; st[sp++]=j; } }
-      if(y>T){ const j=i-W; if(isBg(j*4)&&d<dist[j]){ dist[j]=d; st[sp++]=j; } }
-      if(y<B){ const j=i+W; if(isBg(j*4)&&d<dist[j]){ dist[j]=d; st[sp++]=j; } }
-    }
-    return dist;
-  };
-  const topR=floodLimited(T), botR=floodLimited(B);
-  // 封闭白 = 白色且顶/底 flood 都不可达 → 表格内部
-  const closed=new Uint8Array(W*H);
-  for(let y=T;y<=B;y++)for(let x=L;x<=R;x++){ const i=y*W+x; if(isBg(i*4)&&topR[i]>=2e9&&botR[i]>=2e9) closed[i]=1; }
-  // 聚类封闭白 → 连通块(格子)
-  const cells=[]; const st=new Int32Array(W*H);
-  for(let y=T;y<=B;y++)for(let x=L;x<=R;x++){
-    const i=y*W+x; if(!closed[i]) continue; closed[i]=0; let sp=0; st[sp++]=i;
-    let minX=x,maxX=x,minY=y,maxY=y;
-    while(sp>0){ const j=st[--sp]; const cx=j%W,cy=(j/W)|0;
-      if(cx<minX)minX=cx; if(cx>maxX)maxX=cx; if(cy<minY)minY=cy; if(cy>maxY)maxY=cy;
-      if(cx>L&&closed[j-1]){ closed[j-1]=0; st[sp++]=j-1; }
-      if(cx<R&&closed[j+1]){ closed[j+1]=0; st[sp++]=j+1; }
-      if(cy>T&&closed[j-W]){ closed[j-W]=0; st[sp++]=j-W; }
-      if(cy<B&&closed[j+W]){ closed[j+W]=0; st[sp++]=j+W; }
-    }
-    if(maxX-minX>=3 && maxY-minY>=3) cells.push({top:minY,bottom:maxY,left:minX,right:maxX});
+  const isBlack=(i)=>{ const r=data[i],g=data[i+1],b=data[i+2]; return r<60&&g<60&&b<60; };
+  // 1. 找横线行：整行黑比例≥0.9 且最大连续黑段≥文字区宽0.9
+  const hlineRows=[];
+  for(let y=T;y<=B;y++){
+    let cnt=0,maxSeg=0,seg=0;
+    for(let x=L;x<=R;x++){ if(isBlack((y*W+x)*4)){ cnt++; seg++; if(seg>maxSeg)maxSeg=seg; } else seg=0; }
+    if(cnt/(R-L+1)>=0.9 && maxSeg>=(R-L)*0.9) hlineRows.push(y);
   }
-  // 并查集聚表：横向相邻或纵向相邻(被一条黑线隔开) → 同一张表
-  const n=cells.length; const sep=Math.max(3, Math.round(W*0.002));
-  const parent=new Array(n); for(let i=0;i<n;i++) parent[i]=i;
-  const find=(i)=>{ while(parent[i]!==i){ parent[i]=parent[parent[i]]; i=parent[i]; } return i; };
-  for(let i=0;i<n;i++) for(let j=i+1;j<n;j++){
-    const a=cells[i], b=cells[j];
-    const xAdj=(Math.abs(a.left-b.right)<=sep||Math.abs(b.left-a.right)<=sep) && (Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top)>=-sep);
-    const yAdj=(Math.abs(a.top-b.bottom)<=sep||Math.abs(b.top-a.bottom)<=sep) && (Math.min(a.right,b.right)-Math.max(a.left,b.left)>=-sep);
-    if(xAdj||yAdj){ const ri=find(i), rj=find(j); if(ri!==rj) parent[ri]=rj; }
+  // 2. 黑色4-连通flood：从每根横线的黑像素种子，勾出相连黑框线网络
+  const seen=new Uint8Array(W*H); const st=new Int32Array(W*H); const boxes=[];
+  for(const y of hlineRows){
+    for(let x=L;x<=R;x++){
+      const i=y*W+x; if(seen[i]||!isBlack(i*4)) continue;
+      seen[i]=1; let sp=0; st[sp++]=i;
+      let minX=x,maxX=x,minY=y,maxY=y;
+      while(sp>0){ const j=st[--sp]; const cx=j%W,cy=(j/W)|0;
+        if(cx<minX)minX=cx; if(cx>maxX)maxX=cx; if(cy<minY)minY=cy; if(cy>maxY)maxY=cy;
+        if(cx>L&&!seen[j-1]&&isBlack((j-1)*4)){ seen[j-1]=1; st[sp++]=j-1; }
+        if(cx<R&&!seen[j+1]&&isBlack((j+1)*4)){ seen[j+1]=1; st[sp++]=j+1; }
+        if(cy>T&&!seen[j-W]&&isBlack((j-W)*4)){ seen[j-W]=1; st[sp++]=j-W; }
+        if(cy<B&&!seen[j+W]&&isBlack((j+W)*4)){ seen[j+W]=1; st[sp++]=j+W; }
+      }
+      boxes.push({top:minY,bottom:maxY,left:minX,right:maxX});
+    }
   }
-  const groups={}; cells.forEach((c,i)=>{ const r=find(i); (groups[r]=groups[r]||[]).push(c); });
-  const tables=Object.values(groups).map((grp)=>{ grp.sort((a,b)=>a.top-b.top||a.left-b.left); return grp; });
-  return tables.map((grp,gi)=>{
+  // 合并横向重叠的横线块：同一张表内多根横线若无竖线相连(如三线表)会被 flood 成多个黑块，
+  // 按"横向重叠大 + 纵向同页相邻"并成一张表
+  const nb=boxes.length; const parent=new Array(nb); for(let i=0;i<nb;i++) parent[i]=i;
+  const findB=(i)=>{ while(parent[i]!==i){ parent[i]=parent[parent[i]]; i=parent[i]; } return i; };
+  for(let i=0;i<nb;i++) for(let j=i+1;j<nb;j++){
+    const a=boxes[i], b=boxes[j];
+    const minW=Math.min(a.right-a.left, b.right-b.left);
+    const ovX=Math.min(a.right,b.right)-Math.max(a.left,b.left);
+    const gapY=Math.max(a.top,b.top)-Math.min(a.bottom,b.bottom);
+    if(ovX>=0.5*minW && gapY>=0 && gapY<=(B-T)*0.5){ const ri=findB(i),rj=findB(j); if(ri!==rj) parent[ri]=rj; }
+  }
+  const bgroups={}; boxes.forEach((bx,i)=>{ const r=findB(i); (bgroups[r]=bgroups[r]||[]).push(bx); });
+  const tables=Object.values(bgroups).map((grp)=>{
     let top=1e9,bottom=-1,left=1e9,right=-1;
-    grp.forEach(c=>{ if(c.top<top)top=c.top; if(c.bottom>bottom)bottom=c.bottom; if(c.left<left)left=c.left; if(c.right>right)right=c.right; });
-    grp.sort((a,b)=>a.top-b.top||a.left-b.left);
-    return {top,bottom,left,right, grid:gi, cells:grp.map((c,ci)=>({top:c.top,bottom:c.bottom,left:c.left,right:c.right,grid:gi,row:ci}))};
+    grp.forEach(b=>{ if(b.top<top)top=b.top; if(b.bottom>bottom)bottom=b.bottom; if(b.left<left)left=b.left; if(b.right>right)right=b.right; });
+    return {top,bottom,left,right};
+  });
+  // 每表内白区聚类=格子
+  return tables.map((tb,gi)=>{
+    const cells=[]; const cseen=new Uint8Array(W*H);
+    for(let y=tb.top;y<=tb.bottom;y++)for(let x=tb.left;x<=tb.right;x++){
+      const i=y*W+x; if(cseen[i]||!isBg(i*4)) continue; cseen[i]=1; let sp=0; st[sp++]=i;
+      let minX=x,maxX=x,minY=y,maxY=y;
+      while(sp>0){ const j=st[--sp]; const cx=j%W,cy=(j/W)|0;
+        if(cx<minX)minX=cx; if(cx>maxX)maxX=cx; if(cy<minY)minY=cy; if(cy>maxY)maxY=cy;
+        if(cx>tb.left&&!cseen[j-1]&&isBg((j-1)*4)){ cseen[j-1]=1; st[sp++]=j-1; }
+        if(cx<tb.right&&!cseen[j+1]&&isBg((j+1)*4)){ cseen[j+1]=1; st[sp++]=j+1; }
+        if(cy>tb.top&&!cseen[j-W]&&isBg((j-W)*4)){ cseen[j-W]=1; st[sp++]=j-W; }
+        if(cy<tb.bottom&&!cseen[j+W]&&isBg((j+W)*4)){ cseen[j+W]=1; st[sp++]=j+W; }
+      }
+      if(maxX-minX>=3 && maxY-minY>=3) cells.push({top:minY,bottom:maxY,left:minX,right:maxX});
+    }
+    cells.sort((a,b)=>a.top-b.top||a.left-b.left);
+    return {top:tb.top,bottom:tb.bottom,left:tb.left,right:tb.right,grid:gi,cells:cells.map((c,ci)=>({top:c.top,bottom:c.bottom,left:c.left,right:c.right,grid:gi,row:ci}))};
   });
 }
 
