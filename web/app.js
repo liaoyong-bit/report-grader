@@ -3188,7 +3188,23 @@ function mergeSegs(arr){
   const a=(arr||[]).slice().sort((p,q)=>p.l-q.l);
   const out=[]; for(const s of a){ const last=out[out.length-1]; if(last && s.l<=last.r+1){ last.r=Math.max(last.r,s.r); } else out.push({l:s.l,r:s.r}); } return out;
 }
-// 水平形态学闭运算(1×k)：连接横线断点、补细线断缝，使边界特征更连续（仅作用于疑似横线的长黑段附近，不影响文字/OCR送图）
+// 文字区域定位：从页面四周边界 flood fill 白色(4连通)，白色能穿到的是页边/正文间隙，
+// 穿不到的"内容区"(黑像素 bbox)即文字区域。返回 {T,B,L,R}，同时隐式得到页边距
+function floodTextRegion(data,W,H,isBg){
+  const seen=new Uint8Array(W*H); const st=new Int32Array(W*H); let sp=0;
+  const push=(i)=>{ if(!seen[i]&&isBg(i*4)){ seen[i]=1; st[sp++]=i; } };
+  for(let x=0;x<W;x++){ push(x); push((H-1)*W+x); }
+  for(let y=0;y<H;y++){ push(y*W); push(y*W+W-1); }
+  while(sp>0){ const i=st[--sp]; const x=i%W,y=(i/W)|0;
+    if(x>0)push(i-1); if(x<W-1)push(i+1); if(y>0)push(i-W); if(y<H-1)push(i+W);
+  }
+  let minX=W,minY=H,maxX=-1,maxY=-1;
+  for(let y=0;y<H;y++){ for(let x=0;x<W;x++){ const i=y*W+x; if(!seen[i]&&!isBg(i*4)){ if(x<minX)minX=x; if(x>maxX)maxX=x; if(y<minY)minY=y; if(y>maxY)maxY=y; } } }
+  if(maxX<0) return {T:0,B:H-1,L:0,R:W-1};   // 全白页
+  // 微扩 2px 包容封闭白，避免裁剪表内格线
+  return {T:Math.max(0,minY-2), B:Math.min(H-1,maxY+2), L:Math.max(0,minX-2), R:Math.min(W-1,maxX+2)};
+}
+
 // 只用于"定位/表格判定"的像素分析层；送 OCR 始终从原图渲染，故此处改写 data 不影响识别
 function enhanceHLine(data, W, H, isBg, k=3, minLen){
   for(let y=0;y<H;y++){
@@ -3258,7 +3274,7 @@ async function analyzePage(pdf, pageIdx, scale=2){
   try{ washShading(data, W, H); }catch(e){}   // 浅灰底纹置白，避免底纹污染行统计/表格判定
   const isBg=(i)=>{ const r=data[i],g=data[i+1],b=data[i+2]; return r>242&&g>242&&b>242; };
   try{ enhanceHLine(data, W, H, isBg, 3, Math.max(12, Math.round(W*0.15))); }catch(e){}   // 水平闭运算：连接横线断点，防纯黑白二值化吞掉浅/细横线
-  try{ enhanceHLine(data, W, H, isBg, 3, Math.max(12, Math.round(W*0.15))); }catch(e){}   // 水平闭运算：连接横线断点，防纯黑白二值化吞掉浅/细横线
+  const region=floodTextRegion(data,W,H,isBg);   // 文字区域(去页边)：横线/表格都在此区域内
   // 逐像素行：统计非背景占比 + 最大连续黑段（判断表格横线）
   const rowType=new Array(H).fill('blank');
   const rowSegs=new Array(H);   // 每横线行记录所有黑段 [{l,r}]（合并单元格使横线可能多段）
@@ -3276,7 +3292,7 @@ async function analyzePage(pdf, pageIdx, scale=2){
     if(seg>0){ if(segStart<segLeft) segLeft=segStart; if(seg>=segMin) segs.push({l:segStart,r:W-1}); }
     const ratio=cnt/W;
     // 表格横线：黑像素聚成一个覆盖中间的大连续段(段长>行宽一半)，且段左右都有空白
-    if(maxSeg> W*0.4 && segLeft> W*0.02 && segRight< W*0.98 && ratio>0.2){
+    if(maxSeg> (region.R-region.L)*0.6 && segRight>=region.L && segLeft<=region.R && ratio>0.2){
       rowType[y]='hline'; rowSegs[y]=mergeSegs(segs);   // 记录该横线行所有黑段
     } else if(ratio>0.0012 && maxSeg < W*0.5){   // 文字行（黑白交替，含粗体大标题；用最大连续段<行宽一半防填充块）
       rowType[y]='text';
@@ -3389,6 +3405,7 @@ async function analyzePage(pdf, pageIdx, scale=2){
     hlines: hlines.map(h=>({top:Math.round(h.top/H*10000)/10000, bottom:Math.round((h.bottom+1)/H*10000)/10000, segs:(h.segs||[]).map(s=>({x0:Math.round(s.l/W*10000)/10000, x1:Math.round(s.r/W*10000)/10000}))})),
     vlines: vlines2.map(v=>({x:Math.round(v.x/W*10000)/10000, top:Math.round(v.top/H*10000)/10000, bottom:Math.round((v.bottom+1)/H*10000)/10000})),
     grid,
+    region: { T:Math.round(region.T/H*10000)/10000, B:Math.round(region.B/H*10000)/10000, L:Math.round(region.L/W*10000)/10000, R:Math.round(region.R/W*10000)/10000 },
     pageRight: maxRightPx>0 ? Math.round(maxRightPx/W*10000)/10000 : null
   };
 }
@@ -3636,7 +3653,7 @@ async function locateReportTitlesScanDB(path, tpl, reportKey){
         const ana=pageStruct[p]||{};
         const hlines=(ana.hlines||[]).flatMap(h=>(h.segs||[]).map(s=>({y:h.top, x0:s.x0, x1:s.x1})));
         const vlines=(ana.vlines||[]).map(v=>({x:v.x, y0:v.top, y1:v.bottom}));
-        pgOut.push({hlines, vlines, grid:(ana&&ana.grid)||null});
+        pgOut.push({hlines, vlines, grid:(ana&&ana.grid)||null, region:(ana&&ana.region)||null});
         const cells=[];
         if(ana.grid && ana.grid.rows && ana.grid.rows.length>=2 && ana.grid.cols && ana.grid.cols.length>=2){
           const gR=ana.grid.rows, gC=ana.grid.cols;
@@ -3876,6 +3893,14 @@ async function openScanPreview(list){
     // 角点叠加：横线段端点 + 竖线段端点 + 横竖线交点，直观验证识别到的点位
     const pg=(r.pages&&r.pages[state.page])||null;
     if(pg){
+      // 文字区域框(青色)：floodTextRegion 去掉页边后得到的内容区，横线/表格都在此区域内
+      const rg=pg.region;
+      if(rg && rg.R>rg.L && rg.B>rg.T){
+        const rf=document.createElement('div');
+        rf.style.cssText='position:absolute;left:'+(rg.L*100).toFixed(2)+'%;top:'+(rg.T*100).toFixed(2)+'%;width:'+Math.max(0.5,((rg.R-rg.L)*100)).toFixed(2)+'%;height:'+Math.max(0.5,((rg.B-rg.T)*100)).toFixed(2)+'%;border:1.5px dashed #0891b2;box-sizing:border-box;pointer-events:none;z-index:1;';
+        rf.title='文字区域 L'+(rg.L*100).toFixed(1)+'%~R'+(rg.R*100).toFixed(1)+'%, T'+(rg.T*100).toFixed(1)+'%~B'+(rg.B*100).toFixed(1)+'%';
+        img.parentNode.appendChild(rf);
+      }
       const pts=[]; const key=(x,y)=>Math.round(x*2000)+','+Math.round(y*2000); const seen={};
       const add=(x,y)=>{ const k=key(x,y); if(seen[k]) return; seen[k]=1; pts.push([x,y]); };
       (pg.hlines||[]).forEach(h=>{ add(h.x0,h.y); add(h.x1,h.y); });
