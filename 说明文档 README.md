@@ -190,6 +190,24 @@
 
 ---
 
+## 批阅状态存储修正（v0.1.113）
+
+**问题**：用户删除报告文件夹内软件生成的 `data/` 后重跑，未批改的报告却带着旧分数 ——
+批阅状态除了写文件夹数据库，还同步写了一份到 **WebView2 localStorage**（系统目录
+`%LOCALAPPDATA%\com.reportgrader.desktop\` 下，不在报告文件夹），且读取时 localStorage
+优先级更高，删文件夹数据后状态被系统缓存"复活"。
+
+**修正**（`grading.db` 本就在 `文件夹/data/`，无需迁移位置）：
+- Tauri 模式**禁用 localStorage 存取批阅状态**（`loadState` 直接返回空、`saveState` 只写库）；
+- `loadReportsFromScope` 装载列表后，从 `reports.draft`（saveState 写入的完整快照：
+  scores/activated/maxs/basic/done/submittedAt）按原始文件名批量恢复状态；
+- `initReportState` 不再让空状态覆盖库里的提交标记（`done`）；
+- localStorage 仅纯浏览器模式兜底使用；`teacher`/快捷键等应用级偏好仍存 localStorage（与文件夹无关）。
+
+**语义**：删掉报告文件夹里的 `data/` = 批阅状态彻底清空（分数、定位、提交状态全部随文件夹走）。
+
+---
+
 ## 导出面板（v0.1.112 重做）
 
 | 项目 | 行为 |

@@ -95,9 +95,11 @@ const el = {
 };
 
 /* ==================== 批阅进度持久化（P0-1） ====================
- * 过渡方案：浏览器 localStorage（关闭不丢）。
- * 后端数据库就绪后，在 tauri-bridge.js 里定义 window.__backendPersist，
- * saveState 会优先调用它写库，localStorage 作为纯浏览器/离线兜底。
+ * Tauri 模式：只存报告文件夹数据库 data/grading.db（reports.draft 存完整快照），
+ *   恢复统一由 loadReportsFromScope 从库读取 —— 禁用 localStorage！
+ *   此前 localStorage（WebView2 系统目录 AppData）也存了批阅状态，用户删掉文件夹里的
+ *   data/ 后分数仍然出现（状态被系统缓存复活）。改后：删文件夹=彻底清空。
+ * 纯浏览器模式：localStorage 兜底（关闭不丢）。
  */
 const STORE_PREFIX = 'gb_';
 function stateKey(r){ return STORE_PREFIX + encodeURIComponent(r.name); }
@@ -108,20 +110,37 @@ function snapshot(r){
   };
 }
 function saveState(r){
-  if(window.__backendPersist){ try{ window.__backendPersist(r, snapshot(r)); }catch(e){ /* 后端不可用时回退本地 */ } }
+  if(window.__backendPersist){ try{ window.__backendPersist(r, snapshot(r)); }catch(e){} return; }
   try{ localStorage.setItem(stateKey(r), JSON.stringify(snapshot(r))); }catch(e){ /* 存储满/禁用时忽略 */ }
 }
 function loadState(r){
+  if(window.__backendPersist) return null;   // Tauri：禁用 localStorage，状态只认文件夹数据库
   try{ const raw = localStorage.getItem(stateKey(r)); return raw ? JSON.parse(raw) : null; }catch(e){ return null; }
 }
 function initReportState(r){
+  const hadDone = !!r.done;   // 库里的提交状态优先保留，不能被空状态覆盖
   const s = loadState(r);
   r.scores    = (s && Array.isArray(s.scores))    ? s.scores    : [0,0,0,0,0];
   r.activated = (s && Array.isArray(s.activated)) ? s.activated : [false,false,false,false,false];
   r.maxs      = (s && Array.isArray(s.maxs))      ? s.maxs      : null;
   r.basic     = (s && s.basic)                    ? s.basic     : null;
-  r.done      = !!(s && s.done);
+  r.done      = s ? !!s.done : hadDone;
   r.submittedAt = (s && s.submittedAt) || null;
+}
+// 从报告文件夹数据库恢复一份报告的批阅状态（draft = saveState 写入的完整快照）
+function applyDraftSnapshot(r, g){
+  if(!g || !g.draft) return false;
+  try{
+    const s = typeof g.draft==='string' ? JSON.parse(g.draft) : g.draft;
+    if(Array.isArray(s.scores) && s.scores.length) r.scores = s.scores;
+    if(Array.isArray(s.activated) && s.activated.length) r.activated = s.activated;
+    if(s.maxs && s.maxs.length) r.maxs = s.maxs;
+    if(s.basic) r.basic = s.basic;
+    if(s.teacher) r.teacher = s.teacher;
+    r.done = !!s.done || !!r.done;
+    r.submittedAt = s.submittedAt || null;
+    return true;
+  }catch(e){ return false; }
 }
 
 /* ==================== 登录 / 创建账号 ==================== */
@@ -961,6 +980,14 @@ async function loadReportsFromScope(){
     if(!r.basic){ r.basic = { name:row.stu_name||'', id:row.stu_no||'', cls:row.stu_cls||'', exp:row.report_name||'' }; }
     return r;
   });
+  // —— 批阅状态从报告文件夹数据库恢复（data/grading.db 的 reports.draft，按原始文件名匹配）——
+  // 此前状态被 WebView2 localStorage（系统 AppData）复活：删了文件夹 data/ 分数仍在。现只认文件夹库。
+  try{
+    const gs = await fetchAllGrades();
+    const gByKey = {};
+    (gs||[]).forEach(g=>{ if(g && g.fname) gByKey[g.fname] = g; });
+    S.reports.forEach(r=>{ applyDraftSnapshot(r, gByKey[r.key]); });
+  }catch(e){}
   renderReportList();
 }
 /* ==================== 批改面板新增功能 ==================== */
