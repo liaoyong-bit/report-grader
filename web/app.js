@@ -3491,7 +3491,7 @@ async function analyzePage(pdf, pageIdx, scale=2){
 }
 */
 
-/* ==================== 文字分块 detectTextBlocks（像素特征版 v2，v0.1.110） ====================
+/* ==================== 文字分块 detectTextBlocks（像素特征版 v2，v0.1.111） ====================
    目标：把扫描页里"挤在一起的汉字"按字符尺度像素特征提取成块 —— 同一处文字一块，
    格与格 / 段与段分开，每块单独送 OCR。只挖像素特征，不重建表格结构（横线/竖线/网格一概不重建）。
    四步：
@@ -3526,34 +3526,61 @@ function detectTextBlocks(data, W, H, region, opt){
     }
   }
 
-  // ② 行墨迹投影 → 文字行带 → 字高取中位数
+  // ② 行墨迹投影 → 文字行带 → 字高稳健估计
+  //    表格框线此刻还在掩码里，会把整表粘成巨型行带；小噪点又会造成 8~9px 小带。
+  //    所以先取全体行带高的粗中位数 m0，再只用 [0.4×m0, 2×m0] 区间内的带精估中位数。
   const rowInk=new Int32Array(H);
   for(let y=T;y<=B;y++){ let c=0; const off=y*W; for(let x=L;x<=R;x++) if(mask[off+x]) c++; rowInk[y]=c; }
-  const hs=[];
+  const bandsAll=[];
   { let s=-1;
     for(let y=T;y<=B+1;y++){
       const has=(y<=B)&&rowInk[y]>=2;
       if(has){ if(s<0) s=y; }
-      else if(s>=0){ const h=y-s; if(h>=5) hs.push(h); s=-1; }
+      else if(s>=0){ if(y-s>=5) bandsAll.push(y-s); s=-1; }
     } }
-  hs.sort((a,b)=>a-b);
-  let charH=hs.length?hs[hs.length>>1]:0;
+  const hsAll=[...bandsAll].sort((a,b)=>a-b);
+  const m0=hsAll.length?hsAll[hsAll.length>>1]:0;
+  const hs=bandsAll.filter(h=>h>=Math.max(6,Math.round(m0*0.4)) && h<=Math.round(m0*2)).sort((a,b)=>a-b);
+  let charH=hs.length?hs[hs.length>>1]:(m0||0);
   if(!charH) charH=Math.max(7,Math.round(chh*0.016));
   const charW=charH;
-  const rDil=Math.max(2,Math.round(charW*rRatio));
+  const rDilH=Math.max(2,Math.round(charW*0.55));   // 横向粘合半径：模板正文/标题普遍加大字距(字隙可达0.4~0.5字宽)，须粘住；表格格间靠 barrier 防粘
+  const rDilV=Math.max(1,Math.round(charH*0.25));   // 纵向只做小幅粘合；行与行是否同段交给 ⑦ 的行带级归并判（避免标题与正文被膨胀粘连）
 
-  // ③ 去长直线（横向：run ≥ 3 字宽；纵向：run ≥ 1.6 字高；两者都要求正交厚度 ≤5px）→ 登记 barrier
+  // ③ 去长直线（登记 barrier）：
+  //    横向候选：连续墨迹 run ≥ 3 字宽；纵向候选：run ≥ 1.6 字高。
+  //    判"真直线"：run 内每一行/列的连续墨迹跨度都 ≤ THIN(0.35×字高)。
+  //    —— 这样上下两行文字的同列竖笔画（行内必有横向宽笔画，跨度大）、大号标题的竖笔画
+  //       都不会被误删；而表格框线整条都是细的，会被删掉并登记为 barrier。
+  //    注：横向先删，纵向 run 在十字交叉处已断开，交叉不会干扰跨度检测。
   const bar=new Uint8Array(W*H);
   const minH=Math.max(16, Math.round(((opt&&opt.minLineW)||3)*charW));
   const minV=Math.max(12, Math.round(((opt&&opt.minLineH)||1.6)*charH));
-  const thinV=(x,y)=>{ let t=0; for(let k=Math.max(T,y-3);k<=Math.min(B,y+3);k++) if(mask[k*W+x]) t++; return t<=5; };
-  const thinH=(x,y)=>{ let t=0; for(let k=Math.max(L,x-3);k<=Math.min(R,x+3);k++) if(mask[y*W+k]) t++; return t<=5; };
+  const THIN=Math.max(5, Math.round(charH*0.35));
   for(let y=T;y<=B;y++){
     const off=y*W; let s=-1;
     for(let x=L;x<=R+1;x++){
       const ink=(x<=R)&&mask[off+x];
       if(ink){ if(s<0) s=x; }
-      else if(s>=0){ if(x-s>=minH){ for(let k=s;k<x;k++){ if(thinV(k,y)){ mask[off+k]=0; bar[off+k]=1; } } } s=-1; }
+      else if(s>=0){
+        if(x-s>=minH){
+          // 逐列量"竖向"连续墨迹跨度：细(≤THIN)=线身，宽=与竖线交叉点（少数）→ 跳过不删
+          let thinCnt=0;
+          for(let k=s;k<x;k++){
+            let a=y; while(a>T&&mask[(a-1)*W+k]) a--;
+            let b=y; while(b<B&&mask[(b+1)*W+k]) b++;
+            if(b-a+1<=THIN) thinCnt++;
+          }
+          if(thinCnt>=(x-s)*0.6){                       // 至少六成是细列才当线删
+            for(let k=s;k<x;k++){
+              let a=y; while(a>T&&mask[(a-1)*W+k]) a--;
+              let b=y; while(b<B&&mask[(b+1)*W+k]) b++;
+              if(b-a+1<=THIN){ mask[y*W+k]=0; bar[y*W+k]=1; }
+            }
+          }
+        }
+        s=-1;
+      }
     }
   }
   for(let x=L;x<=R;x++){
@@ -3561,11 +3588,38 @@ function detectTextBlocks(data, W, H, region, opt){
     for(let y=T;y<=B+1;y++){
       const ink=(y<=B)&&mask[y*W+x];
       if(ink){ if(s<0) s=y; }
-      else if(s>=0){ if(y-s>=minV){ for(let k=s;k<y;k++){ if(thinH(x,k)){ mask[k*W+x]=0; bar[k*W+x]=1; } } } s=-1; }
+      else if(s>=0){
+        if(y-s>=minV){
+          // 竖线三判据：①够长 ②run 内各行横向跨度大多 ≤THIN ③两端(±3px)顶着已删除的横线。
+          // 判据③排除大号标题/正文的竖笔画——它们再长再细，上下也是空白，不挨表格框线。
+          let thinCnt=0;
+          for(let k=s;k<y;k++){
+            const o2=k*W;
+            let a=x; while(a>L&&mask[o2+a-1]) a--;
+            let b=x; while(b<R&&mask[o2+b+1]) b++;
+            if(b-a+1<=THIN) thinCnt++;
+          }
+          let topBar=false;
+          for(let k=Math.max(T,s-3);k<=Math.min(B,s+3)&&!topBar;k++)
+            for(let c=Math.max(L,x-2);c<=Math.min(R,x+2)&&!topBar;c++) if(bar[k*W+c]) topBar=true;
+          let botBar=false;
+          for(let k=Math.max(T,y-3);k<=Math.min(B,y+2)&&!botBar;k++)
+            for(let c=Math.max(L,x-2);c<=Math.min(R,x+2)&&!botBar;c++) if(bar[k*W+c]) botBar=true;
+          if(thinCnt>=(y-s)*0.6 && (topBar||botBar)){
+            for(let k=s;k<y;k++){
+              const o2=k*W;
+              let a=x; while(a>L&&mask[o2+a-1]) a--;
+              let b=x; while(b<R&&mask[o2+b+1]) b++;
+              if(b-a+1<=THIN){ mask[o2+x]=0; bar[o2+x]=1; }
+            }
+          }
+        }
+        s=-1;
+      }
     }
   }
 
-  // ④ 字符尺度膨胀（可分离窗口 OR；遇 barrier 截断，防跨框线粘连）
+  // ④ 字符尺度膨胀（可分离窗口 OR；遇 barrier 截断，防跨框线粘连）：横向 rDilH / 纵向 rDilV
   const tmp=new Uint8Array(W*H), out=new Uint8Array(W*H);
   const dim=Math.max(W,H)+2;
   const pref=new Int32Array(dim+1), lastB=new Int32Array(dim+1), nextB=new Int32Array(dim+1);
@@ -3575,9 +3629,9 @@ function detectTextBlocks(data, W, H, region, opt){
     let lb=-1; for(let x=0;x<W;x++){ if(bar[off+x]) lb=x; lastB[x]=lb; }
     let nb=-1; for(let x=W-1;x>=0;x--){ if(bar[off+x]) nb=x; nextB[x]=nb; }
     for(let x=L;x<=R;x++){
-      const lo=Math.max(L, Math.max(x-rDil, lastB[x]+1));
+      const lo=Math.max(L, Math.max(x-rDilH, lastB[x]+1));
       const hiR=(nextB[x]>=0?nextB[x]-1:R);
-      const hi=Math.min(R, Math.min(x+rDil, hiR));
+      const hi=Math.min(R, Math.min(x+rDilH, hiR));
       if(hi>=lo && pref[hi+1]-pref[lo]>0) tmp[off+x]=1;
     }
   }
@@ -3586,9 +3640,9 @@ function detectTextBlocks(data, W, H, region, opt){
     let lb=-1; for(let y=0;y<H;y++){ if(bar[y*W+x]) lb=y; lastB[y]=lb; }
     let nb=-1; for(let y=H-1;y>=0;y--){ if(bar[y*W+x]) nb=y; nextB[y]=nb; }
     for(let y=T;y<=B;y++){
-      const lo=Math.max(T, Math.max(y-rDil, lastB[y]+1));
+      const lo=Math.max(T, Math.max(y-rDilV, lastB[y]+1));
       const hiB=(nextB[y]>=0?nextB[y]-1:B);
-      const hi=Math.min(B, Math.min(y+rDil, hiB));
+      const hi=Math.min(B, Math.min(y+rDilV, hiB));
       if(hi>=lo && pref[hi+1]-pref[lo]>0) out[y*W+x]=1;
     }
   }
@@ -3597,7 +3651,7 @@ function detectTextBlocks(data, W, H, region, opt){
   const lab=new Int32Array(W*H), st=new Int32Array(W*H);
   const minInk=Math.max(16, Math.round(0.05*charW*charH));
   const minW=Math.max(4, Math.round(charW*0.35));
-  const minHh=Math.max(5, Math.round(charH*0.45));
+  const minHh=Math.max(10, Math.round(charH*0.5));   // 下限提到 10px：滤掉页边杂点形成的 8~9px 小块
   const blocks=[];
   for(let y=T;y<=B;y++){
     const off=y*W;
@@ -3621,19 +3675,143 @@ function detectTextBlocks(data, W, H, region, opt){
       if(ink<minInk||w<minW||h<minHh) continue;
       const dens=ink/(w*h);
       if(dens<=0.02||dens>=0.8) continue;
-      const lines=[]; let s=-1;
+      const lines=[]; let s=-1, lx=0, rx=0;
       for(let yy=y0;yy<=y1+1;yy++){
-        let c=0;
-        if(yy<=y1){ const o2=yy*W; for(let xx=x0;xx<=x1;xx++) if(mask[o2+xx]) c++; }
+        let c=0, fx=-1, ex=-1;
+        if(yy<=y1){ const o2=yy*W; for(let xx=x0;xx<=x1;xx++) if(mask[o2+xx]){ if(c===0) fx=xx; c++; ex=xx; } }
         const has=(yy<=y1)&&c>=2;
-        if(has){ if(s<0) s=yy; }
-        else if(s>=0){ lines.push({top:s,bottom:yy-1,left:x0,right:x1}); s=-1; }
+        if(has){ if(s<0){ s=yy; lx=fx; rx=ex; } else { if(fx<lx)lx=fx; if(ex>rx)rx=ex; } }
+        else if(s>=0){ lines.push({top:s,bottom:yy-1,left:lx,right:rx}); s=-1; }
       }
       blocks.push({top:y0,bottom:y1,left:x0,right:x1,lines});
     }
   }
-  blocks.sort((a,b)=>a.top-b.top||a.left-b.left);
-  return blocks;
+
+  // ⑥ 同行横向合并：被标点/空隙（如 "） （20分）"、"：" 后空隙）拆开的同一行文字并回一块
+  //    判据：纵向重叠 ≥ 较矮方的 50%、横向缝隙 ≤ 1.6×字宽、缝隙矩形内没有被剔除的表格框线
+  //    （表格同一行的格与格之间缝里一定有竖线 barrier，所以不会把不同格并起来）
+  const barIn=(x0,y0,x1,y1)=>{
+    for(let y=Math.max(T,y0);y<=Math.min(B,y1);y++){ const off=y*W;
+      for(let x=Math.max(L,x0);x<=Math.min(R,x1);x++) if(bar[off+x]) return true; }
+    return false;
+  };
+  // 该区域是否存在"横向长 barrier 连续段"（≥minLen）——竖直表格边框宽只有2~3px，不算
+  const barHRun=(x0,y0,x1,y1,minLen)=>{
+    for(let y=Math.max(T,y0);y<=Math.min(B,y1);y++){ const off=y*W;
+      let run=0;
+      for(let x=Math.max(L,x0);x<=Math.min(R,x1);x++){
+        if(bar[off+x]){ run++; if(run>=minLen) return true; } else run=0;
+      }
+    }
+    return false;
+  };
+  const bandsOf=(y0,y1,x0,x1)=>{
+    const arr=[]; let s=-1, bx0=0, bx1=0;
+    for(let yy=y0;yy<=y1+1;yy++){
+      let c=0, fx=-1, ex=-1;
+      if(yy<=y1){ const o2=yy*W; for(let xx=x0;xx<=x1;xx++) if(mask[o2+xx]){ if(c===0) fx=xx; c++; ex=xx; } }
+      const has=(yy<=y1)&&c>=2;
+      if(has){ if(s<0){ s=yy; bx0=fx; bx1=ex; } else { if(fx<bx0)bx0=fx; if(ex>bx1)bx1=ex; } }
+      else if(s>=0){ arr.push({top:s,bottom:yy-1,left:bx0,right:bx1}); s=-1; }
+    }
+    return arr;
+  };
+  let didMerge=true; let guard=0;
+  while(didMerge && guard++<300){
+    didMerge=false;
+    outer:
+    for(let i=0;i<blocks.length;i++) for(let j=i+1;j<blocks.length;j++){
+      const a=blocks[i], b=blocks[j];
+      const ov=Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top)+1;
+      const minH2=Math.min(a.bottom-a.top+1, b.bottom-b.top+1);
+      if(ov < Math.max(3, Math.round(minH2*0.5))) continue;         // 不在同一行
+      const lft=(a.left<=b.left)?a:b, rgt=(lft===a)?b:a;
+      const gap=rgt.left-lft.right-1;
+      if(gap<0 || gap>Math.round(charW*1.6)) continue;              // 缝隙过大：本来就分开的两块
+      if(barIn(lft.right+1, Math.max(a.top,b.top), rgt.left-1, Math.min(a.bottom,b.bottom))) continue;
+      const nb={ top:Math.min(a.top,b.top), bottom:Math.max(a.bottom,b.bottom),
+                 left:Math.min(a.left,b.left), right:Math.max(a.right,b.right) };
+      nb.lines=bandsOf(nb.top,nb.bottom,nb.left,nb.right);
+      blocks.splice(j,1); blocks.splice(i,1,nb);
+      didMerge=true; break outer;
+    }
+  }
+
+  // ⑦ 行带级段落归并：膨胀不再负责纵向合段（rDilV 只保字符完整），改在行带粒度上归并
+  //    · 行距 ≤ 0.85×字高                        → 同段（紧凑行距）
+  //    · 行距 ≤ 1.0×字高 且上下两行字号相近       → 同段（正常段落换行）
+  //    · 上下两行字号突变（比值 ≥1.25，如大标题→正文）→ 不同段（标题独立成块）
+  //    · 两行间隙中部夹着表格框线（barrier）       → 不同段
+  //      （barrier 只查间隙中部 25%~75%：紧贴某行文字的下划线不算分隔线，
+  //       表格横线在间隙正中，才算）
+  const lb=[];
+  const minBandH=Math.max(8, Math.round(charH*0.55));
+  for(const bk of blocks) for(const l of bk.lines){
+    if(l.bottom-l.top+1<minBandH) continue;                 // 滤掉残线形成的 1~2px 细带
+    if(l.right-l.left+1<minW) continue;                     // 滤掉残竖线形成的细条带
+    lb.push(l);
+  }
+  lb.sort((p,q)=>p.top-q.top||p.left-q.left);
+  // 第一阶段：同一"文字行"上的相邻行带聚成行单元（判据与 ⑥ 相同：
+  // 纵向重叠≥较矮方一半、缝≤1.6×字宽、缝里无表格框线）——表格同一行的格不会被并（缝里有竖线 barrier）
+  const units=[];
+  for(const l of lb){
+    const u=units[units.length-1];
+    if(u){
+      const ov=Math.min(u.bottom,l.bottom)-Math.max(u.top,l.top)+1;
+      const minH2=Math.min(u.bottom-u.top+1, l.bottom-l.top+1);
+      const gap=l.left-u.right-1;
+      if(ov>=Math.max(3,Math.round(minH2*0.5)) && gap>=0 && gap<=Math.round(charW*1.6) &&
+         !barIn(u.right+1, Math.max(u.top,l.top), l.left-1, Math.min(u.bottom,l.bottom))){
+        u.bottom=Math.max(u.bottom,l.bottom); u.top=Math.min(u.top,l.top);
+        u.right=Math.max(u.right,l.right);
+        continue;
+      }
+    }
+    units.push({top:l.top,bottom:l.bottom,left:l.left,right:l.right});
+  }
+  // 第二阶段：行单元纵向归并成段。对每个单元**向前回溯**找可链接的组
+  // （同一表格行上有很多并列单元，最近的组未必是纵向相邻的那个）；
+  // 判据：行距 ≤0.85×字高 → 同段；行距 ≤1.0×字高 且字号相近 → 同段；
+  //       字号突变（比值 ≥1.25，如大标题→正文）→ 断开；
+  //       间隙中部 30%~70% 夹着表格框线（barrier）→ 断开（紧贴文字的下划线不算）
+  const groups=[];
+  for(const u of units){
+    let target=null, bestGap=1e9;
+    for(let gi=groups.length-1; gi>=0; gi--){
+      const g=groups[gi]; const last=g[g.length-1];
+      if(last.bottom>u.top) continue;                        // 该组最后一行与本单元同排/在其下
+      const gapV=u.top-last.bottom-1;
+      if(gapV>=bestGap) continue;                            // 已有更近的合格组
+      if(gapV>charH*2.5) continue;                           // 行距过大
+      const h1=last.bottom-last.top+1, h2=u.bottom-u.top+1;
+      const ov=Math.min(last.right,u.right)-Math.max(last.left,u.left)+1;
+      if(ov<=0) continue;
+      const jump=(h1>=Math.round(1.25*h2))||(h2>=Math.round(1.25*h1));
+      // 分隔线判据：间隙行里、两单元重叠区**之外**有"横向长"被删横线（表格线贯穿整行所有格，
+      // 必然延伸到文字之外且是横向长段；下划线只在自己文字正下方；竖直边框不算横向段）
+      let sep=false;
+      if(gapV>=5){
+        const yLo=last.bottom+2, yHi=u.top-2;
+        const xLo=Math.max(L, Math.min(last.left,u.left)-Math.round(W*0.12));
+        const xHi=Math.min(R, Math.max(last.right,u.right)+Math.round(W*0.12));
+        const ovLo=Math.max(last.left,u.left)-2, ovHi=Math.min(last.right,u.right)+2;
+        const minRun=Math.max(10, Math.round(charW*1.2));
+        sep=barHRun(xLo,yLo,ovLo,yHi,minRun) || barHRun(ovHi,yLo,xHi,yHi,minRun);
+      }
+      const same=!sep && (gapV<=Math.round(charH*0.85) || (gapV<=charH && !jump));
+      if(same){ target=g; bestGap=gapV; }
+    }
+    if(target) target.push(u); else groups.push([u]);
+  }
+  const outBlocks=groups.map(g=>({
+    top:g[0].top, bottom:g[g.length-1].bottom,
+    left:Math.min.apply(null,g.map(x=>x.left)),
+    right:Math.max.apply(null,g.map(x=>x.right)),
+    lines:g
+  }));
+  outBlocks.sort((a,b)=>a.top-b.top||a.left-b.left);
+  return outBlocks;
 }
 /* ==================== 扫描页分析 analyzeScanPage（新） ====================
    渲染 → 浅灰底纹置白 → 去页边得文字区域 → detectTextBlocks 按字符尺度特征分块 → 归一化为 0-1 比例。
@@ -3944,7 +4122,7 @@ async function locateReportTitlesScanDB(path, tpl, reportKey){
 }
 */
 
-/* ==================== 扫描版：文字分块 + 逐块 OCR + 落库（v0.1.110 字符尺度分块版） ====================
+/* ==================== 扫描版：文字分块 + 逐块 OCR + 落库（v0.1.111 行带合并版） ====================
    流程：
      ① 逐页 analyzeScanPage → "挤在一起的文字"块（每块含块内像素行带，位置 0-1 比例）；
      ② 全部块先入库（scan_block）拿到全局唯一 KEY(id)；
@@ -4066,7 +4244,7 @@ function snapLinesToBands(lines, bands, block){
   return out;
 }
 
-/* ==================== 标题匹配 matchTitlesInBlocks（行级打分版，v0.1.110） ====================
+/* ==================== 标题匹配 matchTitlesInBlocks（行级打分版，v0.1.111） ====================
    在"块的 OCR 行"（有行带则用行带，没有则退回整块）上匹配题目标题。打分级判据：
      · 完全相等 100 / 以标题开头 90 / 包含标题 74（按行长惩罚）/ 模糊 62（最长公共子串 ≥82%）
      · 一行里同时出现 ≥2 个题目名 → 直接淘汰（这是"评分项目"汇总表头，不是正文标题）

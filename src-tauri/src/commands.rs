@@ -626,12 +626,25 @@ pub async fn ocr_image_b64(b64: String) -> Result<String, String> {
         .map_err(|e| format!("OCR 任务失败: {e}"))?
 }
 
+// 临时文件名：进程ID + 原子递增序号 + 纳秒时间戳，保证多路并发调用互不覆盖
+// （此前固定文件名 rg_ocr_tmp.png 在前端 4 路并发 OCR 时互相覆盖，导致不同块识别出相同文本、
+//   甚至文件被先完成的调用删除后读取失败返回空文本）
+static OCR_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+fn unique_ocr_tmp(tag: &str) -> std::path::PathBuf {
+    let n = OCR_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    std::env::temp_dir().join(format!("rg_ocr_{}_{}_{}_{}.png", tag, std::process::id(), n, t))
+}
+
 fn ocr_b64_impl(b64: &str) -> Result<String, String> {
     use base64::Engine;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(b64)
         .map_err(|e| format!("base64 解码失败: {e}"))?;
-    let tmp = std::env::temp_dir().join("rg_ocr_tmp.png");
+    let tmp = unique_ocr_tmp("txt");
     std::fs::write(&tmp, &bytes).map_err(|e| format!("写临时图片失败: {e}"))?;
     let r = ocr_file_with_com(&tmp.to_string_lossy());
     let _ = std::fs::remove_file(&tmp);
@@ -651,7 +664,7 @@ fn ocr_words_impl(b64: &str) -> Result<serde_json::Value, String> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(b64)
         .map_err(|e| format!("base64 解码失败: {e}"))?;
-    let tmp = std::env::temp_dir().join("rg_ocr_words_tmp.png");
+    let tmp = unique_ocr_tmp("words");
     std::fs::write(&tmp, &bytes).map_err(|e| format!("写临时图片失败: {e}"))?;
     let r = ocr_words_with_com(&tmp.to_string_lossy());
     let _ = std::fs::remove_file(&tmp);
