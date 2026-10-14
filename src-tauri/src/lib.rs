@@ -16,6 +16,7 @@ pub fn run() {
             commands::save_to_output,
             commands::read_font,
             commands::pack_renamed_zip,
+            commands::pack_dir_zip,
             // commands::scan_save_struct,   // 【已停用】表结构识别落库（改为 scan_block 文字分块）
             commands::block_reset,
             commands::block_init,

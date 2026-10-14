@@ -586,10 +586,13 @@ pub fn get_report_locate(conn: &Connection, report_id: i64) -> Result<Option<Str
     .map_err(|e| format!("读取定位失败: {e}"))
 }
 
-/// 按改名版文件名或源文件名定位报告 id
+/// 按改名版文件名或源文件名定位报告 id（完整相对路径精确匹配；另兜底改名路径的文件名部分，
+/// 兼容前端只传 basename 的情况）
 pub fn report_id_by_key(conn: &Connection, batch_id: i64, key: &str) -> Result<Option<i64>, String> {
     conn.query_row(
-        "SELECT id FROM reports WHERE batch_id=?1 AND (renamed_path=?2 OR source_path=?2 OR orig_name=?2) ORDER BY id DESC LIMIT 1",
+        "SELECT id FROM reports WHERE batch_id=?1 AND (renamed_path=?2 OR source_path=?2 OR orig_name=?2
+           OR (length(renamed_path)>length(?2) AND substr(renamed_path, -length(?2))=?2 AND substr(renamed_path, -length(?2)-1, 1)='/')
+         ) ORDER BY id DESC LIMIT 1",
         params![batch_id, key],
         |r| r.get(0),
     )

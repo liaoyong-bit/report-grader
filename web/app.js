@@ -30,6 +30,8 @@ const S = {
   students: [],           // 名单 [{no,name,cls}]
   unmatched: [],          // 未匹配文件 [{path,name,srcName}]
   mode: 'browser',        // 'browser' | 'tauri'
+  exportDir: localStorage.getItem('rg_exportDir') || '',  // 自定义导出位置；空=报告文件夹/output/
+  lastAnnotated: null,    // 最近一次盖章导出 {sub, files[], base:'export'|null}，供预览点击打开
 };
 
 const ITEM_NAMES = [
@@ -59,6 +61,7 @@ const el = {
   gradeSetup: $('gradeSetup'), gradeWrap: $('gradeWrap'), gradeScopeTbody: $('gradeScopeTbody'), gradeScopeOk: $('gradeScopeOk'),
   prepRoster: $('prepRoster'),
   expOptions: $('expOptions'), expOps: $('expOps'), btnExpClose: $('btnExpClose'), expList: $('expList'), expPreview: $('expPreview'),
+  btnExportAll: $('btnExportAll'), expAllStat: $('expAllStat'), expDirLabel: $('expDirLabel'), btnExpDir: $('btnExpDir'),
   attachMask: $('attachMask'), attachBox: $('attachBox'), attachFile: $('attachFile'),
   locateMask: $('locateMask'), locateBody: $('locateBody'), locateTitle: $('locateTitle'),
   locateSave: $('locateSave'), locateCancel: $('locateCancel'),
@@ -651,7 +654,7 @@ const EXP_ITEMS = [
   {id:'annotated',  name:'带批阅痕迹的原始文件', sub:'PDF · 每题红字得分', icon:'✏️'},
 ];
 let EXP_SEL = 'scores';
-let EXP_CHECKED = {scores:true, report:true, renamed:false, annotated:false};
+let EXP_CHECKED = {scores:true, renamed:true, annotated:true};
 let EXP_OPTS = {};   // 每项目勾选项
 let EXP_CHECKS = {}; // 每项目列/内容勾选状态 {id:{index:bool}}
 function renderExportPanel(){
@@ -662,7 +665,9 @@ function renderExportPanel(){
     el.expPreview.addEventListener('click', (e)=>{
       const t = e.target && e.target.closest ? e.target.closest('[data-rn-path]') : null;
       if(t && window.__bridge && window.__bridge.openExternal && S.folder){
-        window.__bridge.openExternal(S.folder, t.getAttribute('data-rn-path')).catch(err=>setErr('打开失败: '+err));
+        const isExp = t.getAttribute('data-rn-base') === 'export';
+        window.__bridge.openExternal(S.folder, t.getAttribute('data-rn-path'), isExp ? (S.exportDir||null) : null)
+          .catch(err=>setErr('打开失败: '+err));
       }
     });
   }
@@ -680,7 +685,41 @@ function renderExportPanel(){
     list.appendChild(item);
   });
   renderExpDetail(EXP_SEL);
+  renderExpToolbar();
 }
+/* —— 导出工具栏：全部导出（按勾选顺序批量执行）+ 导出位置 —— */
+function expDirText(){
+  return S.exportDir ? S.exportDir : ((S.folder ? S.folder + '\\output\\' : 'output/') + '（默认，随报告文件夹）');
+}
+function renderExpToolbar(){
+  if(el.expDirLabel) el.expDirLabel.textContent = '导出位置：' + expDirText();
+}
+el.btnExportAll.onclick = async ()=>{
+  const stat = el.expAllStat;
+  const order = ['scores','renamed','annotated'];
+  const list = order.filter(id=>EXP_CHECKED[id]);
+  if(!list.length){ setErr('请先在左侧勾选要导出的项目'); return; }
+  let ok=0;
+  for(let i=0;i<list.length;i++){
+    const id=list[i];
+    const nm=(EXP_ITEMS.find(x=>x.id===id)||{}).name||id;
+    if(stat) stat.textContent='('+ (i+1)+'/'+list.length+') 正在导出：'+nm+'…';
+    try{ await runExport(id); ok++; }
+    catch(e){ setErr(nm+' 导出失败: '+(e&&e.message?e.message:e)); }
+  }
+  if(stat) stat.textContent='✅ 全部导出完成 '+ok+'/'+list.length+' 项 → '+(S.exportDir||'output/');
+};
+el.btnExpDir.onclick = async ()=>{
+  if(!window.__bridge || !window.__bridge.pickExportDir){ setErr('仅 Tauri 模式支持更改导出位置'); return; }
+  try{
+    const d = await window.__bridge.pickExportDir();
+    if(!d) return;   // 用户取消
+    S.exportDir = d;
+    try{ localStorage.setItem('rg_exportDir', d); }catch(e){}
+    renderExpToolbar();
+    setDetect('✅ 导出位置已设为 '+d+'（成绩表/ZIP/带批阅痕迹均写到此处）');
+  }catch(e){ /* 取消选择视为放弃 */ }
+};
 function renderExpDetail(id){
   const opt = el.expOptions;
   const meta = {
@@ -801,10 +840,19 @@ async function previewAnnotated(){
     const g=gByKey[r.key]; if(!g||!g.draft) return false;
     try{ const d=JSON.parse(g.draft||'{}'); const s=d.scores||[]; return s.length && !s.every(x=>x==null); }catch(e){ return false; }
   });
-  if(!list.length) return '<div class="ex-ptt">带批阅痕迹 · 暂无可导出的已批报告</div><div style="color:#999;font-size:12px">请先在批改面板完成批阅，并确保报告已挂靠改名。</div>';
-  let h='<div class="ex-ptt">带批阅痕迹 · 预览（共 '+list.length+' 份已批报告）</div>';
-  list.slice(0,12).forEach(r=>{ h+='<div class="ex-tag">'+esc((r.renamed_path||'').split(/[\\/]/).pop()||'')+'</div>'; });
-  h+='<div style="margin-top:8px;font-size:12px;color:#999">基于改名后文件盖章：每题标题行右缘红字「得分/满分」（复用已入库打分定位），首页页脚含批阅教师+时间戳 → output/带批阅痕迹/</div>';
+  if(!list.length) return '<div class="ex-ptt">带批阅痕迹 · 暂无可导出的已批报告</div><div style="color:#999;font-size:12px">请先在批改面板完成批阅（逐项打分），并确保报告已挂靠改名。</div>';
+  const la=S.lastAnnotated;
+  let h='<div class="ex-ptt">带批阅痕迹 · 预览（共 '+list.length+' 份已批报告，点击文件名可打开）</div>';
+  list.slice(0,12).forEach(r=>{
+    const fn=(r.renamed_path||'').split(/[\\/]/).pop()||'';
+    const stamped = la && la.files && la.files.includes(fn);
+    const path = stamped ? ('output/带批阅痕迹/'+fn) : r.renamed_path;
+    const baseAttr = (stamped && la.base==='export') ? ' data-rn-base="export"' : '';
+    const tip = stamped ? '点击打开已盖章 PDF' : '点击打开改名后原始文件（导出后同一位置即盖章版）';
+    h+='<div class="ex-tag" data-rn-path="'+esc(path)+'"'+baseAttr+' style="cursor:pointer" title="'+tip+'">'+esc(fn)+(stamped?' ✏️':'')+'</div>';
+  });
+  h+='<div style="margin-top:8px;font-size:12px;color:#999">每题标题行右缘红字「得分/满分」（复用已入库打分定位），首页页脚含批阅教师+时间戳。'+
+     '导出后写入 '+(S.exportDir?esc(S.exportDir):'output/')+'\\带批阅痕迹\\，并自动打包为 带批阅痕迹.zip（打✏️的可直接打开盖章版）。</div>';
   return h;
 }
 async function exportReportPdfs(){
@@ -2088,6 +2136,7 @@ async function exportScoredPdf(){
     const cjkBytes = await loadCJKBytes();
     const red = rgb(0.82,0.05,0.05), gray = rgb(0.45,0.45,0.45);
     let ok=0, fail=0, skip=0;
+    const doneFiles=[];
     for(let idx=0; idx<rows.length; idx++){
       const t = rows[idx];
       setDetect('⏳ 正在导出带批阅痕迹 PDF（'+(idx+1)+'/'+rows.length+'）：'+((t.renamed_path||'').split(/[\\/]/).pop()||''));
@@ -2142,13 +2191,25 @@ async function exportScoredPdf(){
         const fname = (t.renamed_path.split(/[\\/]/).pop()) || ((t.key||'report')+'_已批阅.pdf');
         await deliverExport('带批阅痕迹/'+fname, blob);
         ok++;
+        doneFiles.push(fname);
         if(window.__bridge.log) window.__bridge.log('[导出痕迹] '+fname+' 盖章 '+stamped+' 项');
       }catch(e){
         fail++;
         if(window.__bridge && window.__bridge.log) window.__bridge.log('[导出痕迹失败] '+(t.renamed_path||t.key)+': '+(e&&e.message?e.message:e));
       }
     }
-    setDetect('✅ 带批阅痕迹导出完成：成功 '+ok+' 份'+(skip?('，未批跳过 '+skip+' 份'):'')+(fail?('，失败 '+fail+' 份'):'')+' → output/带批阅痕迹/');
+    // 导出成功后自动打包为 ZIP（预览点击即可打开）
+    let zipMsg = '';
+    if(ok>0 && window.__bridge && window.__bridge.packDirZip){
+      try{
+        await window.__bridge.packDirZip('带批阅痕迹', '带批阅痕迹.zip');
+        zipMsg = '，并打包为 带批阅痕迹.zip';
+      }catch(e){
+        if(window.__bridge.log) window.__bridge.log('[导出痕迹] 打包ZIP失败: '+(e&&e.message?e.message:e));
+      }
+    }
+    S.lastAnnotated = { sub:'带批阅痕迹', files:doneFiles, base: S.exportDir ? 'export' : 'folder' };
+    setDetect('✅ 带批阅痕迹导出完成：成功 '+ok+' 份'+(skip?('，未批跳过 '+skip+' 份'):'')+(fail?('，失败 '+fail+' 份'):'')+zipMsg+' → '+expDirText());
   }catch(e){
     setErr('导出失败: ' + (e && e.message ? e.message : e));
   }

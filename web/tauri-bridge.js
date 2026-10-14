@@ -166,7 +166,7 @@
   window.__bridge.getGradingScope = async (folder) => { return await invoke('get_grading_scope', { folder }); };
   window.__bridge.saveGradingScope = async (folder, range, selected) => { await invoke('save_grading_scope', { folder, range, selected }); };
   window.__bridge.getRoster = async (folder) => { return await invoke('get_roster', { folder }); };
-  window.__bridge.openExternal = async (folder, path) => { return await invoke('open_external', { folder, path }); };
+  window.__bridge.openExternal = async (folder, path, base) => { return await invoke('open_external', { folder, path, base: base || null }); };
 
   // —— 首次打开某份报告时从磁盘读入 PDF
   // 关键：app.js 里列表点击 li.onclick 与"下一份"逻辑调用的都是【全局 selectReport】，
@@ -204,15 +204,17 @@
   window.selectReport = wrappedSelect;
 
   // —— 批阅进度持久化 → 后端数据库（done=true 视为提交，由后端固化；localStorage 由 app.js 兜底）
+  // 关键：reportKey 必须用 r.key(原始文件名)——scope 流程的 r.name 只是 basename，
+  // 此前按 r.name 存库被 report_id_by_key 精确匹配拒绝，草稿从未入库 → 导出拿不到分数
   window.__backendPersist = (r, snap) => {
     if(!app.S.folder) return;
-    invoke('save_grading_state', { folder: app.S.folder, reportKey: r.name, snapshot: snap })
+    invoke('save_grading_state', { folder: app.S.folder, reportKey: r.key || r.name, snapshot: snap })
       .catch(e => log('save_grading_state 失败: ' + String(e && e.message || e)));
   };
 
-  // —— 改名文件打包 ZIP（写入 output/改名文件包.zip）
+  // —— 改名文件打包 ZIP（写入导出位置/改名文件包.zip）
   window.__bridge.packRenamedZip = async () => {
-    return await invoke('pack_renamed_zip', { folder: app.S.folder });
+    return await invoke('pack_renamed_zip', { folder: app.S.folder, base: app.S.exportDir || null });
   };
 
   // —— 【已停用】保存一份报告的扫描结构（表结构识别产物）；按新需求改为 scan_block 文字分块
@@ -230,9 +232,9 @@
     return await invoke('block_get_rows', { folder, reportKey });
   };
 
-  // —— 导出产物写入 output/（替代浏览器下载；name 支持 "子目录/文件名"）
+  // —— 导出产物写入导出位置（base 为空=报告文件夹/output/；S.exportDir 可自定义）
   window.__bridge.saveToOutput = async (name, bytes) => {
-    await invoke('save_to_output', { folder: app.S.folder, name, data: Array.from(bytes) });
+    await invoke('save_to_output', { folder: app.S.folder, name, data: Array.from(bytes), base: app.S.exportDir || null });
   };
 
   // ---- 全量成绩清单（所有学生，供保存全部成绩 CSV / 批阅概览表格）
@@ -243,6 +245,17 @@
   // ---- 读系统中文字体字节（白名单 simhei/simfang/simkai/stkaiti），供 pdf-lib 嵌入批注
   window.__bridge.readFont = async (name) => {
     return await invoke('read_font', { name });
+  };
+
+  // ---- 打包子目录为 ZIP（base 为空=报告文件夹/output/）
+  window.__bridge.packDirZip = async (sub, zipName) => {
+    return await invoke('pack_dir_zip', { folder: app.S.folder, sub, zipName, base: app.S.exportDir || null });
+  };
+
+  // ---- 选择导出位置（复用系统目录对话框）
+  window.__bridge.pickExportDir = async () => {
+    const p = await invoke('pick_pdf_folder');
+    return p && p.folder;
   };
 
   // —— 名单模板下载：Tauri 下弹系统保存对话框写文件（覆盖浏览器 downloadBlob）

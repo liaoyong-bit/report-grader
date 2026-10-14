@@ -80,10 +80,15 @@ pub fn resolve_unmatched(folder: String, path: String, student_no: String) -> Re
     scan::resolve_unmatched(&conn, &folder, &path, &student_no)
 }
 
-/// 用系统默认程序打开指定文件（挂靠时查看原始报告）
+/// 用系统默认程序打开指定文件（挂靠时查看原始报告；base 为空时 path 相对报告文件夹，
+/// 否则相对用户指定的导出位置）
 #[tauri::command]
-pub fn open_external(folder: String, path: String) -> Result<(), String> {
-    let full = Path::new(&folder).join(&path);
+pub fn open_external(folder: String, path: String, base: Option<String>) -> Result<(), String> {
+    let root = match base.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(b) => std::path::PathBuf::from(b),
+        None => std::path::PathBuf::from(&folder),
+    };
+    let full = root.join(&path);
     let p = full.to_string_lossy().into_owned();
     let quoted = format!("\"{}\"", p);
     let _ = std::process::Command::new("cmd").args(["/C", "start", "", &quoted]).spawn();
@@ -166,10 +171,14 @@ pub fn mark_excluded(folder: String, report_key: String) -> Result<(), String> {
     db::mark_excluded(&conn, rid)
 }
 
-/// 导出产物写入 output/ 目录（name 支持 "子目录/文件名.pdf"，逐段清洗防目录穿越）
+/// 导出产物写入输出目录（name 支持 "子目录/文件名.pdf"，逐段清洗防目录穿越；
+/// base 为空时写入 报告文件夹/output/，否则写入用户指定的导出位置）
 #[tauri::command]
-pub fn save_to_output(folder: String, name: String, data: Vec<u8>) -> Result<String, String> {
-    let out_dir = Path::new(&folder).join(db::OUTPUT_DIR);
+pub fn save_to_output(folder: String, name: String, data: Vec<u8>, base: Option<String>) -> Result<String, String> {
+    let out_dir = match base.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(b) => std::path::PathBuf::from(b),
+        None => Path::new(&folder).join(db::OUTPUT_DIR),
+    };
     let rel: std::path::PathBuf = name
         .split(['/', '\\'])
         .filter(|seg| !seg.is_empty() && *seg != "." && *seg != "..")
@@ -186,7 +195,7 @@ pub fn save_to_output(folder: String, name: String, data: Vec<u8>) -> Result<Str
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("创建导出目录失败: {e}"))?;
     }
-    fs::write(&path, &data).map_err(|e| format!("写入 output 失败: {e}"))?;
+    fs::write(&path, &data).map_err(|e| format!("写入输出失败: {e}"))?;
     Ok(path.to_string_lossy().into_owned())
 }
 
@@ -202,33 +211,47 @@ pub fn read_font(name: String) -> Result<Vec<u8>, String> {
     fs::read(&p).map_err(|e| format!("读取字体失败({name}): {e}"))
 }
 
-/// 将 renamed/ 目录下所有改名报告打包为一个 ZIP，写入 output/改名文件包.zip
+/// 将 renamed/ 目录下所有改名报告打包为一个 ZIP，写入导出位置（base 为空=报告文件夹/output/）
 #[tauri::command]
-pub fn pack_renamed_zip(folder: String) -> Result<String, String> {
-    let rdir = Path::new(&folder).join(db::RENAME_DIR);
-    if !rdir.exists() { return Err("renamed 目录不存在，请先核对/改名".into()); }
-    let out_dir = Path::new(&folder).join(db::OUTPUT_DIR);
-    fs::create_dir_all(&out_dir).map_err(|e| format!("创建 output 失败: {e}"))?;
-    let out_path = out_dir.join("改名文件包.zip");
+pub fn pack_renamed_zip(folder: String, base: Option<String>) -> Result<String, String> {
+    pack_dir_zip_impl(&folder, db::RENAME_DIR, "改名文件包.zip", base.as_deref().map(str::trim).filter(|s| !s.is_empty()))
+}
+
+/// 通用子目录打包：将 folder/<sub> 下的文件打包为 base(或 output)/<zip_name>
+#[tauri::command]
+pub fn pack_dir_zip(folder: String, sub: String, zip_name: String, base: Option<String>) -> Result<String, String> {
+    pack_dir_zip_impl(&folder, &sub, &zip_name, base.as_deref().map(str::trim).filter(|s| !s.is_empty()))
+}
+
+fn pack_dir_zip_impl(folder: &str, sub: &str, zip_name: &str, base: Option<&str>) -> Result<String, String> {
+    let src = Path::new(folder).join(sub);
+    if !src.exists() { return Err(format!("目录不存在: {sub}，请先执行相应步骤")); }
+    let out_dir = match base {
+        Some(b) if !b.is_empty() => std::path::PathBuf::from(b),
+        _ => Path::new(folder).join(db::OUTPUT_DIR),
+    };
+    fs::create_dir_all(&out_dir).map_err(|e| format!("创建输出目录失败: {e}"))?;
+    let safe_zip: String = zip_name.chars().map(|c| if ":*?\"<>|".contains(c) { '_' } else { c }).collect();
+    let out_path = out_dir.join(&safe_zip);
     let f = fs::File::create(&out_path).map_err(|e| format!("创建 zip 失败: {e}"))?;
     let mut zw = zip::ZipWriter::new(f);
     let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     let mut count = 0i32;
     let mut total = 0u64;
-    for entry in fs::read_dir(&rdir).map_err(|e| format!("读取 renamed 目录失败: {e}"))? {
+    for entry in fs::read_dir(&src).map_err(|e| format!("读取目录 {sub} 失败: {e}"))? {
         let ent = entry.map_err(|e| format!("读取目录项失败: {e}"))?;
         let p = ent.path();
         if !p.is_file() { continue; }
         let fname = ent.file_name().to_string_lossy().into_owned();
         zw.start_file(&fname, opts).map_err(|e| format!("写入 zip 条目失败: {e}"))?;
-        let mut src = fs::File::open(&p).map_err(|e| format!("打开文件失败: {e}"))?;
-        let n = std::io::copy(&mut src, &mut zw).map_err(|e| format!("写入 zip 失败: {e}"))?;
+        let mut fp = fs::File::open(&p).map_err(|e| format!("打开文件失败: {e}"))?;
+        let n = std::io::copy(&mut fp, &mut zw).map_err(|e| format!("写入 zip 失败: {e}"))?;
         total += n;
         count += 1;
     }
     zw.finish().map_err(|e| format!("完成 zip 失败: {e}"))?;
-    dbglog(&format!("pack_renamed_zip count={} total={} -> {}", count, total, out_path.to_string_lossy()));
-    Ok(format!("已打包 {} 份 → {}", count, out_path.to_string_lossy()))
+    dbglog(&format!("pack_dir_zip sub={sub} count={count} total={total} -> {}", out_path.to_string_lossy()));
+    Ok(format!("已打包 {count} 份 → {}", out_path.to_string_lossy()))
 }
 
 /* —— 【已停用】保存一份报告的扫描结构数据（表结构识别产物：横线/竖线/格子/文字行）
