@@ -627,9 +627,9 @@ el.bbGrade.onclick = ()=> enterGradePanel();
 /* ==================== 导出面板（两栏：左项目 / 右选项+预览） ==================== */
 const EXP_ITEMS = [
   {id:'scores',     name:'学生成绩总表',  sub:'Excel · 美观表格',   icon:'📊'},
-  {id:'report',     name:'批阅报告',      sub:'PDF · 逐份美观',      icon:'📄'},
-  {id:'renamed',    name:'改名后的原始文件', sub:'ZIP · 打包导出',   icon:'🗂'},
-  {id:'annotated',  name:'带批阅痕迹的原始文件', sub:'PDF · 含批改信息', icon:'✏️'},
+  // 【已移除】批阅报告（自制排版汇总 PDF，用户不需要）；exportReportPdfs 代码保留备用
+  {id:'renamed',    name:'改名后的原始文件', sub:'ZIP · 点击文件名可打开', icon:'🗂'},
+  {id:'annotated',  name:'带批阅痕迹的原始文件', sub:'PDF · 每题红字得分', icon:'✏️'},
 ];
 let EXP_SEL = 'scores';
 let EXP_CHECKED = {scores:true, report:true, renamed:false, annotated:false};
@@ -637,6 +637,16 @@ let EXP_OPTS = {};   // 每项目勾选项
 let EXP_CHECKS = {}; // 每项目列/内容勾选状态 {id:{index:bool}}
 function renderExportPanel(){
   const list = el.expList; if(!list) return;
+  // 打包预览：点击文件名 → 系统默认程序打开（事件委托，只绑定一次）
+  if(el.expPreview && !el.expPreview.__rnBound){
+    el.expPreview.__rnBound = true;
+    el.expPreview.addEventListener('click', (e)=>{
+      const t = e.target && e.target.closest ? e.target.closest('[data-rn-path]') : null;
+      if(t && window.__bridge && window.__bridge.openExternal && S.folder){
+        window.__bridge.openExternal(S.folder, t.getAttribute('data-rn-path')).catch(err=>setErr('打开失败: '+err));
+      }
+    });
+  }
   list.innerHTML = '';
   EXP_ITEMS.forEach(it=>{
     const item = document.createElement('div');
@@ -659,10 +669,10 @@ function renderExpDetail(id){
       rows:['学号','姓名','班级','实验名称','各题得分','总分','满分','状态','批阅教师','批阅时间戳'] },
     report:{ tt:'报告包含内容', note:'PDF 逐份导出，页眉含学校/课程名与报告名称。',
       rows:['学生信息','评分表','统分区','总分与总评','批阅教师','批阅时间戳'] },
-    renamed:{ tt:'打包设置', note:'将改名文件夹中的报告打包为一个 ZIP。',
-      rows:['ZIP 打包','含子目录结构','只打包已改名'] },
-    annotated:{ tt:'痕迹信息', note:'在原始报告上叠加批阅痕迹后导出 PDF。',
-      rows:['大题旁显示分数','显示批阅教师','显示批阅时间戳','显示总分'] }
+    renamed:{ tt:'打包设置', note:'将 renamed/ 目录打包为 output/改名文件包.zip；打包预览中点击文件名可用系统默认 PDF 程序打开该文件。',
+      rows:[] },
+    annotated:{ tt:'痕迹信息', note:'基于「改名后的原始文件」批量导出：每题标题行右缘红字「得分/满分」（与批改界面同一位置），首页页脚附批阅教师与时间戳。',
+      rows:['每题得分（红字 N/满分）','批阅教师 + 时间戳（首页页脚）'] }
   }[id] || {tt:'',note:'',rows:[]};
   const nm = (EXP_ITEMS.find(x=>x.id===id)||{}).name || '';
   opt.innerHTML = esc_m(nm+'选项') + expOptLines(id, meta.rows, meta.tt) +
@@ -754,20 +764,28 @@ async function previewRenamed(){
   const rows=(S.prepOv&&S.prepOv.rows)||[];
   const rnm=rows.filter(r=>r.renamed_path);
   if(!rnm.length) return '<div class="ex-ptt">改名后的原始文件 · 暂无已改名文件</div><div style="color:#999;font-size:12px">请先在准备面板执行「核对/挂靠/改名」。</div>';
-  let h='<div class="ex-ptt">改名后的原始文件 · 打包预览</div>';
-  rnm.slice(0,12).forEach(r=>{ h+='<div class="ex-tag">'+esc((r.renamed_path||'').split(/[\\/]/).pop()||'')+'</div>'; });
-  h+='<div style="margin-top:8px;font-size:12px;color:#999">共 '+rnm.length+' 份 · 打包为 report_renamed.zip</div>';
+  let h='<div class="ex-ptt">改名后的原始文件 · 打包预览（点击文件名用系统默认程序打开）</div>';
+  rnm.slice(0,12).forEach(r=>{
+    const fn=(r.renamed_path||'').split(/[\\/]/).pop()||'';
+    h+='<div class="ex-tag" data-rn-path="'+esc(r.renamed_path)+'" style="cursor:pointer" title="点击用系统默认 PDF 程序打开">'+esc(fn)+'</div>';
+  });
+  h+='<div style="margin-top:8px;font-size:12px;color:#999">共 '+rnm.length+' 份 · 打包为 output/改名文件包.zip</div>';
   return h;
 }
 async function previewAnnotated(){
-  const tpl=await loadTpl();
-  const r=(S.reports||[]).find(x=>x&&!x.missing);
-  if(!r || !Array.isArray(r.scores)) return '<div class="ex-ptt">带批阅痕迹 · 暂无报告</div><div style="color:#999;font-size:12px">请先在批改面板打开一份报告。</div>';
-  const n=r.scores.length;
-  let h='<div class="ex-ptt">带批阅痕迹 · 预览（PDF，第一份）</div>'+
-    '<div style="border:1px solid #e3e8f0;border-radius:6px;padding:10px;font-size:12px;max-width:440px">';
-  for(let i=0;i<n;i++){ const tm=(tpl[i]||{}).item_name||('第'+(i+1)+'项'); h+='<div>'+(i+1)+'. '+esc(tm)+'<span style="float:right;color:#e0245e;font-weight:700">'+(r.scores[i]!=null?r.scores[i]:0)+'分</span></div><div style="border-top:1px dashed #e3e8f0;margin:4px 0"></div>'; }
-  h+='<div>总分：<b>'+(r.scores.reduce((a,b)=>a+(b||0),0))+'</b>/'+((r.maxs||[]).reduce((a,b)=>a+(b||0),0))+'　批阅教师：'+esc(S.teacher||'未设置')+'　'+dateStamp()+'</div></div>';
+  if(!window.__bridge || !window.__bridge.prepOverview || !S.folder) return '<div class="ex-ptt">带批阅痕迹 · 仅 Tauri 模式支持</div>';
+  let rows=[]; try{ const ov=await window.__bridge.prepOverview(S.folder); rows=(ov&&ov.rows)||[]; }catch(e){}
+  let grades=[]; try{ grades=await fetchAllGrades(); }catch(e){}
+  const gByKey={}; (grades||[]).forEach(g=>{ if(g&&g.fname) gByKey[g.fname]=g; });
+  const list=rows.filter(r=>{
+    if(!r||!r.matched||!r.renamed_path) return false;
+    const g=gByKey[r.key]; if(!g||!g.draft) return false;
+    try{ const d=JSON.parse(g.draft||'{}'); const s=d.scores||[]; return s.length && !s.every(x=>x==null); }catch(e){ return false; }
+  });
+  if(!list.length) return '<div class="ex-ptt">带批阅痕迹 · 暂无可导出的已批报告</div><div style="color:#999;font-size:12px">请先在批改面板完成批阅，并确保报告已挂靠改名。</div>';
+  let h='<div class="ex-ptt">带批阅痕迹 · 预览（共 '+list.length+' 份已批报告）</div>';
+  list.slice(0,12).forEach(r=>{ h+='<div class="ex-tag">'+esc((r.renamed_path||'').split(/[\\/]/).pop()||'')+'</div>'; });
+  h+='<div style="margin-top:8px;font-size:12px;color:#999">基于改名后文件盖章：每题标题行右缘红字「得分/满分」（复用已入库打分定位），首页页脚含批阅教师+时间戳 → output/带批阅痕迹/</div>';
   return h;
 }
 async function exportReportPdfs(){
@@ -1928,17 +1946,29 @@ document.addEventListener('keydown', (e)=>{
 });
 
 /* ==================== 导出 ==================== */
-async function loadCJKFont(doc){
-  // 尝试嵌入中文字体(可选)：若 lib/cjk.ttf 存在则导出"得分："标签；否则仅导出数字
-  const urls = ['lib/cjk.ttf','lib/simsun.ttf','lib/msyh.ttf'];
-  for(const u of urls){
+// 中文字体字节：1) Rust 读系统字体(simhei.ttf 等 .ttf) 2) 兜底 web/lib 下的字体文件
+async function loadCJKBytes(){
+  try{ if(window.__bridge && window.__bridge.readFont){ return await window.__bridge.readFont('simhei.ttf'); } }catch(e){}
+  for(const u of ['lib/cjk.ttf','lib/simsun.ttf','lib/msyh.ttf']){
     try{
       const resp = await fetch(u);
       if(!resp.ok) continue;
-      const buf = await resp.arrayBuffer();
-      return await doc.embedFont(buf);
+      return new Uint8Array(await resp.arrayBuffer());
     }catch(e){ /* 继续尝试下一个 */ }
   }
+  return null;
+}
+function fullTimeStamp(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes()); }
+
+async function loadCJKFont(doc){
+  // 尝试嵌入中文字体(可选)：系统字体 → lib/ 下字体文件；都没有则返回 null（批注降级为纯数字）
+  try{
+    const bytes = await loadCJKBytes();
+    if(bytes){
+      if(window.fontkit){ try{ doc.registerFontkit(window.fontkit); }catch(e){} }
+      return await doc.embedFont(bytes.slice(0), { subset: true });   // 子集嵌入：只嵌用到的字形，避免整字体(≈10MB)塞进 PDF
+    }
+  }catch(e){ /* 降级 */ }
   return null;
 }
 
@@ -2009,26 +2039,89 @@ async function exportOne(r){
   await deliverExport((r.name.replace(/\.pdf$/i,'') || 'report') + '_已批阅.pdf', blob);
 }
 
+/* 【已停用】旧版单份盖章 exportOne（见上方保留代码）：数据源是批改会话内存 S.reports，
+   且坐标依赖模板框选分析；v0.1.112 起改用下方库驱动的 exportScoredPdf 批量导出。 */
+
+/* 带批阅痕迹的原始文件：批量导出（v0.1.112 库驱动重写）
+   数据全部来自库：prep_overview(改名文件清单) + list_all_grading(成绩) + get_report_locate(打分位置)；
+   在「改名后的 PDF」上按 titleY_pct(行高)/titleX_pct(文字区右缘) 盖红字「得分/满分」——
+   与批改界面红字同一位置；首页页脚可附批阅教师+时间戳。逐份写 output/带批阅痕迹/。 */
 async function exportScoredPdf(){
   try{
     if(!S.pdflibOk){ setErr('pdf-lib 未加载, 无法导出（检查 web/lib 目录）'); return; }
-    const list = (S.reports||[]).filter(r=>r && !r.missing);
-    if(!list.length){ setErr('没有可导出的报告'); return; }
-    setDetect('⏳ 正在导出 ' + list.length + ' 份...');
-    let ok=0, fail=0;
-    for(const r of list){
+    if(!window.__bridge || !S.folder){ setErr('仅 Tauri 模式支持'); return; }
+    const { PDFDocument, StandardFonts, rgb } = PDFLib;
+    const ov = await window.__bridge.prepOverview(S.folder);
+    const rows = ((ov&&ov.rows)||[]).filter(r=>r && r.matched && r.renamed_path);
+    if(!rows.length){ setErr('没有已挂靠改名的报告，请先在准备面板完成核对/挂靠/改名'); return; }
+    let grades=[]; try{ grades = await fetchAllGrades(); }catch(e){}
+    const gByKey={}; (grades||[]).forEach(g=>{ if(g&&g.fname) gByKey[g.fname]=g; });
+    const opt = EXP_CHECKS['annotated']||{};
+    const showScore = opt[0]!==false, showFoot = opt[1]!==false;
+    const cjkBytes = await loadCJKBytes();
+    const red = rgb(0.82,0.05,0.05), gray = rgb(0.45,0.45,0.45);
+    let ok=0, fail=0, skip=0;
+    for(let idx=0; idx<rows.length; idx++){
+      const t = rows[idx];
+      setDetect('⏳ 正在导出带批阅痕迹 PDF（'+(idx+1)+'/'+rows.length+'）：'+((t.renamed_path||'').split(/[\\/]/).pop()||''));
+      // 成绩按原始文件名(report_key)匹配
+      const g = gByKey[t.key];
+      let scores=[], maxs=[];
+      if(g && g.draft){ try{ const d=JSON.parse(g.draft); scores=d.scores||[]; maxs=d.maxs||[]; }catch(e){} }
+      if(!scores.length || scores.every(s=>s==null)){ skip++; continue; }   // 未批阅：跳过
       try{
-        await ensureLoaded(r);
-        if(!r.analysis){ fail++; continue; }
-        await exportOne(r);
+        // 打分位置（与批改渲染同源：locate_json 的 titleY_pct/titleX_pct）
+        const locMap={};
+        try{
+          const locJ = await window.__bridge.getReportLocate(S.folder, t.key);
+          if(locJ){ JSON.parse(locJ).items.forEach(li=>{ if(li && li.item_index!=null) locMap[li.item_index]=li; }); }
+        }catch(e){}
+        const bytes = await window.__bridge.readPdf(S.folder, t.renamed_path);
+        const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+        const pdfDoc = await PDFDocument.load(u8.buffer.slice(u8.byteOffset, u8.byteOffset+u8.byteLength));
+        const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+        let cjk=null;
+        if(cjkBytes){
+          try{
+            if(window.fontkit) pdfDoc.registerFontkit(window.fontkit);   // 自定义字体必须先注册 fontkit
+            cjk = await pdfDoc.embedFont(cjkBytes.slice(0), { subset: true });   // 子集嵌入，控制体积
+          }catch(e){ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[导出痕迹] 中文字体嵌入失败(页脚将省略): '+(e&&e.message?e.message:e)); }
+        }
+        let stamped=0;
+        for(let i=0;i<scores.length;i++){
+          const sc=scores[i], lc=locMap[i];
+          if(!showScore || sc==null || !lc || lc.titleY_pct==null || lc.pageIndex==null) continue;
+          let page;
+          try{ page = pdfDoc.getPage(lc.pageIndex); }catch(e){ continue; }
+          const W=page.getWidth(), H=page.getHeight();
+          const maxv=(maxs[i]!=null && maxs[i]!=='') ? maxs[i] : null;
+          const txt=String(sc)+(maxv!=null?('/'+maxv):'');
+          const size=12;
+          const w=font.widthOfTextAtSize(txt, size);
+          let x=(lc.titleX_pct!=null && lc.titleX_pct>0) ? (W*lc.titleX_pct - w - 8) : (W - 70 - w);
+          if(x<10) x=10;
+          // titleY_pct 为标题行纵向中心，基线下移 0.3 字号使文字视觉居中于该行
+          const y = H*(1-lc.titleY_pct) - size*0.3;
+          page.drawText(txt, { x, y, size, font, color: red });
+          stamped++;
+        }
+        if(showFoot && cjk){
+          const page0 = pdfDoc.getPage(0);
+          const foot = '批阅教师：'+(S.teacher||'')+'　批阅时间：'+fullTimeStamp();
+          page0.drawText(foot, { x:40, y:20, size:9, font:cjk, color:gray });
+        }
+        const out = await pdfDoc.save();
+        const blob = new Blob([out], {type:'application/pdf'});
+        const fname = (t.renamed_path.split(/[\\/]/).pop()) || ((t.key||'report')+'_已批阅.pdf');
+        await deliverExport('带批阅痕迹/'+fname, blob);
         ok++;
+        if(window.__bridge.log) window.__bridge.log('[导出痕迹] '+fname+' 盖章 '+stamped+' 项');
       }catch(e){
         fail++;
-        if(window.__bridge && window.__bridge.log){ window.__bridge.log('exportOne 失败 '+(r.name||'')+': '+(e&&e.message?e.message:e)); }
+        if(window.__bridge && window.__bridge.log) window.__bridge.log('[导出痕迹失败] '+(t.renamed_path||t.key)+': '+(e&&e.message?e.message:e));
       }
     }
-    setErr('');
-    setDetect('✅ 已导出 ' + ok + ' 份' + (fail ? '，失败 ' + fail + ' 份' : '') + ' 到 output/');
+    setDetect('✅ 带批阅痕迹导出完成：成功 '+ok+' 份'+(skip?('，未批跳过 '+skip+' 份'):'')+(fail?('，失败 '+fail+' 份'):'')+' → output/带批阅痕迹/');
   }catch(e){
     setErr('导出失败: ' + (e && e.message ? e.message : e));
   }

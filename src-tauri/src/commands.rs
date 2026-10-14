@@ -166,18 +166,40 @@ pub fn mark_excluded(folder: String, report_key: String) -> Result<(), String> {
     db::mark_excluded(&conn, rid)
 }
 
-/// 导出产物写入 output/ 目录
+/// 导出产物写入 output/ 目录（name 支持 "子目录/文件名.pdf"，逐段清洗防目录穿越）
 #[tauri::command]
 pub fn save_to_output(folder: String, name: String, data: Vec<u8>) -> Result<String, String> {
     let out_dir = Path::new(&folder).join(db::OUTPUT_DIR);
-    fs::create_dir_all(&out_dir).map_err(|e| format!("创建 output 失败: {e}"))?;
-    let safe: String = name
-        .chars()
-        .map(|c| if "\\/:*?\"<>|".contains(c) { '_' } else { c })
-        .collect();
-    let path = out_dir.join(&safe);
+    let rel: std::path::PathBuf = name
+        .split(['/', '\\'])
+        .filter(|seg| !seg.is_empty() && *seg != "." && *seg != "..")
+        .map(|seg| {
+            let safe: String = seg
+                .chars()
+                .map(|c| if ":*?\"<>|".contains(c) { '_' } else { c })
+                .collect();
+            std::path::PathBuf::from(safe)
+        })
+        .fold(std::path::PathBuf::new(), |acc, p| acc.join(p));
+    if rel.as_os_str().is_empty() { return Err("非法的导出文件名".into()); }
+    let path = out_dir.join(&rel);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建导出目录失败: {e}"))?;
+    }
     fs::write(&path, &data).map_err(|e| format!("写入 output 失败: {e}"))?;
     Ok(path.to_string_lossy().into_owned())
+}
+
+/// 读取系统中文字体（白名单，仅 .ttf 单字体文件，pdf-lib 可嵌入），供导出批注用
+#[tauri::command]
+pub fn read_font(name: String) -> Result<Vec<u8>, String> {
+    const ALLOW: [&str; 4] = ["simhei.ttf", "simfang.ttf", "simkai.ttf", "stkaiti.ttf"];
+    if !ALLOW.contains(&name.to_lowercase().as_str()) {
+        return Err(format!("不支持的字体: {name}"));
+    }
+    let win = std::env::var("windir").unwrap_or_else(|_| "C:\\Windows".to_string());
+    let p = Path::new(&win).join("Fonts").join(&name);
+    fs::read(&p).map_err(|e| format!("读取字体失败({name}): {e}"))
 }
 
 /// 将 renamed/ 目录下所有改名报告打包为一个 ZIP，写入 output/改名文件包.zip

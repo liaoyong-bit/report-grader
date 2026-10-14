@@ -55,7 +55,8 @@
 | `resolve_unmatched` | 处理未匹配：挂到学生 / 不导入 |
 | `read_pdf` | 读 PDF 字节给前端 |
 | `save_grading_state` | 保存批阅草稿/提交固化 |
-| `save_to_output` | 导出产物写入 `output/` |
+| `save_to_output` | 导出产物写入 `output/`（name 支持"子目录/文件名"，逐段清洗防穿越） |
+| `read_font` | 读系统中文字体（白名单 simhei/simfang/simkai/stkaiti 的 .ttf）供 pdf-lib 嵌入批注 |
 
 ### 数据库四表
 `batches`（批次）/ `students`（名单）/ `reports`（报告+批阅状态）/ `report_items`（逐项评分）。批阅状态存 `reports.draft`（草稿）与 `final_scores`（提交固化），`done=true` 视为提交。
@@ -186,6 +187,23 @@
 - **标题/段落误合并**：膨胀不再负责纵向合段，改为行带级显式归并（字号突变断开、
   分隔线判据=间隙行里重叠区之外的横向长 barrier），标题独立成块、段落整段一块；
 - **行带左右边界 bug**：行带关闭前的残行（如 1px 残线）会把带的 left/right 覆盖成 1px 宽。
+
+---
+
+## 导出面板（v0.1.112 重做）
+
+| 项目 | 行为 |
+|---|---|
+| **学生成绩总表** | Excel（exceljs），列勾选动态生效。 |
+| **改名后的原始文件** | 打包 `renamed/` 目录 → `output/改名文件包.zip`；打包预览中**点击文件名**用系统默认 PDF 程序打开该文件（`open_external`）。 |
+| **带批阅痕迹的原始文件** | **库驱动批量导出**：`prep_overview`（已挂靠改名的报告）+ `list_all_grading`（成绩，按原始文件名匹配）+ `get_report_locate`（打分位置）→ 在**改名后的 PDF** 上，每题标题行右缘（`titleX_pct`，往左收 8px）盖红字「得分/满分」（12pt，基线下移 0.3 字号视觉居中于 `titleY_pct` 行）——与批改界面红字同一位置；首页页脚灰色小字「批阅教师：X　批阅时间：yyyy-mm-dd hh:mm」（需中文字体，读系统 simhei.ttf）。逐份写 `output/带批阅痕迹/<改名文件名>`；未批阅的报告自动跳过；结束报成功/跳过/失败计数。 |
+| ~~批阅报告~~ | 【已移除】自制排版汇总 PDF，用户不需要；`exportReportPdfs` 代码保留备用。 |
+
+- 旧版「带批阅痕迹」`exportOne`（数据源=批改会话内存 `S.reports`、坐标依赖模板框选）已停用保留。
+- **中文字体链路**：pdf-lib 嵌入自定义字体必须注册 fontkit —— 新增 `web/lib/fontkit.umd.min.js`（@pdf-lib/fontkit 1.1.1，index.html 引入），
+  Rust `read_font` 读系统 simhei.ttf → 前端 `embedFont(bytes, {subset:true})` 子集嵌入（页脚仅增 ~4KB，不嵌则全字体 ≈10MB/份）。
+  无字体可用时自动降级：分数照常盖（纯数字），仅省略中文页脚。
+- 修复：`tauri-bridge.js` 中 `getAllGrades` 误嵌进 `saveToOutput` 函数体（导致桥接未注册、总表走浏览器兜底）。
 
 ---
 

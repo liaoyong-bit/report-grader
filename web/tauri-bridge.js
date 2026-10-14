@@ -230,14 +230,19 @@
     return await invoke('block_get_rows', { folder, reportKey });
   };
 
-  // —— 导出产物写入 output/（替代浏览器下载）
+  // —— 导出产物写入 output/（替代浏览器下载；name 支持 "子目录/文件名"）
   window.__bridge.saveToOutput = async (name, bytes) => {
     await invoke('save_to_output', { folder: app.S.folder, name, data: Array.from(bytes) });
+  };
 
   // ---- 全量成绩清单（所有学生，供保存全部成绩 CSV / 批阅概览表格）
   window.__bridge.getAllGrades = async () => {
     return await invoke('list_all_grading', { folder: app.S.folder });
   };
+
+  // ---- 读系统中文字体字节（白名单 simhei/simfang/simkai/stkaiti），供 pdf-lib 嵌入批注
+  window.__bridge.readFont = async (name) => {
+    return await invoke('read_font', { name });
   };
 
   // —— 名单模板下载：Tauri 下弹系统保存对话框写文件（覆盖浏览器 downloadBlob）
