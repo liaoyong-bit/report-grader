@@ -3204,6 +3204,8 @@ function floodTextRegion(data,W,H,isBg){
   // 微扩 2px 包容封闭白，避免裁剪表内格线
   return {T:Math.max(0,minY-2), B:Math.min(H-1,maxY+2), L:Math.max(0,minX-2), R:Math.min(W-1,maxX+2)};
 }
+/* ==================== 【已停用】表结构识别：定表区域 / 横线增强 ====================
+   按新需求：不再识别表格结构（横线/竖线/网格/格子），整段代码注释保留，后续需要可再启用。
 // 定表区域(黑色flood连框线)：文字区域内找"整行绝大多数黑"的贯通行=横线，
 // 以每根横线的黑色像素为种子做黑色4-连通flood，沿真实边框线把相连的横线+竖线勾成黑色连通块；
 // 每个黑连通块的外接矩形 = 一张表的区域；表内被黑线分割出的白色连通块 = 格子(或合并格)。
@@ -3291,6 +3293,7 @@ function enhanceHLine(data, W, H, isBg, k=3, minLen){
     }
   }
 }
+*/
 // 渲染页面上一个比例区域（左/上/宽/高均为0-1比例），返回该区域b64 —— 供逐段聚焦OCR
 async function renderAreaB64(pdf, pageIdx, leftPct, topPct, wPct, hPct, scale){
   const page=await pdf.getPage(pageIdx+1);
@@ -3308,6 +3311,27 @@ async function renderAreaB64(pdf, pageIdx, leftPct, topPct, wPct, hPct, scale){
   c2.getContext('2d').putImageData(img,0,0);
   return c2.toDataURL('image/png').split(',')[1];
 }
+/* 渲染整页为 canvas（供"页级缓存 + 块区域裁剪"用，避免逐块整页重渲） */
+async function renderPageCanvas(pdf, pageIdx, scale){
+  const page=await pdf.getPage(pageIdx+1);
+  const vp=page.getViewport({scale});
+  const cv=document.createElement('canvas');
+  cv.width=Math.floor(vp.width); cv.height=Math.floor(vp.height);
+  await page.render({canvasContext:cv.getContext('2d'), viewport:vp}).promise;
+  return cv;
+}
+/* 从页画布裁剪 0-1 比例区域，浅灰底纹置白后返回 b64（与 renderAreaB64 同一处理口径） */
+function cropCanvasB64(cv, leftPct, topPct, wPct, hPct){
+  const W=cv.width, H=cv.height;
+  const px=Math.max(0,Math.floor(leftPct*W)), py=Math.max(0,Math.floor(topPct*H));
+  const pw=Math.max(8,Math.min(W-px,Math.ceil(wPct*W))), ph=Math.max(8,Math.min(H-py,Math.ceil(hPct*H)));
+  const img=cv.getContext('2d').getImageData(px,py,pw,ph);
+  try{ washShading(img.data,pw,ph); }catch(e){}       // 浅灰底纹置白，提升识别率
+  const c2=document.createElement('canvas'); c2.width=pw; c2.height=ph;
+  c2.getContext('2d').putImageData(img,0,0);
+  return c2.toDataURL('image/png').split(',')[1];
+}
+
 // 把整页OCR的行按纵向距离自动聚合成"段落框"（自动框选文字段落）：每段含位置(top/left/right/bottom)+文本
 function clusterLines(lines, gap=0.016){
   const arr=(lines||[]).slice().sort((a,b)=>(a.top||0)-(b.top||0));
@@ -3326,6 +3350,10 @@ function clusterLines(lines, gap=0.016){
   }
   return blocks;
 }
+/* ==================== 【已停用】页面结构分析 analyzePage（表结构识别） ====================
+   原逻辑：文字行带 / 表格横线 / 竖线 → 重建网格 → 定表区域 → 表内格子。
+   按新需求（文字分块 + 逐块 OCR）整体停用，代码注释保留；
+   新的页面分析见下方 analyzeScanPage（仅做文字分块，不碰表格结构）。
 // 逐像素行扫描检测"文字行带"：文字行是连续多条像素行且行内黑白交替(非背景像素占比适中)，空白行没有。
 // 返回段落块(top/bottom 比例)——字体大小不影响，按真实文字区域切分。
 // 页面结构分析（逐像素行扫描）：区分 文字行带 / 表格横线 / 空白；检测表格竖线→重建网格；并反推字号(A4)
@@ -3461,6 +3489,107 @@ async function analyzePage(pdf, pageIdx, scale=2){
     pageRight: maxRightPx>0 ? Math.round(maxRightPx/W*10000)/10000 : null
   };
 }
+*/
+
+/* ==================== 文字分块 detectTextBlocks（新：替代表结构识别） ====================
+   目标：把扫描页里"相互靠在一起的文字"判为一块，一块一次送 OCR。
+   三步（纯像素层，不涉及横线/竖线/网格）：
+     ① 逐像素行统计"墨迹"（非近白像素）数量 → 连续有墨的行合并为"文字行带"；
+     ② 行带内逐列扫描 → 被超过 gapX 的空白分开的片段各自成段（同一行内靠在一起的文字保持一段）；
+     ③ 纵向相邻的两段：横向有重叠 且 行间距 ≤ gapY → 合并进同一块（同一段落的若干行合成一块）。
+   返回 [{top,bottom,left,right}]（像素坐标，调用方归一化）。
+   可调参数（opt）：inkTh 行内墨迹占比下限；gapX 行内切段空白（页宽比例）；gapY 纵向合并间距（页高比例）。
+*/
+function detectTextBlocks(data, W, H, region, opt){
+  const inkTh=(opt&&opt.inkTh)||0.004;      // 一行里墨迹像素占文字区宽度比例 ≥ 该值才算"有字的行"
+  const gapXR=(opt&&opt.gapX)||0.035;       // 行内切段：空白 > gapXR*页宽 才断成两段（约 3~4 个字宽）
+  const gapYR=(opt&&opt.gapY)||0.012;       // 纵向合并：两段行间距 ≤ gapYR*页高 才并入同一块（约半行高）
+  const L=Math.max(0,region.L), R=Math.min(W-1,region.R), T=Math.max(0,region.T), B=Math.min(H-1,region.B);
+  const isInk=(i)=>!(data[i]>242&&data[i+1]>242&&data[i+2]>242);   // 非近白即墨迹
+  const gapX=Math.max(4, Math.round(gapXR*W)), gapY=Math.max(2, Math.round(gapYR*H));
+  const inkThN=Math.max(1, Math.round(inkTh*(R-L+1)));
+
+  // ① 逐像素行：连续有墨行 → 文字行带
+  const bands=[]; let bs=-1;
+  for(let y=T;y<=B;y++){
+    let cnt=0; const off=y*W;
+    for(let x=L;x<=R;x++){ if(isInk((off+x)*4)) cnt++; }
+    if(cnt>=inkThN){ if(bs<0) bs=y; }
+    else if(bs>=0){ bands.push({top:bs,bottom:y-1}); bs=-1; }
+  }
+  if(bs>=0) bands.push({top:bs,bottom:B});
+
+  // ② 行带内逐列切段：连续空白 ≥ gapX 才断开，否则视为同一段（靠在一起的文字不拆开）
+  const segs=[];
+  for(const bd of bands){
+    const cols=new Uint8Array(R-L+1);
+    for(let x=L;x<=R;x++){
+      for(let y=bd.top;y<=bd.bottom;y++){ if(isInk((y*W+x)*4)){ cols[x-L]=1; break; } }
+    }
+    let s=-1, lastInk=-1, gap=0;
+    for(let i=0;i<cols.length;i++){
+      const x=L+i;
+      if(cols[i]){ if(s<0) s=x; lastInk=x; gap=0; }
+      else if(s>=0){ gap++; if(gap>=gapX){ segs.push({top:bd.top,bottom:bd.bottom,left:s,right:lastInk}); s=-1; gap=0; } }
+    }
+    if(s>=0) segs.push({top:bd.top,bottom:bd.bottom,left:s,right:lastInk});
+  }
+
+  // ③ 纵向相邻 + 横向重叠 → 并查集合并成块
+  const n=segs.length; if(!n) return [];
+  const parent=new Array(n); for(let i=0;i<n;i++) parent[i]=i;
+  const find=(i)=>{ while(parent[i]!==i){ parent[i]=parent[parent[i]]; i=parent[i]; } return i; };
+  const uni=(i,j)=>{ const a=find(i),b=find(j); if(a!==b) parent[a]=b; };
+  for(let i=0;i<n;i++) for(let j=i+1;j<n;j++){
+    const a=segs[i], b=segs[j];
+    const ovX=Math.min(a.right,b.right)-Math.max(a.left,b.left);
+    if(ovX<=0) continue;                                     // 横向不重叠 → 不同块
+    const minW=Math.min(a.right-a.left, b.right-b.left);
+    if(ovX < Math.min(minW*0.15, gapX)) continue;            // 重叠太少 → 视为并排的不同块
+    const gapV=(a.top>=b.bottom)?(a.top-b.bottom):((b.top>=a.bottom)?(b.top-a.bottom):-1);
+    if(gapV<0 || gapV>gapY) continue;                        // 行间距过大 → 不同块
+    uni(i,j);
+  }
+  const groups=new Map();
+  for(let i=0;i<n;i++){ const r=find(i); if(!groups.has(r)) groups.set(r,[]); groups.get(r).push(segs[i]); }
+  const blocks=[];
+  for(const grp of groups.values()){
+    let top=1e9,bottom=-1,left=1e9,right=-1;
+    for(const s of grp){ if(s.top<top)top=s.top; if(s.bottom>bottom)bottom=s.bottom; if(s.left<left)left=s.left; if(s.right>right)right=s.right; }
+    if(right-left>=3 && bottom-top>=3) blocks.push({top,bottom,left,right});
+  }
+  blocks.sort((a,b)=>a.top-b.top||a.left-b.left);
+  return blocks;
+}
+
+/* ==================== 扫描页分析 analyzeScanPage（新） ====================
+   渲染 → 浅灰底纹置白 → 去页边得文字区域 → detectTextBlocks 分块 → 归一化为 0-1 比例。
+   注意：只做文字分块，不再输出横线/竖线/网格/格子。
+*/
+async function analyzeScanPage(pdf, pageIdx, scale=2){
+  const page=await pdf.getPage(pageIdx+1);
+  const vp=page.getViewport({scale});
+  const canvas=document.createElement('canvas');
+  canvas.width=Math.floor(vp.width); canvas.height=Math.floor(vp.height);
+  await page.render({canvasContext:canvas.getContext('2d'), viewport:vp}).promise;
+  const W=canvas.width, H=canvas.height;
+  const empty={ blocks:[], region:null };
+  if(!W||!H) return empty;
+  const data=canvas.getContext('2d').getImageData(0,0,W,H).data;
+  try{ washShading(data,W,H); }catch(e){}                 // 浅灰底纹置白，让底纹上的文字浮现
+  const isBg=(i)=>{ const r=data[i],g=data[i+1],b=data[i+2]; return r>242&&g>242&&b>242; };
+  const region=floodTextRegion(data,W,H,isBg);             // 去页边：内容区边框
+  let blocks=[]; try{ blocks=detectTextBlocks(data,W,H,region); }catch(e){ blocks=[]; }
+  return {
+    page_w:W, page_h:H,
+    region:{ T:Math.round(region.T/H*10000)/10000, B:Math.round(region.B/H*10000)/10000,
+             L:Math.round(region.L/W*10000)/10000, R:Math.round(region.R/W*10000)/10000 },
+    blocks: blocks.map(b=>({
+      top:Math.round(b.top/H*10000)/10000, bottom:Math.round((b.bottom+1)/H*10000)/10000,
+      left:Math.round(b.left/W*10000)/10000, right:Math.round((b.right+1)/W*10000)/10000
+    }))
+  };
+}
 // 最长连续公共子串长度（标题与识别文本），用于匹配容错
 function longestContMatch(a,b){
   const m=a.length,n=b.length; if(!m||!n) return 0;
@@ -3471,6 +3600,10 @@ function longestContMatch(a,b){
   }
   return mx;
 }
+/* ==================== 【已停用】扫描版旧定位链（逐行 OCR + 表格网格 + 标题匹配） ====================
+   含 findTitleInScan / locateReportTitlesScan / locateReportTitlesScanDB 三个函数，
+   依赖已停用的 analyzePage 与表结构数据，整体注释保留；
+   新的扫描处理见下方 scanReportBlocksDB（文字分块 → 逐块 OCR → 落库 → 预览）。
 // 扫描版定位：①像素结构分析(文字行+表格网格) → ②逐行OCR(一行一行送,含表格行带) → ③表格格内OCR补充 → ④跨行拼接匹配 → ⑤框选模板区域兜底
 async function findTitleInScan(pdf, target, pageIdx, titleRectJson){
   const p=pageIdx||0;
@@ -3628,7 +3761,7 @@ async function locateReportTitlesScanDB(path, tpl, reportKey){
     const pdf=await pdfjsLib.getDocument({data:bytes.slice(0)}).promise;
     const norm=(s)=>(s||'').replace(/\s+/g,'').replace(/[，。、；：（）()【】《》"'“”]/g,'');
     // 截掉最前面的序号("一、""1."等)和顿号：OCR 常漏识别序号，去掉后题目与识别文本才能对上
-    const stripSeq=(s)=>(s||'').replace(/^\s*[一二三四五六七八九十]+[、．.\s]*/,'');
+    const stripSeq=(s)=>(s||'').replace(/^\s*[一二三四五六七八九十]+[、．.\s]* /,'');
     const items=[]; let fully=true;
     const bandList=[]; let pageRight=null;
     const pageStruct=[];
@@ -3727,6 +3860,90 @@ async function locateReportTitlesScanDB(path, tpl, reportKey){
     }catch(e){ LD('scanSaveStruct ERR '+e); }
     return {items, fully, fullText, rows: renderRows, pages: pgOut};
   }catch(e){ LD('locateReportTitlesScanDB CATCH '+e); return {items:[], fully:false, fullText:'', rows:[]}; }
+}
+*/
+
+/* ==================== 扫描版：文字分块 + 逐块 OCR + 落库（新） ====================
+   流程：
+     ① 逐页 analyzeScanPage → 得到"相互靠在一起的文字"块（0-1 位置比例）；
+     ② 全部块先入库（scan_block）拿到全局唯一 KEY(id)；
+     ③ 逐块渲染该区域（scale4，四周留白防裁字）→ 送 Windows OCR → 按 KEY 写回识别文本；
+     ④ 从库读回全部块（KEY/页码/序号/位置/OCR文本），供预览与标题匹配使用。
+   返回 { items, fully, fullText, rows(库中块), pages(每页块数) }
+*/
+async function scanReportBlocksDB(path, tpl, reportKey){
+  const LD=(m)=>{ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[分块] '+m); };
+  try{
+    const bytes=await window.__bridge.readPdf(S.folder, path);
+    const pdf=await pdfjsLib.getDocument({data:bytes.slice(0)}).promise;
+    // ① 逐页分块
+    const all=[]; const pageInfo=[];
+    for(let p=0;p<pdf.numPages;p++){
+      let ana=null; try{ ana=await analyzeScanPage(pdf,p,2); }catch(e){ LD('analyzeScanPage p'+p+' err '+e); }
+      const blocks=(ana&&ana.blocks)||[];
+      pageInfo.push({blocks:blocks.length});
+      blocks.forEach((b,i)=>all.push({pageIndex:p, seq:i, top:b.top, bottom:b.bottom, left:b.left, right:b.right}));
+    }
+    LD('总块数='+all.length+' 页数='+pdf.numPages);
+    // ② 入库拿 KEY（同一份报告先清旧块）
+    const ids=await window.__bridge.blockInit(S.folder, reportKey, all).catch(e=>{ LD('blockInit ERR '+e); return []; });
+    LD('blockInit ids='+ids.length);
+    // ③ 逐块 OCR，按 KEY 写回（页级缓存：同一页只渲染一次 scale4 画布，块区域从画布裁剪）
+    let curPage=-1, curCv=null;
+    for(let i=0;i<ids.length && i<all.length;i++){
+      const b=all[i];
+      if(b.pageIndex!==curPage){
+        curPage=b.pageIndex;
+        try{ curCv=await renderPageCanvas(pdf, curPage, 4); }catch(e){ curCv=null; LD('pageCanvas p'+curPage+' err '+e); }
+      }
+      if(!curCv) continue;
+      const padX=0.004, padY=0.004;                     // 四周留白，防裁字
+      const left=Math.max(0, b.left-padX), top=Math.max(0, b.top-padY);
+      const right=Math.min(1, b.right+padX), bottom=Math.min(1, b.bottom+padY);
+      const w=Math.max(0.004, right-left), h=Math.max(0.004, bottom-top);
+      const ab64=cropCanvasB64(curCv, left, top, w, h);
+      const l=(await window.__bridge.ocrImageB64Words(ab64).catch(e=>{ LD('ocr k'+ids[i]+' err '+e); return []; }))||[];
+      const text=(l||[]).map(x=>x.text).join('');
+      await window.__bridge.blockSetOcr(S.folder, ids[i], text).catch(e=>{ LD('blockSetOcr ERR id'+ids[i]+' '+e); });
+    }
+    LD('逐块OCR完成 '+ids.length);
+    // ④ 从库读回全部块
+    const rows=await window.__bridge.blockGetRows(S.folder, reportKey).catch(e=>{ LD('blockGetRows ERR '+e); return []; })||[];
+    LD('blockGetRows rows='+rows.length);
+    // ⑤ 标题匹配：在块文本里找每题标题 → 得到批改定位（题号/页/纵向位置）
+    const {items, fully}=matchTitlesInBlocks(rows, tpl||[]);
+    const fullText=(rows||[]).map(r=>r.text).filter(t=>t&&t.trim()).join('\n');
+    LD('标题匹配 items='+items.length+' fully='+fully);
+    return { items, fully, fullText, rows, pages: pageInfo };
+  }catch(e){ LD('scanReportBlocksDB CATCH '+e); return {items:[], fully:false, fullText:'', rows:[], pages:[]}; }
+}
+
+/* 在文字块文本里匹配题目标题：块即"相互靠在一起的文字"，
+   位置取该块纵向中心（与旧的"行中心"语义一致），横向取该块右缘（供得分叠加对齐）。 */
+function matchTitlesInBlocks(rows, tpl){
+  const norm=(s)=>(s||'').replace(/\s+/g,'').replace(/[，。、；：（）()【】《》"'“”]/g,'');
+  const stripSeq=(s)=>(s||'').replace(/^\s*[一二三四五六七八九十]+[、．.\s]*/,'');
+  const items=[]; let fully=true;
+  for(const it of tpl){
+    const tn=stripSeq(norm(locateTarget(it)));
+    let hit=null;
+    for(const r of (rows||[])){
+      const rt=stripSeq(norm(r.text));
+      if(!rt) continue;
+      if(rt.includes(tn) || (tn.length>0 && longestContMatch(tn,rt)/tn.length>=0.8)){ hit=r; break; }
+    }
+    if(hit){
+      const midY=(hit.top+hit.bottom)/2;
+      items.push({ item_index:it.item_index, pageIndex:hit.page_index,
+        titleY_pct:Math.round(midY*10000)/10000,
+        titleX_pct:(hit.right!=null?Math.round(hit.right*10000)/10000:null),
+        ocr_text:hit.text });
+    } else {
+      items.push({ item_index:it.item_index, pageIndex:null, titleY_pct:null, titleX_pct:null, ocr_text:'' });
+      fully=false;
+    }
+  }
+  return {items, fully};
 }
 // 探测 PDF 是否有文字层（首页文本量）
 async function hasTextLayer(path){
@@ -3835,31 +4052,132 @@ async function runLocatePositions(){
   }
   const scanList=[...scanNeed, ...toScan];
   if(scanList.length){
-    showVerifyProgress(scanList.length, '第2步：扫描版定位');
-    // 每次定位前清空定位库并重置自增id，避免行号持续累加、数据膨胀
-    try{ await window.__bridge.locateReset(S.folder); }catch(e){ L2('locateReset err '+e); }
+    showVerifyProgress(scanList.length, '第2步：扫描版文字分块 + OCR');
+    // 每轮扫描前清空文字块表并重置自增id，避免 KEY 持续累加、数据膨胀
+    try{ await window.__bridge.blockReset(S.folder); }catch(e){ L2('blockReset err '+e); }
     const previewData=[];
     for(const t of scanList){
       S._vpDone++; updateVerifyProgress();
-      const res=await locateReportTitlesScanDB(t.renamed_path, itemTpl, t.key);
+      const res=await scanReportBlocksDB(t.renamed_path, itemTpl, t.key);
       const locKey=t.key;                    // 数据库 report_key（原始文件名）
-      const assetKey=t.renamed_path.split(/[\\/]/).pop();   // 改名文件名（还原文本资产名）
+      const assetKey=t.renamed_path.split(/[\\/]/).pop();   // 改名文件名（全文识别资产名）
       if(res.items.length){ await saveLoc(locKey, res.items, 'auto'); doneScan++; }
       if(res.fullText && window.__bridge.saveScanText){
-        try{ await window.__bridge.saveScanText(S.folder, assetKey, res.fullText); }catch(e){ L2('保存还原文本失败 '+assetKey+': '+e); }
+        try{ await window.__bridge.saveScanText(S.folder, assetKey, res.fullText); }catch(e){ L2('保存识别全文失败 '+assetKey+': '+e); }
       }
       if(res.rows && res.rows.length){ previewData.push({key:t.key, path:t.renamed_path, rows:res.rows, items:res.items||[], pages:res.pages||[]}); }
     }
     hideVerifyProgress();
-    L2('扫描定位预览 previewData='+previewData.length);
+    L2('文字块预览 previewData='+previewData.length);
     if(previewData.length){ try{ await openScanPreview(previewData); }catch(e){ L2('预览弹窗失败 '+e); } }
-    else { L2('无预览数据: 扫描版定位未产出 rows'); }
+    else { L2('无预览数据: 扫描版未产出文字块'); }
   }
   refreshPrepOverview();
   setDetect('✅ 定位完成：自动定位 '+(doneText+doneScan)+' 份，未定位 '+(targets.length-doneText-doneScan)+' 份（可在核心表人工定位）');
 }
 
-/* ==================== 可视化扫描框选预览：左栏渲染PDF+自动框选叠加编号，右栏表格收集(序号/页码/行像素/表格标记/OCR结果) ==================== */
+/* ==================== 文字块预览（新）====================
+   左栏：渲染 PDF 页 + 每块橙色框（编号 = 数据库 KEY，悬停看识别文本与位置）；
+   右栏：块表（KEY / 页 / 序号 / 纵向位置% / 左右位置% / OCR 识别内容）。
+   纯展示"文字块"结果，不再叠加表格框与角点（表结构识别已停用）。
+================================================================ */
+async function openScanPreview(list){
+  const L=(m)=>{ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[预览] '+m); };
+  if(!(list&&list.length)) return;
+  let m=document.getElementById('scanPrev');
+  if(!m){ m=document.createElement('div'); m.id='scanPrev'; m.style.cssText='position:fixed;inset:0;z-index:1200;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;'; document.body.appendChild(m); }
+  m.innerHTML='';
+  const state={list, ri:0, page:0, pdf:null};
+  const box=document.createElement('div');
+  box.style.cssText='width:94vw;max-width:1280px;height:92vh;background:#fff;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.3);display:flex;flex-direction:column;overflow:hidden;';
+  m.appendChild(box);
+  const mkBtn=(txt,accent)=>{ const b=document.createElement('button'); b.textContent=txt; b.style.cssText='padding:6px 12px;border:1px solid #cbd5e1;background:'+(accent?'#0d9488':'#f8fafc')+';color:'+(accent?'#fff':'#334155')+';border-radius:6px;cursor:pointer;font-size:13px;margin:0 2px;'; return b; };
+  const head=document.createElement('div'); head.style.cssText='padding:10px 16px;border-bottom:1px solid #e5e8ec;display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+  head.innerHTML='<span style="font-weight:700;color:#2b3a55">扫描文字块预览</span><span id="spInfo" style="color:#666;font-size:13px"></span><span style="flex:1"></span><span style="color:#94a3b8;font-size:12px">每块 = 相互靠在一起的文字，编号即数据库 KEY</span>';
+  const bPrevR=mkBtn('◀ 上一份'), bNextR=mkBtn('下一份 ▶'), bPrevP=mkBtn('◀ 上一页'), bNextP=mkBtn('下一页 ▶'), bClose=mkBtn('关闭',1);
+  head.append(bPrevR,bNextR,bPrevP,bNextP,bClose); box.appendChild(head);
+  const body=document.createElement('div'); body.style.cssText='flex:1;display:flex;min-height:0;';
+  const left=document.createElement('div'); left.style.cssText='width:56%;position:relative;overflow:auto;background:#525659;';
+  const right=document.createElement('div'); right.style.cssText='width:44%;overflow:auto;background:#fff;border-left:1px solid #e5e8ec;';
+  body.append(left,right); box.appendChild(body);
+  const rowsOf=(r)=> (r.rows||[]).slice().sort((a,b)=>a.page_index-b.page_index || (a.seq||0)-(b.seq||0));
+  const info=()=>{
+    const r=state.list[state.ri];
+    const n=rowsOf(r).filter(x=>x.page_index===state.page).length;
+    document.getElementById('spInfo').textContent='报告 '+(state.ri+1)+'/'+state.list.length+'（'+r.key+'）· 第'+(state.page+1)+'页 / 共'+state.pdf.numPages+'页 · 本页 '+n+' 块';
+  };
+  async function loadPdf(force){
+    const r=state.list[state.ri];
+    if(force || !state.pdf){
+      const bytes=await window.__bridge.readPdf(S.folder, r.path);
+      state.pdf=await pdfjsLib.getDocument({data:bytes.slice(0)}).promise;
+      if(state.page>=state.pdf.numPages) state.page=0;
+    }
+  }
+  function buildRight(){
+    const r=state.list[state.ri];
+    right.innerHTML='';
+    const tbl=document.createElement('table');
+    tbl.style.cssText='width:100%;border-collapse:collapse;font-size:12px;';
+    tbl.innerHTML='<thead><tr style="background:#f1f5f9">'+
+      '<th style="padding:5px;border:1px solid #e2e8f0">KEY</th>'+
+      '<th style="padding:5px;border:1px solid #e2e8f0">页</th>'+
+      '<th style="padding:5px;border:1px solid #e2e8f0">序号</th>'+
+      '<th style="padding:5px;border:1px solid #e2e8f0">位置%(纵)</th>'+
+      '<th style="padding:5px;border:1px solid #e2e8f0">左右%</th>'+
+      '<th style="padding:5px;border:1px solid #e2e8f0;min-width:200px">OCR 识别内容</th></tr></thead><tbody>';
+    for(const b of rowsOf(r)){
+      tbl.innerHTML+='<tr>'+
+        '<td style="padding:4px;border:1px solid #e2e8f0;text-align:center;color:#e07b39;font-weight:700">'+(b.id!=null?b.id:'')+'</td>'+
+        '<td style="padding:4px;border:1px solid #e2e8f0;text-align:center">'+(b.page_index+1)+'</td>'+
+        '<td style="padding:4px;border:1px solid #e2e8f0;text-align:center">'+((b.seq!=null?b.seq:0)+1)+'</td>'+
+        '<td style="padding:4px;border:1px solid #e2e8f0">'+(b.top*100).toFixed(1)+'~'+(b.bottom*100).toFixed(1)+'</td>'+
+        '<td style="padding:4px;border:1px solid #e2e8f0">'+(b.left*100).toFixed(1)+'~'+(b.right*100).toFixed(1)+'</td>'+
+        '<td style="padding:4px;border:1px solid #e2e8f0;word-break:break-all">'+((b.text||'').replace(/</g,'&lt;'))+'</td></tr>';
+    }
+    tbl.innerHTML+='</tbody>';
+    right.appendChild(tbl);
+  }
+  async function renderLeft(){
+    const r=state.list[state.ri];
+    await loadPdf(false);
+    const b64=await renderPageB64(state.pdf, state.page, 2);
+    left.innerHTML='';
+    const wrap=document.createElement('div'); wrap.style.cssText='position:relative;';
+    const img=document.createElement('img'); img.src='data:image/png;base64,'+b64; img.style.cssText='display:block;width:100%;height:auto;';
+    wrap.appendChild(img); left.appendChild(wrap);
+    // 文字块框：编号 = 数据库 KEY；悬停显示识别文本与位置
+    for(const b of rowsOf(r)){
+      if(b.page_index!==state.page) continue;
+      const d=document.createElement('div');
+      d.style.cssText='position:absolute;left:'+(b.left*100).toFixed(2)+'%;top:'+(b.top*100).toFixed(2)+'%;width:'+Math.max(0.4,((b.right-b.left)*100)).toFixed(2)+'%;height:'+Math.max(0.4,((b.bottom-b.top)*100)).toFixed(2)+'%;border:1.5px solid #e07b39;background:rgba(224,123,57,.06);box-sizing:border-box;pointer-events:none;z-index:2;';
+      d.innerHTML='<span style="position:absolute;top:-15px;left:0;background:#e07b39;color:#fff;font-size:10px;padding:0 4px;border-radius:3px;white-space:nowrap">'+(b.id!=null?b.id:'')+'</span>';
+      d.title='KEY '+(b.id!=null?b.id:'')+' · 页'+((b.page_index||0)+1)+' · 纵'+(b.top*100).toFixed(1)+'%~'+(b.bottom*100).toFixed(1)+'%\n'+(b.text||'(未识别到文字)');
+      img.parentNode.appendChild(d);
+    }
+    // 标题匹配结果高亮(绿横线)：批改定位所在位置
+    for(const it of (r.items||[])){
+      if(it.pageIndex!==state.page || it.titleY_pct==null) continue;
+      const m2=document.createElement('div');
+      m2.style.cssText='position:absolute;left:0;right:0;top:'+(it.titleY_pct*100).toFixed(1)+'%;height:2px;background:#10b981;z-index:3;';
+      m2.title='题目'+((it.item_index!=null?it.item_index+1:'?'))+' 定位 y='+(it.titleY_pct*100).toFixed(1)+'%';
+      img.parentNode.appendChild(m2);
+    }
+    info();
+  }
+  async function render(){ await renderLeft(); buildRight(); }
+  const nav=async()=>{ try{ await render(); }catch(e){ L('render err '+e); } };
+  bPrevR.onclick=async()=>{ if(state.ri>0){ state.ri--; state.page=0; state.pdf=null; await nav(); } };
+  bNextR.onclick=async()=>{ if(state.ri<state.list.length-1){ state.ri++; state.page=0; state.pdf=null; await nav(); } };
+  bPrevP.onclick=async()=>{ if(state.page>0){ state.page--; await nav(); } };
+  bNextP.onclick=async()=>{ if(state.pdf && state.page<state.pdf.numPages-1){ state.page++; await nav(); } };
+  bClose.onclick=()=>{ m.remove(); };
+  await render();
+}
+
+/* ==================== 【已停用】旧扫描框选预览（表结构可视化：表格框 / 角点 / 格子编号） ====================
+   依赖已停用的 analyzePage 表结构数据，整段注释保留。
+// ==================== 可视化扫描框选预览：左栏渲染PDF+自动框选叠加编号，右栏表格收集(序号/页码/行像素/表格标记/OCR结果) ====================
 async function openScanPreview(list){
   const L=(m)=>{ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[预览] '+m); };
   if(!(list&&list.length)) return;
@@ -3996,6 +4314,7 @@ async function openScanPreview(list){
   bClose.onclick=()=>{ m.remove(); };
   await render();
 }
+*/
 
 /* ---- 人工定位兜底：对「待定位」的报告，拖动蓝框到每题标题行，只改纵向，横向沿用模板文字区右边缘(score_x) ---- */
 async function manualLocate(r){

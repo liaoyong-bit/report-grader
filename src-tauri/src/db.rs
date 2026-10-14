@@ -844,10 +844,89 @@ pub fn open_locate(folder: &str) -> Result<Connection, String> {
              matched_item INTEGER DEFAULT -1,
              processed INTEGER DEFAULT 0
          );
-         CREATE INDEX IF NOT EXISTS idx_loc_key ON loc_rows(report_key);",
+         CREATE INDEX IF NOT EXISTS idx_loc_key ON loc_rows(report_key);
+         CREATE TABLE IF NOT EXISTS scan_block(
+             id INTEGER PRIMARY KEY AUTOINCREMENT,   -- 全局唯一 KEY（前端持此编号写回 OCR 结果）
+             report_key TEXT NOT NULL,
+             page_index INTEGER DEFAULT 0,
+             seq INTEGER DEFAULT 0,                  -- 页内顺序（从上到下、从左到右）
+             top REAL DEFAULT 0, bottom REAL DEFAULT 0,
+             left REAL DEFAULT 0, right REAL DEFAULT 0,
+             text TEXT DEFAULT '',                   -- OCR 识别结果
+             ocr_done INTEGER DEFAULT 0
+         );
+         CREATE INDEX IF NOT EXISTS idx_block_key ON scan_block(report_key);",
     )
     .map_err(|e| format!("建定位表失败: {e}"))?;
     Ok(conn)
+}
+
+/* ==================== 扫描文字块（表结构识别已停用，改为"文字分块 + 逐块 OCR"） ====================
+   一块 = 一片相互靠在一起的文字（同一段落的若干行）。位置以 0-1 比例存 top/bottom/left/right，
+   OCR 结果回填到 text，id 即前端用来绑定的 KEY。 */
+pub fn block_clear(conn: &Connection, report_key: &str) -> Result<(), String> {
+    conn.execute("DELETE FROM scan_block WHERE report_key=?1", params![report_key])
+        .map(|_| ())
+        .map_err(|e| format!("清空文字块失败: {e}"))
+}
+
+pub fn block_insert(
+    conn: &Connection,
+    report_key: &str,
+    page_index: i64,
+    seq: i64,
+    top: f64,
+    bottom: f64,
+    left: f64,
+    right: f64,
+) -> Result<i64, String> {
+    conn.execute(
+        "INSERT INTO scan_block(report_key,page_index,seq,top,bottom,left,right) VALUES(?1,?2,?3,?4,?5,?6,?7)",
+        params![report_key, page_index, seq, top, bottom, left, right],
+    )
+    .map_err(|e| format!("插入文字块失败: {e}"))?;
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn block_set_ocr(conn: &Connection, id: i64, text: &str) -> Result<(), String> {
+    conn.execute("UPDATE scan_block SET text=?1, ocr_done=1 WHERE id=?2", params![text, id])
+        .map(|_| ())
+        .map_err(|e| format!("写入文字块OCR失败: {e}"))
+}
+
+pub fn block_rows(conn: &Connection, report_key: &str) -> Result<Vec<serde_json::Value>, String> {
+    let mut st = conn
+        .prepare(
+            "SELECT id,page_index,seq,top,bottom,left,right,text,ocr_done
+             FROM scan_block WHERE report_key=?1 ORDER BY page_index,seq",
+        )
+        .map_err(|e| format!("准备文字块查询失败: {e}"))?;
+    let rows = st
+        .query_map(params![report_key], |r| {
+            Ok(serde_json::json!({
+                "id": r.get::<_, i64>(0)?,
+                "page_index": r.get::<_, i64>(1)?,
+                "seq": r.get::<_, i64>(2)?,
+                "top": r.get::<_, f64>(3)?,
+                "bottom": r.get::<_, f64>(4)?,
+                "left": r.get::<_, f64>(5)?,
+                "right": r.get::<_, f64>(6)?,
+                "text": r.get::<_, String>(7)?,
+                "ocr_done": r.get::<_, i64>(8)?,
+            }))
+        })
+        .map_err(|e| format!("查询文字块失败: {e}"))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| format!("解析文字块失败: {e}"))
+}
+
+/// 重置文字块表：清空全部行并重置自增 id（每次扫描前调用，避免 id 累加、数据膨胀）
+pub fn block_reset(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "DELETE FROM scan_block;
+         DELETE FROM sqlite_sequence WHERE name='scan_block';",
+    )
+    .map_err(|e| format!("重置文字块表失败: {e}"))?;
+    Ok(())
 }
 
 pub fn locate_clear(conn: &Connection, report_key: &str) -> Result<(), String> {
@@ -922,7 +1001,9 @@ pub fn locate_reset(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
-// ============ 扫描结构（扫描版→文字版 PDF 还原的基础数据） ============
+/* ============ 扫描结构（扫描版→文字版 PDF 还原的基础数据） ============
+   【已停用】按新需求：不再识别表结构，改为"文字分块 + 逐块 OCR"（见上方 scan_block）。
+   以下整段代码整体注释保留，暂不删除，后续若需要还原版式可再启用。
 #[derive(serde::Deserialize)]
 pub struct ScanHLine { pub y: f64, pub x0: f64, pub x1: f64 }
 #[derive(serde::Deserialize)]
@@ -983,3 +1064,4 @@ pub fn save_pdf_scan(
     tx.commit().map_err(|e| format!("提交扫描失败: {e}"))?;
     Ok(scan_id)
 }
+*/

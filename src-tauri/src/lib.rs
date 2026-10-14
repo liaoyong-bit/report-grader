@@ -15,7 +15,11 @@ pub fn run() {
             commands::save_grading_state,
             commands::save_to_output,
             commands::pack_renamed_zip,
-            commands::scan_save_struct,
+            // commands::scan_save_struct,   // 【已停用】表结构识别落库（改为 scan_block 文字分块）
+            commands::block_reset,
+            commands::block_init,
+            commands::block_set_ocr,
+            commands::block_get_rows,
             commands::save_template,
             commands::append_log,
             commands::pick_template,

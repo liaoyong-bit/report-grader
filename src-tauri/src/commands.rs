@@ -209,7 +209,8 @@ pub fn pack_renamed_zip(folder: String) -> Result<String, String> {
     Ok(format!("已打包 {} 份 → {}", count, out_path.to_string_lossy()))
 }
 
-/// 保存一份报告的扫描结构数据（扫描版→文字版 PDF 还原基础），重扫覆盖旧数据
+/* —— 【已停用】保存一份报告的扫描结构数据（表结构识别产物：横线/竖线/格子/文字行）
+   按新需求改为"文字分块 + 逐块 OCR"，该命令不再由前端调用；代码保留，暂不删除。
 #[tauri::command]
 pub fn scan_save_struct(folder: String, report_key: String, pages: Vec<db::ScanPage>) -> Result<i64, String> {
     let conn = db::open(&folder)?;
@@ -218,6 +219,56 @@ pub fn scan_save_struct(folder: String, report_key: String, pages: Vec<db::ScanP
     let n = db::save_pdf_scan(&conn, bid, rid, &report_key, &pages)?;
     dbglog(&format!("scan_save_struct report={} pages={} scan_id={}", report_key, pages.len(), n));
     Ok(n)
+}
+*/
+
+// ==================== 扫描文字块（表结构识别已停用，改为"文字分块 + 逐块 OCR"） ====================
+/// 重置文字块表：清空并重置自增 id（每份报告扫描前调用一次）
+#[tauri::command]
+pub fn block_reset(folder: String) -> Result<(), String> {
+    let conn = db::open_locate(&folder)?;
+    db::block_reset(&conn)
+}
+
+/// 写入一份报告的全部文字块：先清空该报告旧块，逐块插入并返回全局唯一 KEY(id) 列表（与传入 rows 顺序一致）
+#[tauri::command]
+pub fn block_init(folder: String, report_key: String, rows: Vec<serde_json::Value>) -> Result<Vec<i64>, String> {
+    let conn = db::open_locate(&folder)?;
+    db::block_clear(&conn, &report_key)?;
+    let mut ids = Vec::new();
+    for (i, r) in rows.iter().enumerate() {
+        let page = r.get("pageIndex").and_then(|v| v.as_i64()).unwrap_or(0);
+        let seq = r.get("seq").and_then(|v| v.as_i64()).unwrap_or(i as i64);
+        let top = r.get("top").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let bottom = r.get("bottom").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let left = r.get("left").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let right = r.get("right").and_then(|v| v.as_f64()).unwrap_or(1.0);
+        let id = db::block_insert(&conn, &report_key, page, seq, top, bottom, left, right)?;
+        ids.push(id);
+    }
+    dbglog(&format!("block_init key={report_key} blocks={}", ids.len()));
+    Ok(ids)
+}
+
+/// 按 KEY(id) 写回某块的 OCR 识别结果
+#[tauri::command]
+pub fn block_set_ocr(folder: String, id: i64, text: String) -> Result<(), String> {
+    let conn = db::open_locate(&folder)?;
+    let r = db::block_set_ocr(&conn, id, &text);
+    if let Err(ref e) = r { dbglog(&format!("block_set_ocr id={id} ERR={e}")); }
+    r
+}
+
+/// 读取某份报告全部文字块（KEY/页码/序号/位置比例/OCR 文本），供预览渲染
+#[tauri::command]
+pub fn block_get_rows(folder: String, report_key: String) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db::open_locate(&folder)?;
+    let r = db::block_rows(&conn, &report_key);
+    match &r {
+        Ok(rows) => dbglog(&format!("block_get_rows key={report_key} rows={}", rows.len())),
+        Err(e) => dbglog(&format!("block_get_rows key={report_key} ERR={e}")),
+    }
+    r
 }
 
 /// 全量成绩清单（所有学生），供"保存全部成绩 CSV / 批阅概览表格"

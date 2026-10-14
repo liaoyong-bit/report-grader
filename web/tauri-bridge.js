@@ -215,9 +215,19 @@
     return await invoke('pack_renamed_zip', { folder: app.S.folder });
   };
 
-  // —— 保存一份报告的扫描结构（扫描版→文字版还原基础数据）
-  window.__bridge.scanSaveStruct = async (reportKey, pages) => {
-    return await invoke('scan_save_struct', { folder: app.S.folder, reportKey, pages });
+  // —— 【已停用】保存一份报告的扫描结构（表结构识别产物）；按新需求改为 scan_block 文字分块
+  // window.__bridge.scanSaveStruct = async (reportKey, pages) => {
+  //   return await invoke('scan_save_struct', { folder: app.S.folder, reportKey, pages });
+  // };
+
+  // —— 扫描文字块（新）：块位置与 OCR 结果落库 locate.sqlite / scan_block
+  window.__bridge.blockReset = async (folder) => { await invoke('block_reset', { folder }); };
+  window.__bridge.blockInit = async (folder, reportKey, rows) => {
+    return await invoke('block_init', { folder, reportKey, rows });
+  };
+  window.__bridge.blockSetOcr = async (folder, id, text) => { await invoke('block_set_ocr', { folder, id, text }); };
+  window.__bridge.blockGetRows = async (folder, reportKey) => {
+    return await invoke('block_get_rows', { folder, reportKey });
   };
 
   // —— 导出产物写入 output/（替代浏览器下载）
