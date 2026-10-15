@@ -142,8 +142,10 @@
   window.__bridge.getTemplatePath = async (folder) => { return await invoke('get_template_path', { folder }); };
   window.__bridge.readPdf = async (folder, path) => { return await invoke('read_pdf', { folder, path }); };
   window.__bridge.pickTemplate = async (folder) => { return await invoke('pick_template', { folder }); };
-  window.__bridge.ocrImageB64 = async (b64) => { return await invoke('ocr_image_b64', { b64 }); };
-  window.__bridge.ocrImageB64Words = async (b64) => { return await invoke('ocr_image_b64_words', { b64 }); };
+  // —— OCR 引擎选择（准备面板单选，localStorage 持久化）：win=Windows 自带 / paddle=PaddleOCR
+  const ocrEngine = () => { try{ return localStorage.getItem('rg_ocrEngine') || 'win'; }catch(e){ return 'win'; } };
+  window.__bridge.ocrImageB64 = async (b64) => { return await invoke('ocr_image_b64', { b64, engine: ocrEngine() }); };
+  window.__bridge.ocrImageB64Words = async (b64) => { return await invoke('ocr_image_b64_words', { b64, engine: ocrEngine() }); };
   window.__bridge.saveScanText = async (folder, name, text) => { await invoke('save_scan_text', { folder, name, text }); };
   window.__bridge.applyRenames = async (folder) => { return await invoke('apply_renames', { folder }); };
   window.__bridge.saveReportLocate = async (folder, reportKey, locateJson) => { await invoke('save_report_locate', { folder, reportKey, locateJson }); };
@@ -162,6 +164,8 @@
   window.__bridge.saveReportOcr = async (folder, reportKey, no, name, cls, exp) => { await invoke('save_report_ocr', { folder, reportKey, no, name, class: cls, exp }); };
   window.__bridge.syncFolder = async (folder) => { return await invoke('sync_folder', { folder }); };
   window.__bridge.markExcluded = async (folder, reportKey) => { await invoke('mark_excluded', { folder, reportKey }); };
+  // 标记错误报告（交错）：清空成绩+删改名副本+状态置 excluded
+  window.__bridge.markReportBad = async (folder, reportKey) => { await invoke('mark_report_bad', { folder, reportKey }); };
   window.__bridge.prepOverview = async (folder) => { return await invoke('prep_overview', { folder }); };
   window.__bridge.getGradingScope = async (folder) => { return await invoke('get_grading_scope', { folder }); };
   window.__bridge.saveGradingScope = async (folder, range, selected) => { await invoke('save_grading_scope', { folder, range, selected }); };

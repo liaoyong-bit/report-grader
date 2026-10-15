@@ -282,7 +282,7 @@ function renderTbMid(name){
   var theme={
     prep:{c:'#d98d1f',nm:['准备','面板'],btns:[['名单管理',openPrepImport],['设置模板',openItemSetup],['核对原始报告',runSourceVerify],['定位批阅位置',runLocatePositions]],arr:true},
     grade:{c:'#2f8f8f',nm:['批改','面板'],btns:[['批改范围',showGradeSetup],['改分方式',openGradeModeMask],['|'],['快捷键设置',openKeysMask],['批阅概览',function(){showOverview();}],['标记交错',function(){el.btnMarkBad.onclick();},true]],arr:false},
-    export:{c:'#7a5fd0',nm:['导出','面板'],btns:[['开始导出',function(){setDetect('导出功能待接入');}]],arr:false}
+    export:{c:'#7a5fd0',nm:['导出','面板'],btns:[],arr:false}
   };
   var t=theme[name]||theme.prep;
   if(el.tbPhName){ el.tbPhName.innerHTML='<span>'+t.nm[0]+'</span><span>'+t.nm[1]+'</span>'; el.tbPhName.style.color=t.c; }
@@ -302,6 +302,30 @@ function renderTbMid(name){
   var cur = name==='prep' ? el.bbPrep : (name==='grade' ? el.bbGrade : el.bbExport);
   [el.bbPrep, el.bbGrade, el.bbExport].forEach(function(x){ x.classList.toggle('on', x===cur); });
   if(name==='prep' && S.prepSteps){ applyPrepSteps(S.prepSteps); }
+  /* 准备面板：OCR 引擎单选（定位/核对识别用 Windows 自带 OCR 还是 PaddleOCR，localStorage 持久化） */
+  if(name==='prep' && mid){
+    var cur2=(function(){ try{ return localStorage.getItem('rg_ocrEngine')||'win'; }catch(e){ return 'win'; } })();
+    var wrap=document.createElement('span');
+    wrap.style.cssText='margin-left:12px;display:inline-flex;align-items:center;gap:2px;font-size:12px;color:#fff;white-space:nowrap;';
+    wrap.innerHTML='<span style="opacity:.8;margin-right:2px">识别引擎:</span>';
+    [['win','系统OCR','Windows 自带 OCR（离线可用）'],['paddle','PaddleOCR','本地 ONNX 推理，首次使用自动下载模型（更准）']].forEach(function(o){
+      var lb=document.createElement('label');
+      lb.style.cssText='display:inline-flex;align-items:center;gap:3px;margin-left:6px;cursor:pointer;opacity:.95;';
+      lb.title=o[2];
+      var rd=document.createElement('input');
+      rd.type='radio'; rd.name='ocrEngineSel'; rd.value=o[0]; rd.checked=(cur2===o[0]);
+      rd.style.cssText='accent-color:#fff;cursor:pointer;';
+      rd.onchange=function(){
+        if(!rd.checked) return;
+        try{ localStorage.setItem('rg_ocrEngine', o[0]); }catch(e){}
+        setDetect(o[0]==='paddle' ? '已切换 OCR 引擎为 PaddleOCR（首次使用自动下载模型，请保持联网）'
+                                  : '已切换 OCR 引擎为 Windows 系统 OCR');
+      };
+      var tx=document.createElement('span'); tx.textContent=o[1];
+      lb.appendChild(rd); lb.appendChild(tx); wrap.appendChild(lb);
+    });
+    mid.appendChild(wrap);
+  }
 }
 /* 使用帮助（带×流程说明） */
 el.btnHelpTop.onclick = function(){ el.helpTopMask.style.display='flex'; };
@@ -1150,20 +1174,26 @@ function openRangeMask(){ el.rangeMask.style.display='flex'; }
 el.rangeClose.onclick=()=>{ el.rangeMask.style.display='none'; };
 el.rangeOk.onclick=()=>{ el.rangeMask.style.display='none'; };
 
-// —— 标记错误报告（交错）：两次点击确认，回退 excluded 并从列表移除
+// —— 标记错误报告（交错）：两次点击确认；立即清空所有成绩、删除改名副本、
+//    库状态置 excluded —— 原始文件留在原处不动，不再出现在成绩表/改名包/盖章导出中
 el.btnMarkBad.onclick=async()=>{
   const r=S.current; if(!r){ setErr('请先选择一份报告'); return; }
   if(S.__confirmBad === r){ S.__confirmBad=null; }
-  else { S.__confirmBad=r; setErr('再点一次确认：将《'+r.name+'》标记为错误报告（交错）'); return; }
+  else { S.__confirmBad=r; setErr('再点一次确认：将《'+r.name+'》标记为错误报告（交错）——将清空其全部成绩'); return; }
   try{
-    if(window.__bridge && window.__bridge.markExcluded){ await window.__bridge.markExcluded(S.folder, r.name); }
+    if(window.__bridge && window.__bridge.markReportBad){
+      await window.__bridge.markReportBad(S.folder, r.key || r.name);
+    } else if(window.__bridge && window.__bridge.markExcluded){
+      await window.__bridge.markExcluded(S.folder, r.key || r.name);   // 兜底旧接口
+    }
     const idx=S.reports.indexOf(r);
     S.reports.splice(idx,1);
     renderReportList();
+    if(window.__bridge && window.__bridge.prepOverview && S.folder){ try{ S.prepOv=await window.__bridge.prepOverview(S.folder); }catch(e){} }
     if(S.reports.length){ selectReport(Math.min(idx, S.reports.length-1)); }
     else { S.current=null; el.scoreRows.innerHTML=''; el.totalVal.textContent='0 / 0'; el.pdfHost.innerHTML='<div id="pdfEmpty"><div class="big">📭</div>批改范围内没有更多报告</div>'; }
     setErr('');
-    setDetect('已标记《'+r.name+'》为错误报告（交错）');
+    setDetect('已将《'+r.name+'》标记为错误报告（交错）：成绩已清空，原始文件保留，不再参与统计与导出');
   }catch(e){ setErr('标记失败: '+(e&&e.message||e)); }
 };
 
@@ -2076,7 +2106,14 @@ function fmtStampTime(v){
    表结构（OCR 块）：「评分项目」表头行 → 「分值」标签行(各列数字/空白格，给出列 x 中心)
    → 「得分」标签行(给出回填行的纵向位置)。各题得分盖在对应列中心，末列盖总分，
    得分行下方盖批阅教师+时间戳（需中文字体）。定位失败返回 0，不影响大题旁红字。 */
-async function stampSummaryRow(pdfDoc, font, cjk, red, reportKey, scores, teacher, tsStr){
+async function stampSummaryRow(pdfDoc, font, cjk, red, reportKey, scores, teacher, tsStr, pdfBytes){
+  /* 扫描版走库内文字块定位；非扫描版（文字层 PDF）库内无块 → pdf.js 文字层兜底 */
+  const n1 = await stampSummaryRowBlocks(pdfDoc, font, cjk, red, reportKey, scores, teacher, tsStr);
+  if(n1>0 || !pdfBytes || !window.pdfjsLib) return n1;
+  try{ return await stampSummaryRowText(pdfDoc, font, cjk, red, pdfBytes, scores, teacher, tsStr); }
+  catch(e){ if(window.__bridge&&window.__bridge.log) window.__bridge.log('[导出痕迹] 统分区文字层回填失败: '+(e&&e.message?e.message:e)); return 0; }
+}
+async function stampSummaryRowBlocks(pdfDoc, font, cjk, red, reportKey, scores, teacher, tsStr){
   if(!window.__bridge || !window.__bridge.blockGetRows) return 0;
   const rows = await window.__bridge.blockGetRows(S.folder, reportKey);
   if(!rows || !rows.length) return 0;
@@ -2136,6 +2173,76 @@ async function stampSummaryRow(pdfDoc, font, cjk, red, reportKey, scores, teache
     }catch(e){}
   }
   return cnt;
+}
+
+/* 非扫描版（文字层 PDF）统分区回填：pdf.js 抽文字层按行分组，找「分值」行求列中心、
+   「得分」行求回填 y。pdf.js 与 pdf-lib 同用 PDF 用户坐标（y 向上、原点左下），坐标可直接互用。 */
+async function stampSummaryRowText(pdfDoc, font, cjk, red, pdfBytes, scores, teacher, tsStr){
+  const pdf = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
+  try{
+    const isNum = s=>/^[0-9]{1,3}$/.test(s);
+    for(let pg=0; pg<pdf.numPages; pg++){
+      const page = await pdf.getPage(pg+1);
+      const tc = await page.getTextContent();
+      const items=[];
+      (tc.items||[]).forEach(it=>{
+        if(!it || !it.str || !it.str.trim()) return;
+        items.push({ t: it.str.replace(/\s+/g,''), x: it.transform[4], y: it.transform[5], w: it.width||0, h: it.height||8 });
+      });
+      if(!items.length) continue;
+      items.sort((a,b)=> b.y-a.y || a.x-b.x);
+      const rows=[]; let cur=null;
+      for(const it of items){
+        if(!cur || Math.abs(it.y-cur.y) > Math.max(3, Math.min(it.h,cur.h)*0.7)){
+          cur={ y: it.y, h: it.h, cells:[it] }; rows.push(cur);
+        } else { cur.cells.push(it); cur.h=Math.max(cur.h,it.h); }
+      }
+      rows.forEach(r=>{ r.cells.sort((a,b)=>a.x-b.x); });
+      const lab = rows.find(r=>r.cells.some(c=>c.t==='分值'));
+      if(!lab) continue;
+      let cols = lab.cells.filter(c=>c.t!=='分值' && (c.t==='' || isNum(c.t)));
+      if(cols.length<2) cols = lab.cells.filter(c=>isNum(c.t));   // 数字与「分值」合并成一个单元格时退化取数字
+      if(cols.length<2) continue;
+      const n = scores.length;
+      let cx;
+      if(cols.length === n+1){ cx = cols.map(c=>c.x+c.w/2); }
+      else {
+        const x0=cols[0].x+cols[0].w/2, x1=cols[cols.length-1].x+cols[cols.length-1].w/2;
+        cx=[]; for(let i=0;i<=n;i++) cx.push(x0+(x1-x0)*i/n);
+      }
+      // 「得分」行：分值行下方最近一行
+      const sc = rows.filter(r=>r.y < lab.y-1).sort((a,b)=>b.y-a.y).find(r=>r.cells.some(c=>c.t==='得分'));
+      const rh = Math.max(10, lab.h);
+      const y = sc ? sc.y : (lab.y - rh*1.15);
+      let pdoc; try{ pdoc = pdfDoc.getPage(pg); }catch(e){ continue; }
+      const size=11;
+      let cnt=0;
+      for(let i=0;i<n && i<cx.length;i++){
+        const v=scores[i]; if(v==null) continue;
+        const txt=String(v), w=font.widthOfTextAtSize(txt,size);
+        pdoc.drawText(txt, { x: Math.max(6, cx[i]-w/2), y, size, font, color:red });
+        cnt++;
+      }
+      const total0 = scores.reduce((a,b)=>a+(Number(b)||0),0);
+      {
+        const txt=String(total0), w=font.widthOfTextAtSize(txt,size);
+        const xT = cx.length>n ? cx[n] : cx[cx.length-1];
+        pdoc.drawText(txt, { x: Math.max(6, xT-w/2), y, size, font, color:red });
+        cnt++;
+      }
+      if(cjk && (teacher || tsStr)){
+        try{
+          const info='批阅教师：'+(teacher||'')+'　批阅时间：'+(tsStr||'');
+          pdoc.drawText(info, { x: Math.max(8, lab.cells[0].x), y: y-14, size:9, font:cjk, color:red });
+          cnt++;
+        }catch(e){}
+      }
+      return cnt;
+    }
+    return 0;
+  } finally {
+    try{ await pdf.destroy(); }catch(e){}
+  }
 }
 
 async function loadCJKFont(doc){
@@ -2299,7 +2406,7 @@ async function exportScoredPdf(){
         }
         // 统分区「评分」行回填各题得分+总分（库内文字块定位）
         if(showScore){
-          try{ stamped += await stampSummaryRow(pdfDoc, font, cjk, red, t.key, scores, teacher, tsStr); }catch(e){}
+          try{ stamped += await stampSummaryRow(pdfDoc, font, cjk, red, t.key, scores, teacher, tsStr, u8); }catch(e){}
         }
         if(showFoot && cjk){
           const page0 = pdfDoc.getPage(0);

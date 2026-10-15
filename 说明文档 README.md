@@ -190,6 +190,27 @@
 
 ---
 
+## v0.1.118（四项：统分区/导出按钮/标记交错/PaddleOCR）
+
+- **非扫描版统分区无分修复**：`stampSummaryRow` 此前只依赖库内文字块（scan_block），而文字层 PDF
+  （非扫描版）没有 OCR 块 → 统分区回填不了。现拆为 `stampSummaryRowBlocks`（扫描版，原逻辑）+
+  `stampSummaryRowText`（兜底）：pdf.js 抽文字层按行分组，找「分值」行求各列 x 中心、
+  「得分」行求回填 y，坐标与 pdf-lib 同为用户空间可直接互用；pdf.js 与 pdf-lib 坐标系一致，
+  无需换算。导出时把 PDF 字节传入，扫描版块定位失败自动走文字层。
+- **导出面板顶部「开始导出」按钮移除**：原为占位（点击只提示"待接入"），导出入口只有工具栏的
+  「▶ 导出勾选项(N)」。
+- **「标记交错」按钮逻辑补全**（批改面板）：新增 Rust 命令 `mark_report_bad` —— 立即清空该报告
+  全部成绩（draft/final_scores/report_items/teacher/submitted_at）、删除 renamed/ 中的改名副本、
+  状态置 excluded。原始文件留在原处不动，不再出现在成绩表、改名文件包、带批阅痕迹导出中
+  （这些查询均只取 matched）。仍需两次点击确认。
+- **内置 PaddleOCR（可选识别引擎）**：Rust 侧引入 `oar-ocr`（ONNX Runtime + PP-OCR 模型本地推理），
+  `ocr_image_b64` / `ocr_image_b64_words` 新增 `engine` 参数（"paddle" 走 PaddleOCR，缺省 Windows OCR）；
+  准备面板大蓝条（操作按钮行）新增「识别引擎：系统OCR / PaddleOCR」单选（localStorage 持久化，
+  核对与定位的 OCR 均跟随）。模型在首次使用时自动下载到 `~/.oar`（需联网一次，之后离线可用）；
+  引擎构建一次常驻进程。
+
+---
+
 ## v0.1.117 热修（改名覆盖真凶：apply_renames）
 
 **根因**：v0.1.115/116 只给 `scan.rs` 的两处改名点加了防覆盖（`unique_rename_name`），

@@ -176,6 +176,32 @@ pub fn mark_excluded(folder: String, report_key: String) -> Result<(), String> {
     db::mark_excluded(&conn, rid)
 }
 
+/// 标记错误报告（交错）：原始文件留在原处不动，立即清空全部成绩与批阅信息，
+/// 删除 renamed/ 中的改名副本，状态置 excluded —— 不再出现在成绩表/改名包/带批阅痕迹导出中。
+#[tauri::command]
+pub fn mark_report_bad(folder: String, report_key: String) -> Result<(), String> {
+    let conn = db::open(&folder)?;
+    let bid = db::find_batch_by_folder(&conn)?.map(|b| b.0).ok_or("未找到批次")?;
+    let rid = db::report_id_by_key(&conn, bid, &report_key)?.ok_or("未找到报告")?;
+    let rnp: String = conn
+        .query_row("SELECT renamed_path FROM reports WHERE id=?1", params![rid], |r| r.get(0))
+        .map_err(|e| format!("读取改名路径失败: {e}"))?;
+    if !rnp.trim().is_empty() {
+        let p = Path::new(&folder).join(&rnp);
+        if p.exists() { let _ = fs::remove_file(&p); }   // 删除改名副本（best-effort）
+    }
+    conn.execute("DELETE FROM report_items WHERE report_id=?1", params![rid])
+        .map_err(|e| format!("清空题项成绩失败: {e}"))?;
+    conn.execute(
+        "UPDATE reports SET match_status='excluded', renamed_path='', draft='{}', final_scores='{}', \
+         teacher='', submit_status='pending', submitted_at=NULL, updated_at=datetime('now','localtime') WHERE id=?1",
+        params![rid],
+    )
+    .map_err(|e| format!("更新报告状态失败: {e}"))?;
+    dbglog(&format!("mark_report_bad key={report_key} rid={rid} cleared+excluded"));
+    Ok(())
+}
+
 /// 导出产物写入输出目录（name 支持 "子目录/文件名.pdf"，逐段清洗防目录穿越；
 /// base 为空时写入 报告文件夹/output/，否则写入用户指定的导出位置）
 #[tauri::command]
@@ -670,12 +696,14 @@ pub fn get_template_path(folder: String) -> Result<Option<String>, String> {
     Ok(names.first().map(|n| format!("{}/{}", db::TEMPLATE_DIR, n)))
 }
 
-// —— Windows 自带 OCR（Windows.Media.Ocr）识别图片中的文字
+// —— Windows 自带 OCR（Windows.Media.Ocr）识别图片中的文字（engine="paddle" 时改用 PaddleOCR）
 #[tauri::command]
-pub async fn ocr_image_b64(b64: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || ocr_b64_impl(&b64))
-        .await
-        .map_err(|e| format!("OCR 任务失败: {e}"))?
+pub async fn ocr_image_b64(b64: String, engine: Option<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if engine.as_deref() == Some("paddle") { paddle_ocr_text(&b64) } else { ocr_b64_impl(&b64) }
+    })
+    .await
+    .map_err(|e| format!("OCR 任务失败: {e}"))?
 }
 
 // 临时文件名：进程ID + 原子递增序号 + 纳秒时间戳，保证多路并发调用互不覆盖
@@ -706,10 +734,12 @@ fn ocr_b64_impl(b64: &str) -> Result<String, String> {
 // ============ OCR 带坐标（行级）—— 供扫描版标题定位 ============
 /// 识别整图并返回"行"列表 [{text, top(距顶0-1), left(距左0-1)}]，top/left 相对图片宽高归一化
 #[tauri::command]
-pub async fn ocr_image_b64_words(b64: String) -> Result<serde_json::Value, String> {
-    tauri::async_runtime::spawn_blocking(move || ocr_words_impl(&b64))
-        .await
-        .map_err(|e| format!("OCR 任务失败: {e}"))?
+pub async fn ocr_image_b64_words(b64: String, engine: Option<String>) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if engine.as_deref() == Some("paddle") { paddle_ocr_words(&b64) } else { ocr_words_impl(&b64) }
+    })
+    .await
+    .map_err(|e| format!("OCR 任务失败: {e}"))?
 }
 fn ocr_words_impl(b64: &str) -> Result<serde_json::Value, String> {
     use base64::Engine;
@@ -721,6 +751,67 @@ fn ocr_words_impl(b64: &str) -> Result<serde_json::Value, String> {
     let r = ocr_words_with_com(&tmp.to_string_lossy());
     let _ = std::fs::remove_file(&tmp);
     r
+}
+
+// ==================== PaddleOCR（oar-ocr 本地 ONNX 推理，可选引擎）====================
+// 引擎构建一次常驻；模型经 auto-download 特性在首次使用时从 ModelScope 下载到 ~/.oar（需联网一次，之后离线可用）。
+type PaddleEngine = oar_ocr::oarocr::ocr::OAROCR;
+static PADDLE_OCR: std::sync::OnceLock<Result<PaddleEngine, String>> = std::sync::OnceLock::new();
+
+fn paddle_engine() -> Result<&'static PaddleEngine, String> {
+    let r = PADDLE_OCR.get_or_init(|| {
+        use oar_ocr::prelude::*;
+        match OAROCRBuilder::pp_ocrv6(PpOcrV6Size::Small).build() {
+            Ok(e) => Ok(e),
+            Err(e) => Err(format!("PaddleOCR 初始化失败（首次使用需联网自动下载模型；失败请重启应用重试）: {e}")),
+        }
+    });
+    r.as_ref().map_err(|e| e.clone())
+}
+
+/// PaddleOCR 公共流程：base64 → 临时图片 → 推理 → [(文本, 置信度, left0-1, top0-1, right0-1, bottom0-1)]
+fn paddle_ocr_regions(b64: &str) -> Result<Vec<(String, f32, f32, f32, f32, f32)>, String> {
+    use base64::Engine;
+    use oar_ocr::prelude::*;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .map_err(|e| format!("base64 解码失败: {e}"))?;
+    let (iw, ih) = {
+        let dim = image::load_from_memory(&bytes).map_err(|e| format!("图片解码失败: {e}"))?;
+        (dim.width() as f32, dim.height() as f32)
+    };
+    if iw <= 0.0 || ih <= 0.0 { return Err("图片尺寸无效".into()); }
+    let tmp = unique_ocr_tmp("paddle");
+    std::fs::write(&tmp, &bytes).map_err(|e| format!("写临时图片失败: {e}"))?;
+    let eng = paddle_engine()?;
+    let img = oar_ocr::utils::load_image(&tmp).map_err(|e| format!("读图失败: {e}"))?;
+    let _ = std::fs::remove_file(&tmp);
+    let results = eng.predict(vec![img]).map_err(|e| format!("PaddleOCR 推理失败: {e}"))?;
+    let mut out = Vec::new();
+    if let Some(r) = results.first() {
+        for reg in &r.text_regions {
+            let (text, conf) = match reg.text_with_confidence() { Some(v) => v, None => continue };
+            let bb = &reg.bounding_box;
+            out.push((text.to_string(), conf, bb.x_min()/iw, bb.y_min()/ih, bb.x_max()/iw, bb.y_max()/ih));
+        }
+    }
+    Ok(out)
+}
+
+/// 全文模式：与 Windows OCR res.Text() 对齐（行间 \r\n）
+fn paddle_ocr_text(b64: &str) -> Result<String, String> {
+    let mut regs = paddle_ocr_regions(b64)?;
+    regs.sort_by(|a, b| a.3.partial_cmp(&b.3).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(regs.into_iter().map(|r| r.0).collect::<Vec<_>>().join("\r\n"))
+}
+
+/// 行级模式：[{text, top(距顶0-1), left(距左0-1)}]，与 ocr_words_file 输出同构
+fn paddle_ocr_words(b64: &str) -> Result<serde_json::Value, String> {
+    let regs = paddle_ocr_regions(b64)?;
+    let lines: Vec<serde_json::Value> = regs.into_iter()
+        .map(|r| serde_json::json!({ "text": r.0, "top": r.3, "left": r.2 }))
+        .collect();
+    Ok(serde_json::json!(lines))
 }
 fn ocr_words_with_com(path: &str) -> Result<serde_json::Value, String> {
     use windows::Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED};

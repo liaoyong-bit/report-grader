@@ -25,3 +25,6 @@ windows = { version = "0.58", features = [
 base64 = "0.22"
 sha2 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# PaddleOCR 本地推理（ONNX Runtime + PP-OCR 模型，首次使用自动下载模型到 ~/.oar）
+oar-ocr = { version = "0.10", features = ["auto-download"] }
+image = "0.25"
