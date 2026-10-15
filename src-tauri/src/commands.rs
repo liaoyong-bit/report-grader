@@ -234,7 +234,7 @@ fn convert_word_docs_impl(folder: &str) -> Result<serde_json::Value, String> {
     let dir = Path::new(folder);
     if !dir.is_dir() { return Err("报告文件夹无效".into()); }
     // 收集顶层 Word 文档（跳过 ~$ 锁文件），按名排序保证稳定
-    let mut docs: Vec<PathBuf> = Vec::new();
+    let mut docs: Vec<std::path::PathBuf> = Vec::new();
     for e in fs::read_dir(dir).map_err(|e| format!("读目录失败: {e}"))?.flatten() {
         let p = e.path();
         if !p.is_file() { continue; }
