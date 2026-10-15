@@ -57,6 +57,7 @@ pub fn run() {
             commands::recover_roster,
             commands::mark_excluded,
             commands::mark_report_bad,
+            commands::convert_word_docs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -190,6 +190,22 @@
 
 ---
 
+## v0.1.119（成绩总表导出修复 + 核对前 Word→PDF）
+
+- **学生成绩总表导出修复**：`exportExcel` 原先第一行 `if(!S.reports.length) return;` —— 不进批改面板
+  直接导出时 `S.reports` 为空，函数返回 `undefined`，导出结果显示「无返回」。而成绩数据全部来自库
+  （`list_all_grading`），本就不该依赖批改面板的内存状态 → 移除该门槛；所有提前返回都改为返回
+  `{ok,msg,files}`，失败时导出结果清单会显示具体原因。
+- **核对原始报告：优先 Word → 文字版 PDF**（新 Rust 命令 `convert_word_docs`）：
+  - 扫描原始文件夹**顶层**的 `.doc/.docx`（跳过 `~$` 锁文件），转换成**同名 PDF 仍放回原始文件夹**，
+    之后再走原有的 同步 → OCR 挂靠 → 改名 流程；
+  - **幂等**：同名 PDF 已存在即视为「此前已转换」，直接跳过、不重复调用 Office；
+  - 通过本机 Office COM 转换（`Word.Application` → `KWPS.Application` → `Wps.Application` 依次兜底），
+    路径经环境变量传给 PowerShell（避免中文命令行编码问题），单份 180s 超时保护、关闭弹窗；
+  - 核对结果弹窗新增一行：`Word 转 PDF：新转换 N 份，跳过（此前已转换）M 份，失败 K 份`。
+
+---
+
 ## v0.1.118（四项：统分区/导出按钮/标记交错/PaddleOCR）
 
 - **非扫描版统分区无分修复**：`stampSummaryRow` 此前只依赖库内文字块（scan_block），而文字层 PDF

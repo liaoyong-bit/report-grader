@@ -2493,11 +2493,12 @@ function csvEscape(v){ v = String(v==null?'':v); return /[",\n]/.test(v) ? '"'+v
 function dateStamp(){ const d=new Date(); return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0'); }
 
 async function exportExcel(){
-  if(!S.reports.length){ setErr('还没有报告可导出'); return; }
-  if(!window.ExcelJS){ setErr('exceljs 未加载，无法导出Excel'); return; }
+  // 数据全部来自库（list_all_grading），不依赖批改面板的内存状态
+  if(!window.ExcelJS){ setErr('exceljs 未加载，无法导出Excel'); return { ok:false, msg:'exceljs 未加载', files:[] }; }
   let rows;
-  try { rows = await fetchAllGrades(); } catch(e){ setErr('读取成绩失败: '+e); return; }
+  try { rows = await fetchAllGrades(); } catch(e){ setErr('读取成绩失败: '+e); return { ok:false, msg:'读取成绩失败: '+e, files:[] }; }
   const items = gradesToTable(rows);
+  if(!items.length){ setErr('还没有成绩可导出'); return { ok:false, msg:'没有成绩数据（请先批阅并保存）', files:[] }; }
   const n = Math.max(0, ...items.map(it=>it.scores.length));
   const head = ['学号','姓名','班级','批阅教师'];
   for(let i=0;i<n;i++) head.push('第'+(i+1)+'项');
@@ -4747,6 +4748,22 @@ async function runSourceVerify(){
   L('入口 folder='+(S.folder||'<空>'));
   if(!S.folder){ setErr('请先选报告文件夹'); return; }
   if(!window.__bridge || !window.__bridge.syncFolder){ L('缺少同步接口'); setErr('环境异常：缺少同步接口'); return; }
+  /* ① 优先：原始文件夹顶层的 Word 文档 → 同名文字版 PDF（仍放原始文件夹）。
+        幂等：已有同名 PDF 视为「此前已转换」直接跳过，不重复调用 Office。 */
+  let wconv={converted:[],skipped:[],failed:[]};
+  if(window.__bridge.convertWordDocs){
+    setDetect('正在检查 Word 文档（未转换的将转成文字版 PDF）…');
+    try{
+      const r = await window.__bridge.convertWordDocs(S.folder);
+      if(r && !Array.isArray(r)) wconv = { converted:r.converted||[], skipped:r.skipped||[], failed:r.failed||[] };
+    }catch(e){ L('Word 转换失败 '+e); }
+    L('Word转PDF 转换='+wconv.converted.length+' 跳过(已转换)='+wconv.skipped.length+' 失败='+wconv.failed.length);
+    if(wconv.converted.length){
+      setDetect('已将 '+wconv.converted.length+' 份 Word 文档转为文字版 PDF（跳过已转换 '+wconv.skipped.length+' 份），继续核对…');
+    } else if(wconv.skipped.length){
+      setDetect('Word 文档此前已转换（'+wconv.skipped.length+' 份），无需重复转换，继续核对…');
+    }
+  }
   let bf=[]; try{ bf = await window.__bridge.getBasicFields(S.folder); }catch(e){ L('getBasicFields err '+e); }
   if(!(bf&&bf.length)){ L('基本信息为空，中止'); showVerifyAlert('⚠ 请先点「设置模板（框选）」框选基本信息并保存，再核对原始报告。'); return; }
   setDetect('正在核对原始报告：扫描并 OCR 匹配...');
@@ -4788,6 +4805,7 @@ async function runSourceVerify(){
   const unmatchN=(syncRes&&syncRes.unmatched&&syncRes.unmatched.length)||0;
   setDetect('✅ 核对完成'+(ok?('，自动挂靠 '+ok+' 份'):'')+(renamedN?('，改名 '+renamedN+' 份'):''));
   let body='本次核对结果：\n';
+  body+='· Word 转 PDF：新转换 '+wconv.converted.length+' 份'+(wconv.skipped.length?('，跳过（此前已转换）'+wconv.skipped.length+' 份'):'')+(wconv.failed.length?('，失败 '+wconv.failed.length+' 份（请确认本机装有 Word/WPS）'):'')+'\n';
   body+='· 新增原始报告：'+addedN+' 份\n';
   body+='· 自动挂靠：'+ok+' 份\n';
   body+='· 改名：'+renamedN+' 份\n';

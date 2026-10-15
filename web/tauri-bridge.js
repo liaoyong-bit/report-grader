@@ -166,6 +166,8 @@
   window.__bridge.markExcluded = async (folder, reportKey) => { await invoke('mark_excluded', { folder, reportKey }); };
   // 标记错误报告（交错）：清空成绩+删改名副本+状态置 excluded
   window.__bridge.markReportBad = async (folder, reportKey) => { await invoke('mark_report_bad', { folder, reportKey }); };
+  // 核对前处理：顶层 Word 文档 → 同名文字版 PDF（已存在同名 PDF 则跳过），返回 {converted,skipped,failed}
+  window.__bridge.convertWordDocs = async (folder) => { return await invoke('convert_word_docs', { folder }); };
   window.__bridge.prepOverview = async (folder) => { return await invoke('prep_overview', { folder }); };
   window.__bridge.getGradingScope = async (folder) => { return await invoke('get_grading_scope', { folder }); };
   window.__bridge.saveGradingScope = async (folder, range, selected) => { await invoke('save_grading_scope', { folder, range, selected }); };

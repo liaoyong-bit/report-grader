@@ -202,6 +202,101 @@ pub fn mark_report_bad(folder: String, report_key: String) -> Result<(), String>
     Ok(())
 }
 
+/// 核对前处理：把原始文件夹【顶层】的 Word 文档(.doc/.docx)转成同名文字版 PDF，仍放在原始文件夹。
+/// **幂等**：同名 PDF 已存在则跳过（此前转换过就不重复转换）；跳过 ~$ 临时锁文件。
+/// 走本机 Office COM（Word → KWPS → WPS 依次兜底），路径经环境变量传给 PowerShell，避免中文命令行编码问题。
+/// 返回 (新生成的 PDF 文件名, 因已存在而跳过的 Word 名)。
+#[tauri::command]
+pub async fn convert_word_docs(folder: String) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || convert_word_docs_impl(&folder))
+        .await
+        .map_err(|e| format!("Word 转换任务失败: {e}"))?
+}
+
+const WORD_CONVERT_SCRIPT: &str = "\
+$ErrorActionPreference='Stop'; \
+$w=$null; \
+foreach($prog in @('Word.Application','KWPS.Application','Wps.Application')){ \
+  try { $w = New-Object -ComObject $prog; break } catch { } \
+}; \
+if (-not $w) { Write-Output 'NO_ENGINE'; exit 2 }; \
+try { $w.Visible=$false } catch { }; \
+try { $w.DisplayAlerts=0 } catch { }; \
+$src=$env:RG_WORD_SRC; $dst=$env:RG_WORD_DST; \
+try { \
+  $d = $w.Documents.Open($src, $false, $true); \
+  $d.SaveAs([ref]$dst, [ref]17); \
+  $d.Close($false); \
+  Write-Output 'OK' \
+} finally { $w.Quit() }";
+
+fn convert_word_docs_impl(folder: &str) -> Result<serde_json::Value, String> {
+    let dir = Path::new(folder);
+    if !dir.is_dir() { return Err("报告文件夹无效".into()); }
+    // 收集顶层 Word 文档（跳过 ~$ 锁文件），按名排序保证稳定
+    let mut docs: Vec<PathBuf> = Vec::new();
+    for e in fs::read_dir(dir).map_err(|e| format!("读目录失败: {e}"))?.flatten() {
+        let p = e.path();
+        if !p.is_file() { continue; }
+        let ext = p.extension().map(|x| x.to_string_lossy().to_lowercase()).unwrap_or_default();
+        if ext != "doc" && ext != "docx" { continue; }
+        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        if name.starts_with("~$") { continue; }   // Word/WPS 打开时产生的临时锁文件
+        docs.push(p);
+    }
+    docs.sort();
+    let mut converted: Vec<String> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
+    let mut failed: Vec<String> = Vec::new();
+    for p in docs {
+        let stem = p.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        if stem.is_empty() { continue; }
+        let dst = dir.join(format!("{stem}.pdf"));
+        // —— 幂等核心：已有同名 PDF（此前转换过）→ 跳过，不再调用 Office
+        if dst.exists() {
+            skipped.push(format!("{stem}.pdf"));
+            dbglog(&format!("convert_word_docs 跳过(已存在同名PDF) {stem}.pdf"));
+            continue;
+        }
+        let child = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", WORD_CONVERT_SCRIPT])
+            .env("RG_WORD_SRC", &p)
+            .env("RG_WORD_DST", &dst)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn();
+        let mut child = match child {
+            Ok(c) => c,
+            Err(e) => { failed.push(stem.clone()); dbglog(&format!("convert_word_docs 启动 powershell 失败 {stem}: {e}")); continue; }
+        };
+        // 单份最长等 180s，超时杀掉，避免 Word 弹框卡死流程
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
+        let mut timed_out = false;
+        loop {
+            match child.try_wait() {
+                Ok(Some(_status)) => break,
+                Ok(None) => {
+                    if std::time::Instant::now() > deadline { let _ = child.kill(); timed_out = true; break; }
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                }
+                Err(e) => { dbglog(&format!("convert_word_docs 等待失败 {stem}: {e}")); break; }
+            }
+        }
+        let mut so = String::new(); let mut se = String::new();
+        if let Some(mut o) = child.stdout.take() { use std::io::Read; let _ = o.read_to_string(&mut so); }
+        if let Some(mut e) = child.stderr.take() { use std::io::Read; let _ = e.read_to_string(&mut se); }
+        if dst.exists() {
+            converted.push(format!("{stem}.pdf"));
+            dbglog(&format!("convert_word_docs 转换成功 {stem}.pdf"));
+        } else {
+            failed.push(stem.clone());
+            dbglog(&format!("convert_word_docs 转换失败 {stem}: timeout={timed_out} stdout={} stderr={}", so.trim(), se.trim()));
+        }
+    }
+    dbglog(&format!("convert_word_docs 完成: 转换 {} / 跳过 {} / 失败 {}", converted.len(), skipped.len(), failed.len()));
+    Ok(serde_json::json!({ "converted": converted, "skipped": skipped, "failed": failed }))
+}
+
 /// 导出产物写入输出目录（name 支持 "子目录/文件名.pdf"，逐段清洗防目录穿越；
 /// base 为空时写入 报告文件夹/output/，否则写入用户指定的导出位置）
 #[tauri::command]
