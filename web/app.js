@@ -281,7 +281,7 @@ function switchPanel(name){
 function renderTbMid(name){
   var theme={
     prep:{c:'#d98d1f',nm:['准备','面板'],btns:[['名单管理',openPrepImport],['设置模板',openItemSetup],['核对原始报告',runSourceVerify],['定位批阅位置',runLocatePositions]],arr:true},
-    grade:{c:'#2f8f8f',nm:['批改','面板'],btns:[['批改范围',showGradeSetup],['改分方式',openGradeModeMask],['|'],['快捷键设置',openKeysMask],['批阅概览',function(){showOverview();}],['标记交错',function(){el.btnMarkBad.onclick();},true]],arr:false},
+    grade:{c:'#2f8f8f',nm:['批改','面板'],btns:[['批改范围',showGradeSetup],['改分方式',openGradeModeMask],['|'],['快捷键设置',openKeysMask],['批阅概览',function(){showOverview();}]],arr:false},
     export:{c:'#7a5fd0',nm:['导出','面板'],btns:[],arr:false}
   };
   var t=theme[name]||theme.prep;
@@ -1174,28 +1174,28 @@ function openRangeMask(){ el.rangeMask.style.display='flex'; }
 el.rangeClose.onclick=()=>{ el.rangeMask.style.display='none'; };
 el.rangeOk.onclick=()=>{ el.rangeMask.style.display='none'; };
 
-// —— 标记错误报告（交错）：两次点击确认；立即清空所有成绩、删除改名副本、
-//    库状态置 excluded —— 原始文件留在原处不动，不再出现在成绩表/改名包/盖章导出中
-el.btnMarkBad.onclick=async()=>{
-  const r=S.current; if(!r){ setErr('请先选择一份报告'); return; }
-  if(S.__confirmBad === r){ S.__confirmBad=null; }
-  else { S.__confirmBad=r; setErr('再点一次确认：将《'+r.name+'》标记为错误报告（交错）——将清空其全部成绩'); return; }
-  try{
-    if(window.__bridge && window.__bridge.markReportBad){
-      await window.__bridge.markReportBad(S.folder, r.key || r.name);
-    } else if(window.__bridge && window.__bridge.markExcluded){
-      await window.__bridge.markExcluded(S.folder, r.key || r.name);   // 兜底旧接口
-    }
-    const idx=S.reports.indexOf(r);
-    S.reports.splice(idx,1);
-    renderReportList();
-    if(window.__bridge && window.__bridge.prepOverview && S.folder){ try{ S.prepOv=await window.__bridge.prepOverview(S.folder); }catch(e){} }
-    if(S.reports.length){ selectReport(Math.min(idx, S.reports.length-1)); }
-    else { S.current=null; el.scoreRows.innerHTML=''; el.totalVal.textContent='0 / 0'; el.pdfHost.innerHTML='<div id="pdfEmpty"><div class="big">📭</div>批改范围内没有更多报告</div>'; }
-    setErr('');
-    setDetect('已将《'+r.name+'》标记为错误报告（交错）：成绩已清空，原始文件保留，不再参与统计与导出');
-  }catch(e){ setErr('标记失败: '+(e&&e.message||e)); }
-};
+// —— 【v1.0.0 起移除】标记错误报告（交错）按钮已下线，后端命令 mark_report_bad 与此段逻辑保留备查：
+//    原行为：两次点击确认 → 调 mark_report_bad 清空该报告全部成绩、删除 renamed/ 改名副本、状态置 excluded。
+// el.btnMarkBad.onclick=async()=>{
+//   const r=S.current; if(!r){ setErr('请先选择一份报告'); return; }
+//   if(S.__confirmBad === r){ S.__confirmBad=null; }
+//   else { S.__confirmBad=r; setErr('再点一次确认：将《'+r.name+'》标记为错误报告（交错）——将清空其全部成绩'); return; }
+//   try{
+//     if(window.__bridge && window.__bridge.markReportBad){
+//       await window.__bridge.markReportBad(S.folder, r.key || r.name);
+//     } else if(window.__bridge && window.__bridge.markExcluded){
+//       await window.__bridge.markExcluded(S.folder, r.key || r.name);
+//     }
+//     const idx=S.reports.indexOf(r);
+//     S.reports.splice(idx,1);
+//     renderReportList();
+//     if(window.__bridge && window.__bridge.prepOverview && S.folder){ try{ S.prepOv=await window.__bridge.prepOverview(S.folder); }catch(e){} }
+//     if(S.reports.length){ selectReport(Math.min(idx, S.reports.length-1)); }
+//     else { S.current=null; el.scoreRows.innerHTML=''; el.totalVal.textContent='0 / 0'; el.pdfHost.innerHTML='<div id="pdfEmpty"><div class="big">📭</div>批改范围内没有更多报告</div>'; }
+//     setErr('');
+//     setDetect('已将《'+r.name+'》标记为错误报告（交错）：成绩已清空，原始文件保留，不再参与统计与导出');
+//   }catch(e){ setErr('标记失败: '+(e&&e.message||e)); }
+// };
 
 // —— 成绩明细弹窗（只读查看，导出统一到导出阶段）
 function openDetail(){

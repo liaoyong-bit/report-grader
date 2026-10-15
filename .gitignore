@@ -30,3 +30,6 @@ package-lock.json
 
 # 无关临时文件
 新建 文本文档.txt
+
+# 测试报告 PDF（仅本地保留，不入库）
+/*.pdf

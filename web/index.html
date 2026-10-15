@@ -547,9 +547,9 @@
         <button class="x" id="helpTopX">×</button>
       </div>
       <div class="tbhelp-bd">
-        <div class="st"><div class="num">1</div><div><b>准备</b>：选文件夹 → 名单管理 → 设置模板(框选题/分位置) → 核对原始报告(OCR+挂靠+改名) → 定位批阅位置。</div></div>
-        <div class="st"><div class="num">2</div><div><b>批改</b>：按卷/按题改分，支持快捷键、批阅概览统计、标记交错，成绩与批阅痕迹自动入库。</div></div>
-        <div class="st"><div class="num">3</div><div><b>导出</b>：学生成绩总表(Excel)、批阅报告(PDF)、改名文件包、带批阅痕迹PDF。</div></div>
+        <div class="st"><div class="num">1</div><div><b>准备</b>：选文件夹 → 名单管理 → 设置模板(框选) → 核对原始报告（自动先把 Word 转 PDF，再 OCR 挂靠、改名；识别引擎可选 系统/PaddleOCR） → 定位批阅位置。</div></div>
+        <div class="st"><div class="num">2</div><div><b>批改</b>：按卷/按题改分，支持快捷键与批阅概览统计；批阅状态、教师与时间戳自动入库（保存在报告文件夹内）。</div></div>
+        <div class="st"><div class="num">3</div><div><b>导出</b>：学生成绩总表(Excel)、改名文件包(ZIP)、带批阅痕迹 PDF（每题红字得分 + 统分区回填 + 教师/时间戳）；导出位置可自定义。</div></div>
         <button class="go" id="helpTopOk">知道了</button>
       </div>
     </div>
@@ -702,7 +702,9 @@
     <div style="display:none" id="grpTb">
       <button id="btnOverview">📊 批阅概览</button>
       <button id="btnSettings">⚙ 设置</button>
+      <!-- v1.0.0 起移除「标记交错」入口（相关逻辑见 app.js 注释块）
       <button id="btnMarkBad" style="background:#fdf0f0;color:#c0392b">❌ 标记交错</button>
+      -->
     </div>
     <div style="display:none" id="prepTb">
       <span id="pvSelbar"></span>

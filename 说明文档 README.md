@@ -190,6 +190,19 @@
 
 ---
 
+## v1.0.0（首个正式发布版）
+
+- **移除「标记交错」**：批改面板顶栏按钮下线，相关前端逻辑注释保留（Rust 命令 `mark_report_bad`
+  与桥接保留，便于将来恢复）。
+- **仓库清理**：三个测试报告 PDF 移出版本库（本地保留，根目录 `/*.pdf` 已加入 .gitignore）。
+- **帮助文案更新**：准备/批改/导出三步说明与当前功能对齐（Word→PDF、PaddleOCR 引擎、
+  成绩总表/改名包/带批阅痕迹三种导出）。
+- **发布机制**：推送 `v*` 标签时由 CI 自动创建 GitHub Release 并附 NSIS 安装包
+  （`tauri-action` 的 tagName/releaseName 仅在标签触发时生效；平时 push 仍只上传 artifact）。
+- 版本号升级至 1.0.0。
+
+---
+
 ## v0.1.119（成绩总表导出修复 + 核对前 Word→PDF）
 
 - **学生成绩总表导出修复**：`exportExcel` 原先第一行 `if(!S.reports.length) return;` —— 不进批改面板
