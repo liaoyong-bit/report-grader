@@ -34,6 +34,52 @@ fn unique_rename_name(
     }
 }
 
+/// 自愈：matched 报告的改名文件在磁盘上缺失、或多份报告共用同一 renamed_path（历史覆盖遗留）时，
+/// 从源文件重新生成唯一改名版（追加 _2/_3）并更新登记。返回修复份数（失败不阻塞同步）。
+fn repair_renamed(conn: &Connection, folder: &Path, batch_id: i64) -> usize {
+    let mut rows: Vec<(i64, String, String)> = Vec::new();
+    if let Ok(mut st) = conn.prepare(
+        "SELECT id, COALESCE(NULLIF(source_path,''), orig_name), renamed_path
+         FROM reports WHERE batch_id=?1 AND match_status='matched' AND renamed_path!='' ORDER BY id",
+    ) {
+        if let Ok(iter) = st.query_map(rusqlite::params![batch_id], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+        }) {
+            for r in iter.flatten() { rows.push(r); }
+        }
+    }
+    if rows.is_empty() { return 0; }
+    // 每个 renamed_path 的占用数与首个(保留)归属
+    let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    let mut owner: std::collections::HashMap<&str, i64> = std::collections::HashMap::new();
+    for (rid, _, rnp) in &rows {
+        *counts.entry(rnp.as_str()).or_insert(0) += 1;
+        owner.entry(rnp.as_str()).or_insert(*rid);
+    }
+    let rename_dir = folder.join(db::RENAME_DIR);
+    let mut fixed = 0usize;
+    for (rid, src, rnp) in &rows {
+        let duplicated = counts.get(rnp.as_str()).copied().unwrap_or(0) > 1 && owner.get(rnp.as_str()) != Some(rid);
+        let missing = !folder.join(rnp.as_str()).exists();
+        if !duplicated && !missing { continue; }
+        let src_path = folder.join(src.as_str());
+        if !src_path.exists() { continue; }   // 源文件不在，无法重建
+        let fname = rnp.rsplit('/').next().unwrap_or(rnp);
+        let new_name = unique_rename_name(conn, batch_id, fname, &rename_dir, Some(*rid));
+        let rel_new = format!("{}/{}", db::RENAME_DIR, new_name);
+        match fs::create_dir_all(&rename_dir).and_then(|_| fs::copy(&src_path, rename_dir.join(&new_name))) {
+            Ok(_) => {
+                if db::set_renamed(conn, *rid, &rel_new).is_ok() {
+                    fixed += 1;
+                    println!("[repair] rid={rid} {} -> {}", rnp, rel_new);
+                }
+            }
+            Err(e) => println!("[repair] rid={rid} copy 失败: {e}"),
+        }
+    }
+    fixed
+}
+
 #[derive(serde::Serialize, Clone)]
 pub struct SyncItem {
     pub no: String,
@@ -175,6 +221,7 @@ pub fn sync_folder(conn: &Connection, folder: &str, batch_id: i64) -> Result<Syn
 
     // 重新拉取登记，构建"学生维度"三态列表
     println!("[sync] done added={} unmatched={}", result.added, result.unmatched.len());
+    let _ = repair_renamed(conn, folder_p, batch_id);   // 自愈：改名覆盖/文件缺失（结果不阻塞同步）
     let reports = db::list_reports(conn, batch_id)?;
     let students = db::get_students(conn, batch_id)?;
     for s in students {

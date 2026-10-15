@@ -219,22 +219,24 @@ pub fn read_font(name: String) -> Result<Vec<u8>, String> {
 /// 将 renamed/ 目录下所有改名报告打包为一个 ZIP，写入导出位置（base 为空=报告文件夹/output/）
 #[tauri::command]
 pub fn pack_renamed_zip(folder: String, base: Option<String>) -> Result<String, String> {
-    pack_dir_zip_impl(&folder, db::RENAME_DIR, "改名文件包.zip", base.as_deref().map(str::trim).filter(|s| !s.is_empty()))
+    pack_dir_zip_impl(&folder, db::RENAME_DIR, "改名文件包.zip", base.as_deref().map(str::trim).filter(|s| !s.is_empty()), false)
 }
 
-/// 通用子目录打包：将 folder/<sub> 下的文件打包为 base(或 output)/<zip_name>
+/// 通用子目录打包：sub 相对【导出位置】（save_to_output 写出的产物目录，如 "带批阅痕迹"），
+/// 打包为 导出位置/<zip_name>
 #[tauri::command]
 pub fn pack_dir_zip(folder: String, sub: String, zip_name: String, base: Option<String>) -> Result<String, String> {
-    pack_dir_zip_impl(&folder, &sub, &zip_name, base.as_deref().map(str::trim).filter(|s| !s.is_empty()))
+    pack_dir_zip_impl(&folder, &sub, &zip_name, base.as_deref().map(str::trim).filter(|s| !s.is_empty()), true)
 }
 
-fn pack_dir_zip_impl(folder: &str, sub: &str, zip_name: &str, base: Option<&str>) -> Result<String, String> {
-    let src = Path::new(folder).join(sub);
-    if !src.exists() { return Err(format!("目录不存在: {sub}，请先执行相应步骤")); }
+fn pack_dir_zip_impl(folder: &str, sub: &str, zip_name: &str, base: Option<&str>, sub_in_base: bool) -> Result<String, String> {
     let out_dir = match base {
         Some(b) if !b.is_empty() => std::path::PathBuf::from(b),
         _ => Path::new(folder).join(db::OUTPUT_DIR),
     };
+    // sub_in_base=true：sub 相对导出位置（导出产物目录）；false：sub 相对报告文件夹（renamed/）
+    let src = if sub_in_base { out_dir.join(sub) } else { Path::new(folder).join(sub) };
+    if !src.exists() { return Err(format!("目录不存在: {sub}，请先执行相应步骤")); }
     fs::create_dir_all(&out_dir).map_err(|e| format!("创建输出目录失败: {e}"))?;
     let safe_zip: String = zip_name.chars().map(|c| if ":*?\"<>|".contains(c) { '_' } else { c }).collect();
     let out_path = out_dir.join(&safe_zip);

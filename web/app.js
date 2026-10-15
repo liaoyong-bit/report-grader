@@ -2046,8 +2046,15 @@ document.addEventListener('keydown', (e)=>{
 
 /* ==================== 导出 ==================== */
 // 中文字体字节：1) Rust 读系统字体(simhei.ttf 等 .ttf) 2) 兜底 web/lib 下的字体文件
+// 注意：Tauri invoke 返回的 Vec<u8> 是普通 Array，pdf-lib 只认 Uint8Array/ArrayBuffer，
+// 必须转换（此前未转 → 嵌入报 "of type NaN" → 教师/时间戳全部缺失）
 async function loadCJKBytes(){
-  try{ if(window.__bridge && window.__bridge.readFont){ return await window.__bridge.readFont('simhei.ttf'); } }catch(e){}
+  try{
+    if(window.__bridge && window.__bridge.readFont){
+      const b = await window.__bridge.readFont('simhei.ttf');
+      if(b){ return b instanceof Uint8Array ? b : new Uint8Array(b); }
+    }
+  }catch(e){}
   for(const u of ['lib/cjk.ttf','lib/simsun.ttf','lib/msyh.ttf']){
     try{
       const resp = await fetch(u);
@@ -2278,6 +2285,17 @@ async function exportScoredPdf(){
           const y = H*(1-lc.titleY_pct) - size*0.3;
           page.drawText(txt, { x, y, size, font, color: red });
           stamped++;
+          // 分数下一行居中盖「教师 + 时间戳」（需中文字体）
+          if(cjk && (teacher || tsStr) && lc.titleY_pct!=null && lc.titleY_pct < 0.965){
+            try{
+              const info = [teacher, tsStr].filter(Boolean).join('  ');
+              const iw = cjk.widthOfTextAtSize(info, 7.5);
+              let ix = (x + w/2) - iw/2;   // 居中于分数
+              if(ix < 6) ix = 6;
+              const y2 = H*(1-(lc.titleY_pct + 0.02)) - 7.5*0.3;
+              page.drawText(info, { x: ix, y: y2, size: 7.5, font: cjk, color: red });
+            }catch(e){}
+          }
         }
         // 统分区「评分」行回填各题得分+总分（库内文字块定位）
         if(showScore){
