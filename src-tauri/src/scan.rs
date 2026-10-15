@@ -5,6 +5,35 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// 改名防覆盖：目标名已被其他报告占用（库登记）或磁盘已存在同名文件时，追加 _2/_3…
+/// 同一学生交多份报告（如文字版+扫描版）改名规则相同，此前直接 copy 导致后者覆盖前者。
+fn unique_rename_name(
+    conn: &Connection,
+    batch_id: i64,
+    rename: &str,
+    rename_dir: &Path,
+    exclude_rid: Option<i64>,
+) -> String {
+    let stem = clean(rename.strip_suffix(".pdf").unwrap_or(rename));
+    let mut i = 1;
+    loop {
+        let cand = if i == 1 { format!("{}.pdf", stem) } else { format!("{}_{}.pdf", stem, i) };
+        let rel = format!("{}/{}", db::RENAME_DIR, cand);
+        let used: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM reports WHERE batch_id=?1 AND renamed_path=?2 AND (?3 IS NULL OR id != ?3))",
+                rusqlite::params![batch_id, rel, exclude_rid],
+                |r| r.get(0),
+            )
+            .unwrap_or(false);
+        if !used && !rename_dir.join(&cand).exists() {
+            return cand;
+        }
+        i += 1;
+        if i > 99 { return format!("{}_{}.pdf", stem, i); }   // 兜底
+    }
+}
+
 #[derive(serde::Serialize, Clone)]
 pub struct SyncItem {
     pub no: String,
@@ -119,13 +148,15 @@ pub fn sync_folder(conn: &Connection, folder: &str, batch_id: i64) -> Result<Syn
             match st {
                 Some(s) => {
                     let report_name = if s.report_name.trim().is_empty() { batch_name.clone() } else { s.report_name.clone() };
-                    let rename = format!(
+                    let rename0 = format!(
                         "{}_{}_{}_{}.pdf",
                         s.no,
                         clean(&s.name),
                         clean(&s.cls),
                         clean(&report_name)
                     );
+                    let rename_dir0 = folder_p.join(db::RENAME_DIR);
+                    let rename = unique_rename_name(conn, batch_id, &rename0, &rename_dir0, None);
                     let rel_rename = format!("{}/{}", db::RENAME_DIR, rename);
                     let rename_dir = folder_p.join(db::RENAME_DIR);
                     fs::create_dir_all(&rename_dir).map_err(|e| format!("创建 renamed 失败: {e}"))?;
@@ -197,13 +228,14 @@ pub fn resolve_unmatched(
     let rename_dir = folder_p.join(db::RENAME_DIR);
     fs::create_dir_all(&rename_dir).map_err(|e| format!("创建 renamed 失败: {e}"))?;
     let report_name = if st.report_name.trim().is_empty() { batch_name } else { st.report_name.clone() };
-    let rename = format!(
+    let rename0 = format!(
         "{}_{}_{}_{}.pdf",
         st.no,
         clean(&st.name),
         clean(&st.cls),
         clean(&report_name)
     );
+    let rename = unique_rename_name(conn, batch_id, &rename0, &rename_dir, Some(rep.id));
     let rel_rename = format!("{}/{}", db::RENAME_DIR, rename);
     let src = folder_p.join(&path);
     fs::copy(&src, rename_dir.join(&rename))

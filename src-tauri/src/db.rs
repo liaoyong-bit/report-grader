@@ -600,14 +600,14 @@ pub fn report_id_by_key(conn: &Connection, batch_id: i64, key: &str) -> Result<O
     .map_err(|e| format!("定位报告失败: {e}"))
 }
 
-/// 全量成绩清单：每个学生一行（取最新匹配报告），供"保存全部成绩 CSV / 批阅概览表格"
+/// 全量成绩清单：按【报告】逐份列出（同一学生多份报告各占一行，含重名/多版本情况）
 #[derive(serde::Serialize)]
 pub struct GradeRow {
     pub no: String,
     pub name: String,
     pub cls: String,
     pub report_name: String,
-    pub status: String,   // submitted / pending / missing
+    pub status: String,   // submitted / pending
     pub draft: Option<String>,
     pub fname: String,
 }
@@ -615,18 +615,11 @@ pub struct GradeRow {
 pub fn list_all_grading(conn: &Connection, batch_id: i64) -> Result<Vec<GradeRow>, String> {
     let mut st = conn
         .prepare(
-            "SELECT s.student_no, s.name, s.class, s.report_name,
-               COALESCE((SELECT r.submit_status FROM reports r
-                         WHERE r.batch_id=?1 AND r.student_id=s.id AND r.match_status='matched'
-                         ORDER BY r.id DESC LIMIT 1),'missing'),
-               (SELECT r.draft FROM reports r
-                 WHERE r.batch_id=?1 AND r.student_id=s.id AND r.match_status='matched'
-                 ORDER BY r.id DESC LIMIT 1),
-               (SELECT r.orig_name FROM reports r
-                 WHERE r.batch_id=?1 AND r.student_id=s.id AND r.match_status='matched'
-                 ORDER BY r.id DESC LIMIT 1)
-             FROM students s WHERE s.batch_id=?1
-             ORDER BY s.student_no",
+            "SELECT COALESCE(s.student_no,''), COALESCE(s.name,''), COALESCE(s.class,''),
+                    COALESCE(s.report_name,''), r.submit_status, r.draft, r.orig_name
+             FROM reports r LEFT JOIN students s ON s.id = r.student_id
+             WHERE r.batch_id=?1 AND r.match_status='matched'
+             ORDER BY s.student_no, r.id",
         )
         .map_err(|e| format!("准备成绩查询失败: {e}"))?;
     let rows = st

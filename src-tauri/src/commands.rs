@@ -80,19 +80,24 @@ pub fn resolve_unmatched(folder: String, path: String, student_no: String) -> Re
     scan::resolve_unmatched(&conn, &folder, &path, &student_no)
 }
 
-/// 用系统默认程序打开指定文件（挂靠时查看原始报告；base 为空时 path 相对报告文件夹，
-/// 否则相对用户指定的导出位置）
+/// 用系统默认程序打开指定文件。path 支持三种形式：
+/// ① 绝对路径（直接打开）② 相对报告文件夹（base 为空）③ 相对导出位置（base 指定）。
+/// 此前用 `cmd /C start "" "path"`——Rust 传参转义引号后 cmd 无法识别，导致"Windows 找不到文件"；
+/// 改用 explorer 直接打开（explorer <文件> 会用默认关联程序打开）。
 #[tauri::command]
 pub fn open_external(folder: String, path: String, base: Option<String>) -> Result<(), String> {
     let root = match base.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(b) => std::path::PathBuf::from(b),
         None => std::path::PathBuf::from(&folder),
     };
-    let full = root.join(&path);
-    let p = full.to_string_lossy().into_owned();
-    let quoted = format!("\"{}\"", p);
-    let _ = std::process::Command::new("cmd").args(["/C", "start", "", &quoted]).spawn();
-    Ok(())
+    let p = Path::new(&path);
+    let full = if p.is_absolute() { p.to_path_buf() } else { root.join(&path) };
+    if !full.exists() { return Err(format!("文件不存在: {}", full.to_string_lossy())); }
+    let target = full.to_string_lossy().into_owned();
+    match std::process::Command::new("explorer").arg(&target).spawn() {
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("打开失败: {e}")),
+    }
 }
 
 /// 准备盘点：状态总表数据（挂靠/新增/批改状态）+ 缺交名单

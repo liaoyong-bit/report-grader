@@ -665,8 +665,11 @@ function renderExportPanel(){
     el.expPreview.addEventListener('click', (e)=>{
       const t = e.target && e.target.closest ? e.target.closest('[data-rn-path]') : null;
       if(t && window.__bridge && window.__bridge.openExternal && S.folder){
-        const isExp = t.getAttribute('data-rn-base') === 'export';
-        window.__bridge.openExternal(S.folder, t.getAttribute('data-rn-path'), isExp ? (S.exportDir||null) : null)
+        const p = t.getAttribute('data-rn-path');
+        // 绝对路径（导出结果清单）直接打开；相对路径按 data-rn-base 决定基准
+        const isAbs = /^[A-Za-z]:[\\/]/.test(p);
+        const isExp = !isAbs && t.getAttribute('data-rn-base') === 'export';
+        window.__bridge.openExternal(S.folder, p, isAbs ? null : (isExp ? (S.exportDir||null) : null))
           .catch(err=>setErr('打开失败: '+err));
       }
     });
@@ -677,7 +680,7 @@ function renderExportPanel(){
     item.className = 'ex-item' + (it.id===EXP_SEL ? ' active' : '');
     const ck = document.createElement('input'); ck.type='checkbox'; ck.className='ex-ck';
     ck.checked = !!EXP_CHECKED[it.id];
-    ck.onclick = (e)=>{ e.stopPropagation(); EXP_CHECKED[it.id] = ck.checked; };
+    ck.onclick = (e)=>{ e.stopPropagation(); EXP_CHECKED[it.id] = ck.checked; updateExportBtnLabel(); };
     const box = document.createElement('div');
     box.innerHTML = '<div class="ex-nm">'+it.icon+' '+esc(it.name)+'</div><div class="ex-sub">'+esc(it.sub)+'</div>';
     item.appendChild(ck); item.appendChild(box);
@@ -687,27 +690,49 @@ function renderExportPanel(){
   renderExpDetail(EXP_SEL);
   renderExpToolbar();
 }
-/* —— 导出工具栏：全部导出（按勾选顺序批量执行）+ 导出位置 —— */
+/* —— 导出工具栏：唯一导出入口 + 导出位置 —— */
+function expCheckedCount(){ return ['scores','renamed','annotated'].filter(id=>EXP_CHECKED[id]).length; }
+function updateExportBtnLabel(){
+  if(el.btnExportAll) el.btnExportAll.textContent = '▶ 导出勾选项(' + expCheckedCount() + ')';
+}
 function expDirText(){
   return S.exportDir ? S.exportDir : ((S.folder ? S.folder + '\\output\\' : 'output/') + '（默认，随报告文件夹）');
 }
 function renderExpToolbar(){
   if(el.expDirLabel) el.expDirLabel.textContent = '导出位置：' + expDirText();
+  updateExportBtnLabel();
+}
+/* 导出结果区（预览区顶部）：每项任务 ✓/✗ + 可点击产物 */
+let EXP_RESULTS = [];   // [{nm, ok, msg, files:[{path,name}]}]
+function resultsHtml(){
+  if(!EXP_RESULTS.length) return '';
+  let h = '<div style="border:1px solid #d9e3f5;background:#f4f8ff;border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:12px">';
+  h += '<div style="font-weight:700;margin-bottom:4px">最近一次导出结果（点击文件打开）</div>';
+  EXP_RESULTS.forEach(r=>{
+    h += '<div style="margin:3px 0">'+(r.ok?'✅':'❌')+' <b>'+esc(r.nm)+'</b> — '+esc(r.msg)+'</div>';
+    (r.files||[]).forEach(f=>{
+      h += '<div style="margin:2px 0 2px 20px"><span data-rn-path="'+esc(f.path)+'" style="cursor:pointer;color:#1a56c4;text-decoration:underline">📄 '+esc(f.name||f.path.split(/[\\/]/).pop())+'</span></div>';
+    });
+  });
+  return h + '</div>';
 }
 el.btnExportAll.onclick = async ()=>{
   const stat = el.expAllStat;
   const order = ['scores','renamed','annotated'];
   const list = order.filter(id=>EXP_CHECKED[id]);
   if(!list.length){ setErr('请先在左侧勾选要导出的项目'); return; }
-  let ok=0;
+  EXP_RESULTS = [];
+  let okCnt=0;
   for(let i=0;i<list.length;i++){
     const id=list[i];
     const nm=(EXP_ITEMS.find(x=>x.id===id)||{}).name||id;
     if(stat) stat.textContent='('+ (i+1)+'/'+list.length+') 正在导出：'+nm+'…';
-    try{ await runExport(id); ok++; }
-    catch(e){ setErr(nm+' 导出失败: '+(e&&e.message?e.message:e)); }
+    const r = await runExport(id) || {ok:0,msg:'无返回',files:[]};
+    EXP_RESULTS.push({ nm, ok: !!r.ok, msg: r.msg||'', files: r.files||[] });
+    if(r.ok) okCnt++;
   }
-  if(stat) stat.textContent='✅ 全部导出完成 '+ok+'/'+list.length+' 项 → '+(S.exportDir||'output/');
+  if(stat) stat.textContent='✅ 完成 '+okCnt+'/'+list.length+' 项 → '+expDirText();
+  renderExpPreview(EXP_SEL);   // 刷新预览区顶部结果清单
 };
 el.btnExpDir.onclick = async ()=>{
   if(!window.__bridge || !window.__bridge.pickExportDir){ setErr('仅 Tauri 模式支持更改导出位置'); return; }
@@ -729,14 +754,13 @@ function renderExpDetail(id){
       rows:['学生信息','评分表','统分区','总分与总评','批阅教师','批阅时间戳'] },
     renamed:{ tt:'打包设置', note:'将 renamed/ 目录打包为 output/改名文件包.zip；打包预览中点击文件名可用系统默认 PDF 程序打开该文件。',
       rows:[] },
-    annotated:{ tt:'痕迹信息', note:'基于「改名后的原始文件」批量导出：每题标题行右缘红字「得分/满分」（与批改界面同一位置），首页页脚附批阅教师与时间戳。',
-      rows:['每题得分（红字 N/满分）','批阅教师 + 时间戳（首页页脚）'] }
+    annotated:{ tt:'痕迹信息', note:'基于「改名后的原始文件」批量导出：每题标题行右缘红字「得分/满分」（与批改界面同一位置）＋统分区「评分」行回填各题得分与总分，教师/时间戳按报告从库中读取，盖在统分区旁与首页页脚。',
+      rows:['每题得分（红字 N/满分）','统分区评分行回填 + 批阅教师 + 时间戳'] }
   }[id] || {tt:'',note:'',rows:[]};
   const nm = (EXP_ITEMS.find(x=>x.id===id)||{}).name || '';
-  opt.innerHTML = esc_m(nm+'选项') + expOptLines(id, meta.rows, meta.tt) +
+  opt.innerHTML = esc_m(nm+'设置') + expOptLines(id, meta.rows, meta.tt) +
     '<div style="font-size:12px;color:#999;margin-top:6px">'+meta.note+'</div>' +
-    '<div style="margin-top:12px;display:flex;align-items:center;gap:10px"><button id="expRunBtn" class="primary">导出</button><span id="expRunStat" style="font-size:12px;color:#888"></span></div>';
-  const b=document.getElementById('expRunBtn'); if(b) b.onclick=()=>runExport(id);
+    '<div style="font-size:12px;color:#7a5fd0;margin-top:10px">☝ 点顶部「导出勾选项」执行（本项当前'+(EXP_CHECKED[id]?'已':'未')+'勾选）</div>';
   opt.querySelectorAll('input[type=checkbox][data-exid]').forEach(cb=>{
     cb.onchange = ()=>{ EXP_CHECKS[id]=EXP_CHECKS[id]||{}; EXP_CHECKS[id][Number(cb.dataset.exk)]=cb.checked; renderExpPreview(id); };
   });
@@ -745,21 +769,20 @@ function renderExpDetail(id){
 async function renderExpPreview(id){
   const pre=el.expPreview; if(!pre) return;
   try{
-    if(id==='scores') pre.innerHTML=await previewScores();
-    else if(id==='report') pre.innerHTML=await previewReport();
-    else if(id==='renamed') pre.innerHTML=await previewRenamed();
-    else if(id==='annotated') pre.innerHTML=await previewAnnotated();
+    let task='';
+    if(id==='scores') task=await previewScores();
+    else if(id==='report') task=await previewReport();
+    else if(id==='renamed') task=await previewRenamed();
+    else if(id==='annotated') task=await previewAnnotated();
+    pre.innerHTML = resultsHtml() + task;
   }catch(e){ pre.innerHTML='<div style="color:#e0245e">预览失败: '+esc(e&&e.message?e.message:e)+'</div>'; }
 }
 async function runExport(id){
-  const stat=document.getElementById('expRunStat');
-  const mark=(s)=>{ if(stat) stat.textContent=s; };
   try{
-    if(id==='scores'){ mark('导出中…'); await exportExcel(); mark(''); }
-    else if(id==='report'){ mark('导出中…'); await exportReportPdfs(); mark(''); }
-    else if(id==='renamed'){ mark('打包中…'); await exportRenamedZip(); mark(''); }
-    else if(id==='annotated'){ mark('导出中…'); await exportScoredPdf(); mark(''); }
-  }catch(e){ mark(''); setErr('导出失败: '+esc(e&&e.message?e.message:e)); }
+    if(id==='scores') return await exportExcel();
+    else if(id==='renamed') return await exportRenamedZip();
+    else if(id==='annotated') return await exportScoredPdf();
+  }catch(e){ setErr('导出失败: '+esc(e&&e.message?e.message:e)); return {ok:0, msg:String(e&&e.message||e), files:[]}; }
 }
 function expOptLines(id, items, tt){
   const cur = EXP_CHECKS[id]||{};
@@ -904,8 +927,9 @@ async function exportReportPdfs(){
 }
 async function exportRenamedZip(){
   if(window.__bridge && window.__bridge.packRenamedZip){
-    await window.__bridge.packRenamedZip();
-  } else { setErr('打包功能未启用（需后端支持）'); }
+    const msg = await window.__bridge.packRenamedZip();
+    return { ok: true, msg: msg||'已打包', files: [] };
+  } else { setErr('打包功能未启用（需后端支持）'); return { ok:false, msg:'未启用', files:[] }; }
 }
 el.btnPrepFolder.onclick=()=>{ if(el.btnLoadFolder.onclick) el.btnLoadFolder.onclick(); };
 /* —— 批改面板：进入流程（查库 → 有上次范围直接三栏 / 无则先设置） —— */
@@ -2034,6 +2058,78 @@ async function loadCJKBytes(){
   return null;
 }
 function fullTimeStamp(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes()); }
+// 草稿里的 submittedAt（毫秒时间戳）→ 'yyyy-mm-dd hh:mm'；无效则用当前时间
+function fmtStampTime(v){
+  const d = (typeof v==='number' && v>0) ? new Date(v) : (typeof v==='string' && v && !isNaN(Date.parse(v)) ? new Date(v) : new Date());
+  if(isNaN(d.getTime())) return fullTimeStamp();
+  const p=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());
+}
+/* 统分区「评分」行回填：利用库内文字块（locate.sqlite / scan_block）定位。
+   表结构（OCR 块）：「评分项目」表头行 → 「分值」标签行(各列数字/空白格，给出列 x 中心)
+   → 「得分」标签行(给出回填行的纵向位置)。各题得分盖在对应列中心，末列盖总分，
+   得分行下方盖批阅教师+时间戳（需中文字体）。定位失败返回 0，不影响大题旁红字。 */
+async function stampSummaryRow(pdfDoc, font, cjk, red, reportKey, scores, teacher, tsStr){
+  if(!window.__bridge || !window.__bridge.blockGetRows) return 0;
+  const rows = await window.__bridge.blockGetRows(S.folder, reportKey);
+  if(!rows || !rows.length) return 0;
+  const isNum = s=>/^[0-9]{1,3}$/.test(s);
+  // ① 「分值」标签块 → 所在行即分值行
+  const lab = rows.find(r=>r.page_index!=null && r.text && r.text.replace(/\s/g,'')==='分值');
+  if(!lab) return 0;
+  const pg = lab.page_index;
+  // ② 分值行各列块（数字或空白格都带列坐标；排除「分值」标签本身），按 x 排序去重
+  const colList = rows
+    .filter(r=>r.page_index===pg && Math.abs(r.top-lab.top)<0.012 && r.text!==lab.text && (!r.text || isNum(r.text.replace(/\s/g,''))))
+    .sort((a,b)=>a.left-b.left);
+  const seen=new Set(), cols=[];
+  colList.forEach(c=>{ const k=c.left+'|'+c.right+'|'+c.text; if(!seen.has(k)){ seen.add(k); cols.push(c); } });
+  if(cols.length < 2) return 0;
+  const n = scores.length;
+  // 列中心：恰好 n+1 格（各题+总分）直接用；否则首尾等距插值
+  let cx;
+  if(cols.length === n+1){ cx = cols.map(c=>(c.left+c.right)/2); }
+  else {
+    cx = [];
+    const x0=(cols[0].left+cols[0].right)/2, x1=(cols[cols.length-1].left+cols[cols.length-1].right)/2;
+    for(let i=0;i<=n;i++) cx.push(x0 + (x1-x0)*i/n);
+  }
+  // ③ 回填行纵向：「得分」标签行中心；找不到则用分值行下一行高
+  const vTop=Math.min.apply(null, cols.map(c=>c.top)), vBot=Math.max.apply(null, cols.map(c=>c.bottom));
+  const sc = rows.find(r=>r.page_index===pg && r.text && r.text.replace(/\s/g,'')==='得分' && r.top>vTop-0.01 && r.top<vBot+0.08);
+  const rh = Math.max(0.012, vBot-vTop);
+  const yPct = sc ? (sc.top+sc.bottom)/2 : (vBot + rh*0.6);
+  let page; try{ page = pdfDoc.getPage(pg); }catch(e){ return 0; }
+  const W=page.getWidth(), H=page.getHeight();
+  const size=11;
+  const y = H*(1-yPct) - size*0.35;
+  let cnt=0;
+  for(let i=0;i<n && i<cx.length;i++){
+    const v=scores[i];
+    if(v==null) continue;
+    const txt=String(v);
+    const w=font.widthOfTextAtSize(txt, size);
+    page.drawText(txt, { x: Math.max(6, W*cx[i]-w/2), y, size, font, color:red });
+    cnt++;
+  }
+  const total0 = scores.reduce((a,b)=>a+(Number(b)||0),0);
+  {
+    const txt=String(total0);
+    const w=font.widthOfTextAtSize(txt, size);
+    const xT = cx.length>n ? cx[n] : cx[cx.length-1];
+    page.drawText(txt, { x: Math.max(6, W*xT-w/2), y, size, font, color:red });
+    cnt++;
+  }
+  // ④ 教师+时间戳（得分行与备注行之间的空档，需中文字体）
+  if(cjk && (teacher || tsStr)){
+    try{
+      const info='批阅教师：'+(teacher||'')+'　批阅时间：'+(tsStr||'');
+      page.drawText(info, { x: Math.max(8, W*Math.max(0.04, lab.left-0.02)), y: H*(1-(sc? sc.bottom+0.028 : yPct+rh)), size:9, font:cjk, color:red });
+      cnt++;
+    }catch(e){}
+  }
+  return cnt;
+}
 
 async function loadCJKFont(doc){
   // 尝试嵌入中文字体(可选)：系统字体 → lib/ 下字体文件；都没有则返回 null（批注降级为纯数字）
@@ -2136,15 +2232,17 @@ async function exportScoredPdf(){
     const cjkBytes = await loadCJKBytes();
     const red = rgb(0.82,0.05,0.05), gray = rgb(0.45,0.45,0.45);
     let ok=0, fail=0, skip=0;
-    const doneFiles=[];
+    const doneFiles=[], outFiles=[];
     for(let idx=0; idx<rows.length; idx++){
       const t = rows[idx];
       setDetect('⏳ 正在导出带批阅痕迹 PDF（'+(idx+1)+'/'+rows.length+'）：'+((t.renamed_path||'').split(/[\\/]/).pop()||''));
-      // 成绩按原始文件名(report_key)匹配
+      // 成绩按原始文件名(report_key)匹配；教师/时间戳也从草稿读取（随报告存库）
       const g = gByKey[t.key];
-      let scores=[], maxs=[];
-      if(g && g.draft){ try{ const d=JSON.parse(g.draft); scores=d.scores||[]; maxs=d.maxs||[]; }catch(e){} }
+      let scores=[], maxs=[], dObj=null;
+      if(g && g.draft){ try{ dObj=JSON.parse(g.draft); scores=dObj.scores||[]; maxs=dObj.maxs||[]; }catch(e){} }
       if(!scores.length || scores.every(s=>s==null)){ skip++; continue; }   // 未批阅：跳过
+      const teacher = (dObj && dObj.teacher) || S.teacher || '';
+      const tsStr = fmtStampTime(dObj && dObj.submittedAt);
       try{
         // 打分位置（与批改渲染同源：locate_json 的 titleY_pct/titleX_pct）
         const locMap={};
@@ -2181,17 +2279,22 @@ async function exportScoredPdf(){
           page.drawText(txt, { x, y, size, font, color: red });
           stamped++;
         }
+        // 统分区「评分」行回填各题得分+总分（库内文字块定位）
+        if(showScore){
+          try{ stamped += await stampSummaryRow(pdfDoc, font, cjk, red, t.key, scores, teacher, tsStr); }catch(e){}
+        }
         if(showFoot && cjk){
           const page0 = pdfDoc.getPage(0);
-          const foot = '批阅教师：'+(S.teacher||'')+'　批阅时间：'+fullTimeStamp();
+          const foot = '批阅教师：'+teacher+'　批阅时间：'+tsStr;
           page0.drawText(foot, { x:40, y:20, size:9, font:cjk, color:gray });
         }
         const out = await pdfDoc.save();
         const blob = new Blob([out], {type:'application/pdf'});
         const fname = (t.renamed_path.split(/[\\/]/).pop()) || ((t.key||'report')+'_已批阅.pdf');
-        await deliverExport('带批阅痕迹/'+fname, blob);
+        const pout = await deliverExport('带批阅痕迹/'+fname, blob);
         ok++;
         doneFiles.push(fname);
+        if(pout) outFiles.push({ path:pout, name:fname });
         if(window.__bridge.log) window.__bridge.log('[导出痕迹] '+fname+' 盖章 '+stamped+' 项');
       }catch(e){
         fail++;
@@ -2210,8 +2313,10 @@ async function exportScoredPdf(){
     }
     S.lastAnnotated = { sub:'带批阅痕迹', files:doneFiles, base: S.exportDir ? 'export' : 'folder' };
     setDetect('✅ 带批阅痕迹导出完成：成功 '+ok+' 份'+(skip?('，未批跳过 '+skip+' 份'):'')+(fail?('，失败 '+fail+' 份'):'')+zipMsg+' → '+expDirText());
+    return { ok: ok>0, msg: '成功 '+ok+' 份'+(skip?('，跳过 '+skip):'')+(fail?('，失败 '+fail):'')+zipMsg, files: outFiles };
   }catch(e){
     setErr('导出失败: ' + (e && e.message ? e.message : e));
+    return { ok:false, msg:String(e&&e.message||e), files:[] };
   }
 }
 /* 导出已移至导出阶段（批改面板不再涉及导出） */
@@ -2247,13 +2352,13 @@ async function fetchAllGrades(){
 // 解析全量成绩 → 表格行（供 CSV 与概览表格共用）
 function gradesToTable(rows){
   return (rows||[]).map(g=>{
-    let scores=[], maxs=[];
-    try{ const d = JSON.parse(g.draft||'{}'); scores = d.scores||[]; maxs = d.maxs||[]; }catch(e){}
+    let scores=[], maxs=[], teacher='';
+    try{ const d = JSON.parse(g.draft||'{}'); scores = d.scores||[]; maxs = d.maxs||[]; teacher = d.teacher||''; }catch(e){}
     const total = (scores||[]).reduce((x,y)=>x+(Number(y)||0),0)||0;
     const maxTotal = (maxs||[]).reduce((x,y)=>x+(Number(y)||0),0)||0;
     return {
       no: g.no||'', name: g.name||'', cls: g.cls||'', report_name: g.report_name||'',
-      scores, maxs, total, maxTotal,
+      scores, maxs, total, maxTotal, teacher,
       status: g.status==='submitted' ? '已批' : (g.status==='missing' ? '待提交' : '待批'),
       fname: g.fname||''
     };
@@ -2277,15 +2382,16 @@ async function exportExcel(){
   ws.addRow(head);
   ws.getRow(1).font = { bold: true };
   items.forEach(it=>{
-    const row = [it.no, it.name, it.cls, S.teacher||''];
+    const row = [it.no, it.name, it.cls, it.teacher||S.teacher||''];
     for(let i=0;i<n;i++) row.push(it.scores[i]!=null?it.scores[i]:'');
     row.push(it.total, it.maxTotal||'', it.status, it.fname);
     ws.addRow(row);
   });
   const buf = await wb.xlsx.writeBuffer();
-  await deliverExport('全部成绩_'+dateStamp()+'.xlsx',
+  const p = await deliverExport('全部成绩_'+dateStamp()+'.xlsx',
     new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
-  setErr(''); setDetect('已导出全部成绩Excel（'+items.length+'人）');
+  setErr(''); setDetect('已导出全部成绩Excel（'+items.length+'行）');
+  return { ok: items.length>0, msg: items.length+' 行', files: p?[{path:p, name:'全部成绩_'+dateStamp()+'.xlsx'}]:[] };
 }
 /* 导出已移至导出阶段（批改面板不再涉及导出） */
 
@@ -2345,17 +2451,18 @@ function downloadBlob(blob, name){
   setTimeout(()=>URL.revokeObjectURL(url), 5000);
 }
 
-// 导出交付：Tauri 下写入 output/ 目录，否则浏览器下载
+// 导出交付：Tauri 下写入导出位置（返回落盘绝对路径），否则浏览器下载
 async function deliverExport(name, blob){
   if(window.__bridge && window.__bridge.saveToOutput && S.folder){
     try{
       const bytes = new Uint8Array(await blob.arrayBuffer());
-      await window.__bridge.saveToOutput(name, bytes);
-      setDetect('✅ 已导出到 output/：' + name);
-      return;
-    }catch(e){ setErr('导出写入失败: ' + e); }
+      const p = await window.__bridge.saveToOutput(name, bytes);
+      setDetect('✅ 已导出：' + (p || name));
+      return p || null;
+    }catch(e){ setErr('导出写入失败: ' + e); return null; }
   }
   downloadBlob(blob, name);
+  return null;
 }
 
 /* ==================== 状态栏 ==================== */
