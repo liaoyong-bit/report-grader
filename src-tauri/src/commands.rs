@@ -760,8 +760,12 @@ static PADDLE_OCR: std::sync::OnceLock<Result<PaddleEngine, String>> = std::sync
 
 fn paddle_engine() -> Result<&'static PaddleEngine, String> {
     let r = PADDLE_OCR.get_or_init(|| {
-        use oar_ocr::prelude::*;
-        match OAROCRBuilder::pp_ocrv6(PpOcrV6Size::Small).build() {
+        // PP-OCRv5 mobile 三件套（裸文件名经 auto-download 从 ModelScope 取到 ~/.oar，校验 SHA-256）
+        match oar_ocr::oarocr::OAROCRBuilder::new(
+            "pp-ocrv5_mobile_det.onnx",
+            "pp-ocrv5_mobile_rec.onnx",
+            "ppocrv5_dict.txt",
+        ).build() {
             Ok(e) => Ok(e),
             Err(e) => Err(format!("PaddleOCR 初始化失败（首次使用需联网自动下载模型；失败请重启应用重试）: {e}")),
         }
@@ -772,7 +776,6 @@ fn paddle_engine() -> Result<&'static PaddleEngine, String> {
 /// PaddleOCR 公共流程：base64 → 临时图片 → 推理 → [(文本, 置信度, left0-1, top0-1, right0-1, bottom0-1)]
 fn paddle_ocr_regions(b64: &str) -> Result<Vec<(String, f32, f32, f32, f32, f32)>, String> {
     use base64::Engine;
-    use oar_ocr::prelude::*;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(b64)
         .map_err(|e| format!("base64 解码失败: {e}"))?;
