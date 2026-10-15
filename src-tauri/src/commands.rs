@@ -861,6 +861,8 @@ pub fn apply_renames(folder: String) -> Result<i32, String> {
             .map(|c| if "\\/:*?\"<>| ".contains(c) { '_' } else { c })
             .collect();
         if fname.trim().is_empty() { continue; }
+        // 防覆盖：同一学生多份报告（文字版+扫描版）命名相同，直接 copy 会互相覆盖 → 追加 _2/_3
+        let fname = crate::scan::unique_rename_name(&conn, bid, &fname, &rdir, Some(rid));
         let dst = rdir.join(&fname);
         let src_full = Path::new(&folder).join(&src);
         if src_full.exists() {
@@ -870,6 +872,8 @@ pub fn apply_renames(folder: String) -> Result<i32, String> {
         db::set_renamed(&conn, rid, &rel).map_err(|e| format!("写改名库失败: {e}"))?;
         n += 1;
     }
+    // 自愈：历史遗留的多份报告共用同一 renamed_path（旧版覆盖产物）→ 从源文件补唯一改名版
+    let _ = crate::scan::repair_renamed(&conn, Path::new(&folder), bid);
     dbglog(&format!("apply_renames 改名 {} 份", n));
     Ok(n)
 }

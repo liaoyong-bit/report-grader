@@ -190,6 +190,27 @@
 
 ---
 
+## v0.1.117 热修（改名覆盖真凶：apply_renames）
+
+**根因**：v0.1.115/116 只给 `scan.rs` 的两处改名点加了防覆盖（`unique_rename_name`），
+但「核对原始报告」实际调用的改名入口是 **`commands.rs::apply_renames`**（前端 `runSourceVerify`
+→ `syncFolder` 之后单独调 `applyRenames`），它仍按 `学号_姓名_班级_报告名.pdf` 直接 `fs::copy`——
+同一学生「文字版 + 扫描版」两份报告命名完全相同，后一份**直接覆盖**前一份：
+- `renamed/` 只剩 2 个文件 → 「改名文件包」2 份；
+- 两份报告 `renamed_path` 相同 → 「带批阅痕迹」两次写入同一输出名 → 只剩 2 份（日志实证：同名打印两次）；
+- 成绩表也少一行。
+而 `repair_renamed` 只在 `sync_folder` 末尾跑，位于 `applyRenames` **之前**，同一次核对无法自愈。
+
+**修复**：
+- `apply_renames` 改用 `unique_rename_name`（目标名被占用或磁盘已存在 → 追加 `_2/_3`），
+  并在末尾补一次 `repair_renamed`；
+- `scan.rs` 的 `unique_rename_name` / `repair_renamed` 提升为 `pub(crate)` 供 `commands.rs` 复用。
+
+**验证步骤（旧数据无需删除）**：安装 v0.1.117 → 选报告文件夹 → 重新点「核对原始报告」→
+`renamed/` 应出现 3 份（张三、张三_2、李四）→ 成绩表 3 行 → 改名包 / 带批阅痕迹包均 3 份。
+
+---
+
 ## v0.1.116 热修（日志定位的三处）
 
 - **教师/时间戳缺失根因**：Tauri invoke 返回的 Vec<u8> 是普通 Array，pdf-lib 嵌入字体只认

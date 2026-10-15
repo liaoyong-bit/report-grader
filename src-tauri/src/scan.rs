@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 /// 改名防覆盖：目标名已被其他报告占用（库登记）或磁盘已存在同名文件时，追加 _2/_3…
 /// 同一学生交多份报告（如文字版+扫描版）改名规则相同，此前直接 copy 导致后者覆盖前者。
-fn unique_rename_name(
+pub(crate) fn unique_rename_name(
     conn: &Connection,
     batch_id: i64,
     rename: &str,
@@ -36,7 +36,7 @@ fn unique_rename_name(
 
 /// 自愈：matched 报告的改名文件在磁盘上缺失、或多份报告共用同一 renamed_path（历史覆盖遗留）时，
 /// 从源文件重新生成唯一改名版（追加 _2/_3）并更新登记。返回修复份数（失败不阻塞同步）。
-fn repair_renamed(conn: &Connection, folder: &Path, batch_id: i64) -> usize {
+pub(crate) fn repair_renamed(conn: &Connection, folder: &Path, batch_id: i64) -> usize {
     let mut rows: Vec<(i64, String, String)> = Vec::new();
     if let Ok(mut st) = conn.prepare(
         "SELECT id, COALESCE(NULLIF(source_path,''), orig_name), renamed_path
