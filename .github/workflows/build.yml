@@ -9,6 +9,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest   # 自带 WebView2
+    permissions:
+      contents: write         # 打 v* 标签时需要写权限创建 Release 并上传安装包
     steps:
       - uses: actions/checkout@v4
 
